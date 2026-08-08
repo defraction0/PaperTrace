@@ -9,7 +9,7 @@ then check it against the literature that came after.</b><br>
 An agentic paper-audit tool. Your judgement stays in charge.</p>
 
 <p align="center">
-  <img src="docs/table_figure_evidence.png" width="85%" alt="Two evidence crops from published open-access papers: a table cell and an in-figure number, each boxed in red by text search">
+  <img src="docs/report_terminal.png" width="70%" alt="Terminal run: claims checked against their cited pages, evidence crops inline">
 </p>
 
 ---
@@ -118,7 +118,7 @@ retrieval, scout, crops, reports) is deterministic Python.
 
 A fictional mini-review with **planted citation errors** and real, published
 references — the resolver fetches the open-access ones live, then the checker
-catches the plants: an AUC quoted as 0.94 where the cited paper says 0.84, an
+catches the plants: an AUC quoted as 0.94 where the cited paper says 0.77, an
 attendance figure that contradicts the cited flow chart, a headline resting
 on a paywalled source that is honestly reported as unverifiable, and one
 assertive sentence with no citation at all. (The scout step reports the

@@ -5,7 +5,7 @@ The paper is FICTIONAL and clearly labeled as such — a mini-review that
 exists only so the tool has something realistic to check. Its references are
 real, published papers, and the citation errors are planted on purpose:
 
-  [1] "external validation AUC of 0.94" — the cited paper reports 0.84   → contradicted
+  [1] "external validation AUC of 0.94" — the cited paper reports 0.77   → contradicted
   [3] "nearly one in five confirmed participants had not attended" —
       the cited flow chart shows 3% not yet attended                     → contradicted
   [4] a paywalled reference carrying a headline claim                    → not retrievable

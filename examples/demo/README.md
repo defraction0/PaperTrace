@@ -6,7 +6,7 @@ planted on purpose:
 
 | Ref | Planted error | Expected verdict |
 |---|---|---|
-| [1] | "external validation AUC of 0.94" — the cited paper reports **0.84** | ❌ `contradicted` |
+| [1] | "external validation AUC of 0.94" — the cited paper reports **0.77** | ❌ `contradicted` |
 | [3] | "nearly one in five confirmed participants had not attended" — the cited flow chart shows **3%** not yet attended | ❌ `contradicted` |
 | [4] | a headline claim resting on a **paywalled** reference | ⊘ `not_retrieved` |
 | — | "Routine imaging archives are among the largest untapped screening resources in medicine." — assertive, **no citation** | flagged in the uncited register |
