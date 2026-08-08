@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "results",
+  "type": "object",
+  "required": [
+    "manuscript",
+    "claims"
+  ],
+  "properties": {
+    "manuscript": {
+      "type": "string"
+    },
+    "checker": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string"
+    },
+    "refs": {
+      "type": "object"
+    },
+    "counts": {
+      "type": "object"
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "claim",
+          "location",
+          "verdict"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "claim": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verdict": {
+            "enum": [
+              "supported",
+              "partial",
+              "contradicted",
+              "not_retrieved"
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "source_slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_page": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source_block": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "anchor_phrases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_image": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "converter": {
+      "type": "string"
+    },
+    "uncited": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "claim"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "claim": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "labels_in_text": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "covered": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

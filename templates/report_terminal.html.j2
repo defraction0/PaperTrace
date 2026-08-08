@@ -1,0 +1,149 @@
+<meta charset="utf-8">
+<title>papertrace — fact-check</title>
+<style>
+  @font-face { font-family:"JB"; src:url("assets/JetBrainsMono-Regular.ttf") format("truetype"); font-weight:400; }
+  @font-face { font-family:"JB"; src:url("assets/JetBrainsMono-Bold.ttf") format("truetype"); font-weight:700; }
+  :root{
+    --bg:#0d1117; --bar:#161b22; --edge:#30363d; --fg:#c9d1d9; --dim:#6e7681; --dimmer:#484f58;
+    --green:#3fb950; --amber:#d29922; --red:#f85149; --blue:#58a6ff; --cyan:#39c5cf; --mag:#bc8cff; --white:#f0f6fc;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{background:#010409;}
+  body{width:1200px;font-family:"JB","DejaVu Sans Mono",monospace;color:var(--fg);-webkit-font-smoothing:antialiased;}
+  .term{background:var(--bg);}
+  .bar{background:var(--bar);border-bottom:1px solid var(--edge);height:42px;display:flex;align-items:center;padding:0 16px;gap:14px;}
+  .lights{display:flex;gap:9px;}
+  .lights i{width:12px;height:12px;border-radius:50%;display:block;}
+  .lights .r{background:#ff5f56;} .lights .y{background:#ffbd2e;} .lights .g{background:#27c93f;}
+  .bar .ttl{flex:1;text-align:center;font-size:13px;color:var(--dim);letter-spacing:.02em;}
+  .bar .ttl b{color:#adbac7;font-weight:400;}
+  .body{padding:26px 34px 30px;font-size:14px;line-height:1.62;}
+  .body b{font-weight:700;}
+  .green{color:var(--green);} .amber{color:var(--amber);} .red{color:var(--red);}
+  .blue{color:var(--blue);} .cyan{color:var(--cyan);} .mag{color:var(--mag);}
+  .dim{color:var(--dim);} .white{color:var(--white);} .dimmer{color:var(--dimmer);}
+  .cmd{margin-bottom:14px;}
+  .cmd .pr{color:var(--green);font-weight:700;} .cmd .cwd{color:var(--cyan);}
+  .cmd .tool{color:var(--mag);} .cmd .arg{color:var(--fg);} .cmd .flag{color:var(--dim);}
+  .log{margin-bottom:4px;}
+  .log .step{color:var(--blue);font-weight:700;display:inline-block;width:112px;}
+  .log .k{color:var(--dim);}
+  .rule{border-top:1px solid #21262d;margin:16px 0 14px;}
+  .claim{margin:0 0 20px;}
+  .cl-head .idx{color:var(--mag);font-weight:700;}
+  .cl-head .q{color:var(--white);}
+  .cl-meta{margin:3px 0 9px;font-size:13.5px;}
+  .cl-meta .lab{color:var(--dim);}
+  .cl-meta .st{font-weight:700;}
+  .cl-meta .from{color:var(--blue);}
+  .cl-meta .loc{color:var(--dim);}
+  .st.supported{color:var(--green);} .st.partial{color:var(--amber);} .st.contradicted{color:var(--red);}
+  .dot{font-size:12px;vertical-align:1px;}
+  .imgwrap{border:1px solid var(--edge);border-radius:4px;overflow:hidden;width:600px;background:#fff;position:relative;margin:2px 0 2px;}
+  .imgwrap::before{content:"⧉ inline image · " attr(data-src);position:absolute;top:0;left:0;right:0;font-size:10.5px;color:#8b949e;background:#0d1117;padding:3px 9px;border-bottom:1px solid var(--edge);letter-spacing:.03em;}
+  .imgwrap img{display:block;width:600px;margin-top:22px;}
+  .note{font-size:13.5px;color:var(--dim);margin-top:8px;}
+  .note .a{color:var(--dimmer);} .note b{color:#adbac7;font-weight:700;}
+  .sumline{margin:2px 0 18px;font-size:14px;}
+  .sumline .k{color:var(--dim);display:inline-block;width:112px;}
+  .nr-head{color:var(--white);font-weight:700;margin-bottom:3px;}
+  .nr-head .c{color:var(--dim);font-weight:400;}
+  .nr-sub{color:var(--dim);font-size:13px;margin-bottom:11px;}
+  .nrrow{display:grid;grid-template-columns:170px 44px 1fr;gap:10px;font-size:13px;padding:6px 0;border-bottom:1px solid #1b2029;}
+  .nrrow .sec{color:#adbac7;} .nrrow .n{color:var(--dim);text-align:right;}
+  .nrrow .it{color:var(--dim);line-height:1.5;}
+  .nrrow .it .s{color:var(--dimmer);padding:0 5px;}
+  .foot{margin-top:20px;color:var(--dimmer);font-size:12.5px;line-height:1.6;}
+  .prompt-end{margin-top:16px;color:var(--green);font-weight:700;}
+  .cur{display:inline-block;width:9px;height:16px;background:var(--fg);vertical-align:-3px;margin-left:4px;}
+</style>
+
+<div class="term">
+  <div class="bar">
+    <span class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></span>
+    <span class="ttl"><b>papertrace</b> — fact-check — 120×48</span>
+  </div>
+
+  <div class="body">
+    <div class="cmd"><span class="pr">❯</span> <span class="cwd">~/audit</span>
+      <span class="tool">papertrace run</span> <span class="arg">{{ r.manuscript }}</span>
+      <span class="flag">--provided ./sources -c case</span></div>
+
+    <div class="log"><span class="step">▸ ingest</span><span class="k">{{ r.manuscript }} → </span><span class="cyan">clean.md</span><span class="k"> · </span><span class="cyan">source_map.json</span><span class="k"> </span><span class="green">✓</span></div>
+    <div class="log"><span class="step">▸ resolve</span><span class="k">{{ r.refs_total }} cited refs · crossref → unpaywall → europepmc → arxiv</span></div>
+    <div class="log"><span class="step"></span><span class="green">✓</span> available <b>{{ r.refs_available }}/{{ r.refs_total }}</b>{% if r.refs_total > r.refs_available %}<span class="k"> · </span><span class="amber">{{ r.refs_total - r.refs_available }} not obtainable</span><span class="dim"> (paywall / no doi / unpublished)</span>{% endif %}</div>
+    <div class="log"><span class="step">▸ ingest</span><span class="k">converter: </span><span class="cyan">{{ r.converter }}</span>{% if r.converter == "pymupdf" %}<span class="k"> · </span><span class="amber">⚠ flat text — tables linearized (install [docling])</span>{% endif %}</div>
+    <div class="log"><span class="step">▸ check</span><span class="k">{{ r.claims|length }} citation-backed claims · reading each against its cited page{% if r.uncited %} · </span><span class="amber">{{ r.uncited|length }} uncited assertions flagged</span><span class="k">{% endif %}</span></div>
+{% if scout and not scout.error %}
+    <div class="log"><span class="step">▸ scout</span><span class="k">europe pmc · citing articles + keyword neighbourhood · </span><span class="cyan">{{ scout.newer|length }} newer</span><span class="k"> · </span><span class="cyan">{{ scout.overlooked|length }} possibly overlooked</span></div>
+{% endif %}
+
+    <div class="rule"></div>
+
+{% for c in checked %}
+    <div class="claim">
+      <div class="cl-head"><span class="idx">[{{ c.id }}]</span> <span class="q">“{{ c.claim }}”</span>{% if c.refs|length > 1 %} <span class="dim">[{{ c.refs|length }} refs]</span>{% endif %}</div>
+      <div class="cl-meta">
+        <span style="display:inline-block;width:190px"><span class="lab">status </span><span class="st {{ c.verdict }}"><span class="dot">●</span> {{ c.verdict|upper }}</span></span>
+        {% if c.source_slug %}<span class="lab">from </span><span class="from">{{ c.source_slug }}</span>
+        <span class="loc"> · p.{{ c.source_page }}{% if c.source_block %} · {{ c.source_block }}{% endif %}</span>{% endif %}
+      </div>
+{% if c.evidence_image %}
+      <div class="imgwrap" data-src="{{ c.source_slug }} · page {{ c.source_page }}"><img src="{{ c.evidence_image }}"></div>
+{% endif %}
+{% if c.note %}
+      <div class="note"><span class="a">└─</span> {{ c.note }}</div>
+{% endif %}
+    </div>
+{% endfor %}
+
+    <div class="rule"></div>
+
+    <div class="sumline"><span class="k">summary</span>
+      <span class="green"><span class="dot">●</span> {{ counts.supported }} supported</span>&nbsp;&nbsp;&nbsp;
+      <span class="amber"><span class="dot">●</span> {{ counts.partial }} partial</span>&nbsp;&nbsp;&nbsp;
+      <span class="red"><span class="dot">●</span> {{ counts.contradicted }} contradicted</span>&nbsp;&nbsp;&nbsp;
+      <span class="dim"><span class="dot">○</span> {{ counts.not_retrieved }} not retrieved</span>
+    </div>
+
+{% if r.coverage %}
+    <div class="sumline"><span class="k">coverage</span>{% if r.coverage.missing %}<span class="amber">{{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} citation labels covered · unaddressed: [{{ r.coverage.missing|join('] [') }}]</span>{% else %}<span class="green">all {{ r.coverage.labels_in_text|length }} citation labels covered</span>{% endif %}</div>
+{% endif %}
+{% if r.uncited %}
+    <div class="nr-head"><span class="amber">▲</span> assertions without citation <span class="c">({{ r.uncited|length }}) — your judgement required</span></div>
+    <div class="nr-sub">would normally carry a reference but don't — not verified, flagged for you to weigh.</div>
+{% for u in r.uncited %}
+    <div class="nrrow"><span class="sec">[U{{ u.id }}]</span><span class="n"></span><span class="it">{{ u.claim }}{% if u.location %} <span class="s">·</span> {{ u.location }}{% endif %}</span></div>
+{% endfor %}
+    <div style="height:14px"></div>
+{% endif %}
+    <div class="nr-head"><span class="dim">○</span> not verifiable — cited source not retrieved <span class="c">({{ gap_total }} / {{ r.claims|length }})</span></div>
+    <div class="nr-sub">the cited PDF couldn’t be fetched, so the claim was left unchecked and reported as such — never guessed.</div>
+{% for section, items in gaps.items() %}
+    <div class="nrrow"><span class="sec">{{ section|lower }}</span><span class="n">[{{ items|length }}]</span><span class="it">{% for c in items %}{{ c.claim }}{% if not loop.last %}<span class="s">·</span>{% endif %}{% endfor %}</span></div>
+{% endfor %}
+{% if scout and (scout.newer or scout.overlooked or scout.error) %}
+
+    <div style="height:14px"></div>
+    <div class="nr-head"><span class="cyan">◆</span> literature the reference list doesn't know <span class="c">(scout · europe pmc{% if scout.paper_year %} · paper year {{ scout.paper_year }}{% endif %})</span></div>
+    <div class="nr-sub">candidates for your judgement, not accusations — search-based, absence from these lists proves nothing.{% if scout.error %} <span class="amber">⚠ {{ scout.error }}</span>{% endif %}</div>
+{% for h in scout.newer[:8] %}
+    <div class="nrrow"><span class="sec">newer · {{ h.year or "?" }}</span><span class="n">[{{ h.via[:6] }}]</span><span class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> {{ h.doi }}{% endif %}</span></div>
+{% endfor %}
+{% if scout.newer|length > 8 %}
+    <div class="nr-sub" style="margin-top:7px">… {{ scout.newer|length - 8 }} more newer candidates in scout.json</div>
+{% endif %}
+{% for h in scout.overlooked[:6] %}
+    <div class="nrrow"><span class="sec">uncited · {{ h.year or "?" }}</span><span class="n">[{{ h.via[:6] }}]</span><span class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> {{ h.doi }}{% endif %}</span></div>
+{% endfor %}
+{% if scout.overlooked|length > 6 %}
+    <div class="nr-sub" style="margin-top:7px">… {{ scout.overlooked|length - 6 }} more uncited candidates in scout.json</div>
+{% endif %}
+{% endif %}
+
+    <div class="foot"># evidence crops are real pages of the cited sources · red box = matched text<br>
+    # your judgement stays in charge · candidates, not accusations · papertrace v0.3</div>
+
+    <div class="prompt-end">❯<span class="cur"></span></div>
+  </div>
+</div>

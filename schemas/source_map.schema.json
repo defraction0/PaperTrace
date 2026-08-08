@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "source_map",
+  "type": "object",
+  "required": [
+    "doc",
+    "pages",
+    "blocks"
+  ],
+  "properties": {
+    "doc": {
+      "type": "string"
+    },
+    "pages": {
+      "type": "integer"
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "page",
+          "bbox"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^block_\\d{4}$"
+          },
+          "type": {
+            "enum": [
+              "sectionheader",
+              "text",
+              "table",
+              "picture",
+              "list"
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "heading_path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "text_preview": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "converter": {
+      "type": "string",
+      "description": "ingest backend that produced this map, e.g. 'pymupdf' or 'docling 2.x'"
+    }
+  }
+}

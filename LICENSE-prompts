@@ -1,0 +1,10 @@
+The review workflow prompts and skill instructions in prompts/, journal_packs/
+and .claude/skills/ are licensed under Creative Commons Attribution-ShareAlike
+4.0 International (CC BY-SA 4.0): https://creativecommons.org/licenses/by-sa/4.0/
+
+You may share and adapt them, including commercially, provided you give
+appropriate credit and distribute your adaptations under the same license.
+
+Code (src/, scripts/, templates/*.html, templates/*.j2) is MIT-licensed — see LICENSE.
+Bundled fonts in templates/assets/ are under the SIL Open Font License 1.1 — see
+the *-OFL.txt files there.

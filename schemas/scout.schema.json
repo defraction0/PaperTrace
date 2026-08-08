@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "scout",
+  "description": "Post-publication literature scan around one paper. Search-based and incomplete by construction: absence from the registers proves nothing; a non-empty error means the scan soft-failed.",
+  "type": "object",
+  "required": ["paper", "newer", "overlooked"],
+  "properties": {
+    "paper": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "doi": { "type": "string" },
+        "year": { "type": ["integer", "null"] },
+        "resolved_via": { "type": "string", "enum": ["doi", "title", ""] }
+      }
+    },
+    "query": { "type": "string" },
+    "date": { "type": "string" },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "newer": { "type": "integer" },
+        "overlooked": { "type": "integer" }
+      }
+    },
+    "newer": { "$ref": "#/$defs/hits" },
+    "overlooked": { "$ref": "#/$defs/hits" },
+    "error": { "type": "string" }
+  },
+  "$defs": {
+    "hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string" },
+          "year": { "type": ["integer", "null"] },
+          "doi": { "type": "string" },
+          "via": { "type": "string", "enum": ["citing", "search"] },
+          "journal": { "type": "string" },
+          "authors": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "refs_manifest",
+  "type": "object",
+  "required": [
+    "manuscript",
+    "entries"
+  ],
+  "properties": {
+    "manuscript": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "object"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "num",
+          "raw",
+          "status"
+        ],
+        "properties": {
+          "num": {
+            "type": "string"
+          },
+          "raw": {
+            "type": "string"
+          },
+          "doi": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "year": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "retrieved",
+              "provided",
+              "paywalled",
+              "no_doi",
+              "unpublished",
+              "error"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resolver": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pdf_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

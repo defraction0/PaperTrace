@@ -1,0 +1,20 @@
+# --- confidentiality guardrails -------------------------------------------
+# Never commit manuscripts under review or downloaded publisher PDFs.
+*.pdf
+*.docx
+cases/
+out/
+references/
+
+# --- python ----------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# --- misc ------------------------------------------------------------------
+.DS_Store

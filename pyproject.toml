@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "papertrace"
+version = "0.3.0"
+description = "Trace a published paper's claims back to what its cited sources actually say — then scout the literature that came after. Page-level visual evidence for every check."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "PaperTrace contributors" }]
+keywords = ["fact-checking", "citations", "research-integrity", "literature-review", "peer-review", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+
+dependencies = [
+    "pymupdf>=1.24",
+    "pillow>=10.0",
+    "httpx>=0.27",
+    "rich>=13.0",
+    "typer>=0.12",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+png = ["playwright>=1.45"]
+docling = ["docling>=2.0"]
+full = ["playwright>=1.45", "docling>=2.0"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+papertrace = "papertrace.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/defraction0/PaperTrace"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/papertrace"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "templates", "prompts", "journal_packs", "schemas", "README.md", "LICENSE"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/papertrace/cli.py" = ["B008"]  # typer's option-in-default idiom
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
