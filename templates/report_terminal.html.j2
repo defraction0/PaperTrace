@@ -103,7 +103,7 @@
       <span class="green"><span class="dot">●</span> {{ counts.supported }} supported</span>&nbsp;&nbsp;&nbsp;
       <span class="amber"><span class="dot">●</span> {{ counts.partial }} partial</span>&nbsp;&nbsp;&nbsp;
       <span class="red"><span class="dot">●</span> {{ counts.contradicted }} contradicted</span>&nbsp;&nbsp;&nbsp;
-      <span class="dim"><span class="dot">○</span> {{ counts.not_retrieved }} not retrieved</span>
+      <span class="dim"><span class="dot">○</span> {{ counts.not_retrieved }} not retrieved</span>{% if counts.unchecked %}&nbsp;&nbsp;&nbsp;<span class="red"><span class="dot">●</span> {{ counts.unchecked }} unchecked (check failed)</span>{% endif %}
     </div>
 
 {% if r.coverage %}
@@ -117,8 +117,8 @@
 {% endfor %}
     <div style="height:14px"></div>
 {% endif %}
-    <div class="nr-head"><span class="dim">○</span> not verifiable — cited source not retrieved <span class="c">({{ gap_total }} / {{ r.claims|length }})</span></div>
-    <div class="nr-sub">the cited PDF couldn’t be fetched, so the claim was left unchecked and reported as such — never guessed.</div>
+    <div class="nr-head"><span class="dim">○</span> not verified — source not retrieved or check failed <span class="c">({{ gap_total }} / {{ r.claims|length }})</span></div>
+    <div class="nr-sub">the cited PDF couldn’t be fetched — or the check step failed on an available source — so the claim is reported unverified, never guessed.</div>
 {% for section, items in gaps.items() %}
     <div class="nrrow"><span class="sec">{{ section|lower }}</span><span class="n">[{{ items|length }}]</span><span class="it">{% for c in items %}{{ c.claim }}{% if not loop.last %}<span class="s">·</span>{% endif %}{% endfor %}</span></div>
 {% endfor %}

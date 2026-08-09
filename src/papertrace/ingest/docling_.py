@@ -117,12 +117,25 @@ def blocks_from_docling(doc, page_heights: dict[int, float]) -> list[Block]:
 
 
 def _quiet_third_party_loggers() -> None:
-    """docling's model stack (RapidOCR, torch dynamo, transformers) logs at
-    INFO/WARNING and buries the pipeline ticker — keep errors only."""
+    """docling's model stack (RapidOCR, torch dynamo, transformers) floods the
+    terminal with INFO/WARNING logs, tqdm weight-loading bars and torch
+    UserWarnings, burying the pipeline ticker — keep errors only."""
     import logging
+    import os
+    import warnings
 
     for name in ("RapidOCR", "rapidocr", "torch._dynamo", "transformers", "docling"):
         logging.getLogger(name).setLevel(logging.ERROR)
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("TQDM_DISABLE", "1")
+    warnings.filterwarnings("ignore", category=UserWarning, module=r"torch\.nn\.modules\.conv")
+    try:
+        from transformers.utils import logging as hf_logging
+
+        hf_logging.set_verbosity_error()
+        hf_logging.disable_progress_bar()
+    except Exception:  # noqa: BLE001 — cosmetic only, never fatal
+        pass
 
 
 def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:

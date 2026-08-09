@@ -38,7 +38,7 @@ def write_reports(
     out_dir.mkdir(parents=True, exist_ok=True)
     env = _env()
 
-    checked = [c for c in results.claims if c.verdict != "not_retrieved"]
+    checked = [c for c in results.claims if c.verdict not in ("not_retrieved", "unchecked")]
     gaps = results.gaps_by_location()
     ctx = {
         "r": results,

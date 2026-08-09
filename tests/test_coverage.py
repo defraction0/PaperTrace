@@ -92,3 +92,42 @@ def test_unrecognized_citation_style_is_disclosed(tmp_path):
     assert "all 0" not in md
     term = (tmp_path / "report_terminal.html").read_text()
     assert "coverage not audited" in term
+
+
+def test_failed_check_is_unchecked_never_not_retrieved(tmp_path, monkeypatch):
+    """A model-call failure on an AVAILABLE source must surface as `unchecked`
+    (with the reason and a retry behind it), never as `not_retrieved` — the
+    report may not claim a retrieval gap that didn't happen."""
+    import papertrace.check as check_mod
+    from papertrace.check import check_claims
+    from papertrace.models import RefEntry, RefManifest
+
+    src_dir = tmp_path / "ingest" / "good-2020"
+    src_dir.mkdir(parents=True)
+    (src_dir / "annotated.md").write_text("Some source text.")
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num="1", raw="Good G (2020) X.", status="retrieved",
+                          slug="good-2020", pdf_path="unused.pdf")],
+    )
+    claims = [ClaimResult(id=1, claim="c", location="Intro", refs=["1"])]
+
+    calls = []
+
+    def boom(prompt, model=None):
+        calls.append(1)
+        raise RuntimeError("claude -p failed: transient")
+
+    monkeypatch.setattr(check_mod, "_ask", boom)
+    errors = []
+    check_claims(claims, manifest, tmp_path, on_error=lambda s, m: errors.append((s, m)))
+
+    assert len(calls) == 2  # one retry before giving up
+    assert claims[0].verdict == "unchecked"
+    assert "source WAS retrieved" in claims[0].note
+    assert errors and errors[0][0] == "good-2020"
+
+    # and a genuinely missing source still reads not_retrieved
+    claims2 = [ClaimResult(id=2, claim="d", location="Intro", refs=["9"])]
+    check_claims(claims2, manifest, tmp_path)
+    assert claims2[0].verdict == "not_retrieved"

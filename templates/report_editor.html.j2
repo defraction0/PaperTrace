@@ -95,7 +95,8 @@
       <b class="g">✅ Supported:</b> <span class="cnt g">{{ counts.supported }}</span><span class="sep">|</span>
       <b class="a">⚠️ Partial:</b> <span class="cnt a">{{ counts.partial }}</span><span class="sep">|</span>
       <b class="r">❌ Contradicted:</b> <span class="cnt r">{{ counts.contradicted }}</span><span class="sep">|</span>
-      <b class="n">⊘ Not retrieved:</b> <span class="cnt n">{{ counts.not_retrieved }}</span>
+      <b class="n">⊘ Not retrieved:</b> <span class="cnt n">{{ counts.not_retrieved }}</span>{% if counts.unchecked %}<span class="sep">|</span>
+      <b class="r">⚠ Unchecked:</b> <span class="cnt r">{{ counts.unchecked }}</span>{% endif %}
     </p>
 {% if r.coverage %}
     <p class="meta" style="margin-top:-14px">
@@ -138,12 +139,12 @@
     </ul>
 {% endif %}
 
-    <h2><span class="hx">##</span> Not verifiable — cited source not retrieved <span class="q">({{ gap_total }} of {{ r.claims|length }})</span></h2>
-    <p class="gap-intro">The cited PDF could not be obtained, so the claim was left unchecked
-      and reported as such — never filled in from memory.</p>
+    <h2><span class="hx">##</span> Not verified — source not retrieved, or check failed <span class="q">({{ gap_total }} of {{ r.claims|length }})</span></h2>
+    <p class="gap-intro">Either the cited PDF could not be obtained, or the check step failed on an
+      available source (see notes). Reported as such — never filled in from memory.</p>
     <table class="gaptbl">
 {% for section, items in gaps.items() %}
-      <tr><td class="sec">{{ section }}</td><td class="st">⊘ not retrieved · {{ items|length }}</td>
+      <tr><td class="sec">{{ section }}</td><td class="st">{{ items[0].verdict|replace("_", " ") }} · {{ items|length }}</td>
         <td class="it">{% for c in items %}{{ c.claim }}{% if not loop.last %}<span class="s">·</span>{% endif %}{% endfor %}</td></tr>
 {% endfor %}
     </table>

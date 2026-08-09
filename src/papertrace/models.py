@@ -145,13 +145,16 @@ class RefManifest:
 # claim results (check output)
 # ---------------------------------------------------------------------------
 
-VERDICTS = ("supported", "partial", "contradicted", "not_retrieved")
+VERDICTS = ("supported", "partial", "contradicted", "not_retrieved", "unchecked")
 
 VERDICT_LABEL = {
     "supported": "✅ SUPPORTED",
     "partial": "⚠️ PARTIALLY SUPPORTED",
     "contradicted": "❌ CONTRADICTED",
     "not_retrieved": "⊘ NOT RETRIEVED",
+    # the source WAS available but the check itself failed — never disguised
+    # as a retrieval gap
+    "unchecked": "⚠️ NOT CHECKED (check failed — source available)",
 }
 
 
@@ -203,9 +206,11 @@ class RunResults:
         return {v: sum(1 for c in self.claims if c.verdict == v) for v in VERDICTS}
 
     def gaps_by_location(self) -> dict[str, list[ClaimResult]]:
+        """Unverified claims by section — source not retrieved, or the check
+        itself failed (`unchecked`). Both are gaps to report, never silence."""
         out: dict[str, list[ClaimResult]] = {}
         for c in self.claims:
-            if c.verdict == "not_retrieved":
+            if c.verdict in ("not_retrieved", "unchecked"):
                 key = c.location.split("§")[0].split("¶")[0].strip() or "Other"
                 out.setdefault(key, []).append(c)
         return out

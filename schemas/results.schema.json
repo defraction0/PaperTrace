@@ -53,7 +53,8 @@
               "supported",
               "partial",
               "contradicted",
-              "not_retrieved"
+              "not_retrieved",
+              "unchecked"
             ]
           },
           "note": {

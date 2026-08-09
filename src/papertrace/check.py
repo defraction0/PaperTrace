@@ -85,9 +85,12 @@ def _ask(prompt: str, model: str | None = None) -> str:
     cmd = ["claude", "-p", "--output-format", "json"]
     if model:
         cmd += ["--model", model]
-    proc = subprocess.run(
-        cmd, input=prompt, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT
-    )
+    try:
+        proc = subprocess.run(
+            cmd, input=prompt, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"claude -p timed out after {CLAUDE_TIMEOUT}s") from None
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed: {proc.stderr.strip()[:400]}")
     payload = json.loads(proc.stdout)
@@ -194,8 +197,19 @@ def check_claims(
     case_dir: Path,
     model: str | None = None,
     progress=None,
+    on_error=None,
 ) -> list[ClaimResult]:
-    """Fill verdicts in place. One model call per source that carries claims."""
+    """Fill verdicts in place. One model call per source that carries claims.
+
+    A failed check is NEVER disguised as a retrieval gap: if the source was
+    available but the model call or source ingest failed (after one retry),
+    the claims get verdict `unchecked`, the reason lands in the note, and
+    `on_error(slug, message)` fires so the CLI can say so loudly.
+
+    Sources are ingested with the flat backend on purpose — fast and
+    dependable, and text anchors are what verdicts and crops need. Layout
+    fidelity (tables/figures) is spent on the audited paper, not its sources.
+    """
     by_slug: dict[str, list[ClaimResult]] = {}
     for c in claims:
         entries = [_slug_for_ref(manifest, r) for r in c.refs]
@@ -212,31 +226,42 @@ def check_claims(
         by_slug.setdefault(primary.slug, []).append(c)
 
     for slug, group in by_slug.items():
-        ingest_dir = case_dir / "ingest" / slug
-        annotated = ingest_dir / "annotated.md"
-        if not annotated.exists():
-            entry = next(e for e in manifest.entries if e.slug == slug)
-            from .ingest import ingest_pdf
-
-            ingest_pdf(Path(entry.pdf_path), ingest_dir)
-        claims_json = json.dumps(
-            [{"id": c.id, "claim": c.claim, "location": c.location} for c in group]
-        )
-        prompt = (
-            CHECK_PROMPT.replace("<<CLAIMS>>", claims_json)
-            .replace("<<SLUG>>", slug)
-            .replace("<<SOURCE>>", annotated.read_text()[:150_000])
-        )
         try:
-            verdicts = {v["id"]: v for v in _parse_json_array(_ask(prompt, model))}
-        except (RuntimeError, ValueError) as e:
+            ingest_dir = case_dir / "ingest" / slug
+            annotated = ingest_dir / "annotated.md"
+            if not annotated.exists():
+                entry = next(e for e in manifest.entries if e.slug == slug)
+                from .ingest import ingest_pdf
+
+                ingest_pdf(Path(entry.pdf_path), ingest_dir, backend="pymupdf")
+            claims_json = json.dumps(
+                [{"id": c.id, "claim": c.claim, "location": c.location} for c in group]
+            )
+            prompt = (
+                CHECK_PROMPT.replace("<<CLAIMS>>", claims_json)
+                .replace("<<SLUG>>", slug)
+                .replace("<<SOURCE>>", annotated.read_text()[:150_000])
+            )
+            try:
+                raw = _ask(prompt, model)
+            except (RuntimeError, ValueError):
+                raw = _ask(prompt, model)  # one retry — claude -p fails transiently
+            verdicts = {v["id"]: v for v in _parse_json_array(raw)}
+        except Exception as e:  # noqa: BLE001 — a failed check must never kill the run
+            msg = f"{type(e).__name__}: {str(e)[:300]}"
             for c in group:
-                c.verdict, c.note = "not_retrieved", f"check failed: {e}"
+                c.verdict = "unchecked"
+                c.note = (
+                    f"check failed ({msg}) — the source WAS retrieved; "
+                    f"re-run `papertrace check` to retry"
+                )
+            if on_error:
+                on_error(slug, msg)
             continue
         for c in group:
             v = verdicts.get(c.id)
             if not v:
-                c.verdict, c.note = "not_retrieved", "model returned no verdict"
+                c.verdict, c.note = "unchecked", "model returned no verdict for this claim"
                 continue
             c.verdict = v.get("verdict", "partial")
             c.note = v.get("note", "")

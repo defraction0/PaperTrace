@@ -248,8 +248,15 @@ def check(
         )
         console.print(f"  checked against [cyan]{slug}[/cyan]: {marks}")
 
+    def fail(slug, msg):
+        console.print(
+            f"  [red]✗ {slug}: check failed — {msg}[/red]\n"
+            f"    [yellow]claims marked ⚠ unchecked (source was retrieved) — "
+            f"re-run `papertrace check` to retry[/yellow]"
+        )
+
     with console.status("reading claims against their cited pages…"):
-        check_claims(claims, manifest, case, model, progress=tick)
+        check_claims(claims, manifest, case, model, progress=tick, on_error=fail)
 
     from .check import coverage_audit
     from .models import SourceMap
@@ -272,10 +279,11 @@ def check(
     results.to_json(case / "out" / "results.json")
 
     c = results.counts()
+    unchecked = f"   [red]⚠ {c['unchecked']} unchecked (check failed)[/red]" if c["unchecked"] else ""
     console.print(
         f"\n[bold]verdicts[/bold]  [green]● {c['supported']} supported[/green]   "
         f"[yellow]● {c['partial']} partial[/yellow]   [red]● {c['contradicted']} contradicted[/red]   "
-        f"[dim]○ {c['not_retrieved']} not retrieved[/dim]"
+        f"[dim]○ {c['not_retrieved']} not retrieved[/dim]{unchecked}"
     )
     n_text, n_missing = len(coverage["labels_in_text"]), len(coverage["missing"])
     if n_missing:
