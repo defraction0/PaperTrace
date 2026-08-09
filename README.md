@@ -131,23 +131,58 @@ Batch checking runs on headless Claude Code (`claude -p`) — it inherits your
 existing login, **no API key to configure**. Every other step (ingest,
 retrieval, scout, crops, reports) is deterministic Python.
 
-## Try the demo (5 minutes)
+## Try the demo
 
 A fictional mini-review with **planted citation errors** and real, published
 references — the resolver fetches the open-access ones live, then the checker
 catches the plants: an AUC quoted as 0.94 where the cited paper says 0.77, an
 attendance figure that contradicts the cited flow chart, a headline resting
 on a paywalled source that is honestly reported as unverifiable, and one
-assertive sentence with no citation at all. (The scout step reports the
-fictional paper as *not identified* — the tool would rather say so than
-invent neighbours.)
+assertive sentence with no citation at all.
+
+The run itself takes about five minutes; the first time adds two one-time
+downloads (chromium ~150 MB, docling's layout models ~500 MB).
+**Prerequisite:** [Claude Code](https://claude.com/claude-code) installed and
+logged in — the claim checker runs on `claude -p`.
+
+Run these four steps **in this order**, each from the repo root, waiting for
+one to finish before the next:
+
+**1 · Install** (skip anything you've already done)
+
+```bash
+pip install -e ".[full]"
+playwright install chromium
+```
+
+**2 · Set your contact email** — Unpaywall's API requires one; the run
+refuses to start without it:
+
+```bash
+export PAPERTRACE_EMAIL="you@example.org"   # use your real address
+```
+
+**3 · Build the fictional demo paper** — wait for
+`wrote … demo_manuscript.pdf` before continuing:
 
 ```bash
 python examples/demo/make_manuscript.py
+```
+
+**4 · Run the audit** — retrieval ticker, claim checking, evidence crops,
+reports:
+
+```bash
 papertrace run examples/demo/demo_manuscript.pdf -c demo_case
 ```
 
-See [`examples/demo/`](examples/demo/) for the expected verdicts.
+When it finishes, open `demo_case/out/report.md` — or the same report as
+`report_terminal.html` / `report_editor.html`. Expected result:
+**2 supported · 2 contradicted · 1 not retrieved**, one uncited assertion
+flagged, all 4 citation labels covered — the planted errors, and exactly
+them. (The scout step reports the fictional paper as *not identified* in
+Europe PMC — the tool would rather say so than invent neighbours.) Details
+per plant: [`examples/demo/`](examples/demo/).
 
 ## How it works
 

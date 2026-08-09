@@ -16,17 +16,26 @@ faithfully and should come back ✅ `supported`.
 
 ## Run it
 
+Four steps, **in this order**, from the repo root — wait for each to finish
+before the next. (Prerequisite: [Claude Code](https://claude.com/claude-code)
+installed and logged in; the checker runs on `claude -p`.)
+
 ```bash
-# 1) build the paper PDF
-playwright install chromium     # once, if you haven't already
+# 1) install — skip anything you've already done
+pip install -e ".[full]"
+playwright install chromium                 # one-time browser download
+
+# 2) set your contact email (Unpaywall requires one; the run refuses to start without it)
+export PAPERTRACE_EMAIL="you@example.org"   # use your real address
+
+# 3) build the fictional demo paper — wait for "wrote … demo_manuscript.pdf"
 python examples/demo/make_manuscript.py
 
-# 2) run the pipeline — the resolver fetches the open-access references live
-export PAPERTRACE_EMAIL="you@example.org"   # Unpaywall requires a contact
+# 4) run the audit — the resolver fetches the open-access references live
 papertrace run examples/demo/demo_manuscript.pdf -c demo_case
 
-# 3) read the results
-open demo_case/out/report.md            # or report_editor.html / report_terminal.html
+# then read the results:
+open demo_case/out/report.md                # or report_editor.html / report_terminal.html
 ```
 
 No reference PDFs ship with this repo — retrieving them **is** the demo.
