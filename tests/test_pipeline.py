@@ -100,3 +100,19 @@ def test_crop_and_reports(fixture_pdf, tmp_path):
     again = RunResults.from_json(out / "results.json")
     assert again.counts() == {"supported": 0, "partial": 1, "contradicted": 0,
                               "not_retrieved": 1}
+
+
+def test_case_folder_belongs_to_one_paper(tmp_path):
+    """A used case dir must be refused for a different paper (stale scout/
+    evidence/manifest files would otherwise bleed into the new report) and
+    accepted for a re-run of the same one."""
+    from papertrace.cli import _case_conflict
+    from papertrace.models import RefEntry, RefManifest
+
+    RefManifest(
+        manuscript="first.pdf", entries=[RefEntry(num="1", raw="X (2020) Y.")]
+    ).to_json(tmp_path / "refs_manifest.json")
+
+    assert _case_conflict(tmp_path, "second.pdf") == "first.pdf"  # refuse
+    assert _case_conflict(tmp_path, "first.pdf") is None  # same paper: fine
+    assert _case_conflict(tmp_path / "fresh", "second.pdf") is None  # new case: fine

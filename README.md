@@ -126,6 +126,11 @@ by default (`--no-scout` to skip); pass `--doi` if the title lookup picks the
 wrong paper. Want shareable PNG images of the report looks? Add `--png`
 (one-time setup: `playwright install chromium`).
 
+**One case folder per paper.** `case` is only the default name — give each
+paper its own (`papertrace run zhang2025.pdf -c zhang2025`). Re-running the
+same paper into its case is fine; pointing a *different* paper at a used
+case is refused, so two audits can never mix.
+
 Batch checking runs on headless Claude Code (`claude -p`) — it inherits your
 existing login, **no API key to configure**. Every other step (ingest,
 retrieval, scout, crops, reports) is deterministic Python.

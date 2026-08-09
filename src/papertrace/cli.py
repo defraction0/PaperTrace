@@ -38,6 +38,28 @@ STATUS_MARK = {
 }
 
 
+def _case_conflict(case: Path, manuscript_name: str) -> str | None:
+    """A case folder belongs to one paper. Returns the previous paper's name
+    when `case` already holds an audit of a different one, else None."""
+    marker = case / "refs_manifest.json"
+    if not marker.exists():
+        return None
+    previous = RefManifest.from_json(marker).manuscript
+    return previous if previous != manuscript_name else None
+
+
+def _guard_case(case: Path, manuscript: Path) -> None:
+    if previous := _case_conflict(case, manuscript.name):
+        console.print(
+            f"[red]case folder [bold]{case}[/bold] already holds an audit of "
+            f"[bold]{previous}[/bold].[/red]\n"
+            f"One case per paper — give this one its own, e.g. "
+            f"[cyan]-c {manuscript.stem}[/cyan], or delete [cyan]{case}/[/cyan] "
+            f"to reuse the name. (Re-running the [i]same[/i] paper in its case is fine.)"
+        )
+        raise typer.Exit(2)
+
+
 def _email(cli_value: str | None) -> str:
     # MANUSCRIPTAGENT_EMAIL is honored as a fallback for pre-rename setups
     email = (
@@ -121,6 +143,7 @@ def refs(
             console.print(f"  [{e.num:>3}] {e.raw[:90]}")
         return
 
+    _guard_case(case, manuscript)  # one case folder per paper
     provided = provided or (case / "sources")
     dest = case / "sources_resolved"
     console.print(
@@ -349,6 +372,7 @@ def run(
     """Full pipeline: ingest → refs → scout → check → highlight → report."""
     console.print(BANNER)
     email = _email(email)  # fail fast — before the ingest models load, not after
+    _guard_case(case, manuscript)  # one case folder per paper — never mix two audits
     ingest(manuscript, case / "ingest" / "manuscript", backend)
     refs(manuscript, case, provided, email, parse_only=False, backend=backend)
     if with_scout:
