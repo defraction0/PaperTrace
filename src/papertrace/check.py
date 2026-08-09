@@ -19,6 +19,14 @@ from .models import ClaimResult, RefManifest, UncitedClaim
 
 CLAUDE_TIMEOUT = 600
 
+# model actually used by the last `claude -p` call, when the CLI reports it —
+# stamped into results.json so the report discloses its judge
+_LAST_MODEL: str | None = None
+
+
+def last_model() -> str | None:
+    return _LAST_MODEL
+
 EXTRACT_PROMPT = """You are the claim-extraction step of a peer-review fact-checker.
 
 Below is a manuscript converted to markdown with provenance markers
@@ -94,6 +102,13 @@ def _ask(prompt: str, model: str | None = None) -> str:
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed: {proc.stderr.strip()[:400]}")
     payload = json.loads(proc.stdout)
+    global _LAST_MODEL
+    usage = payload.get("modelUsage")
+    _LAST_MODEL = (
+        payload.get("model")
+        or (next(iter(usage), None) if isinstance(usage, dict) else None)
+        or _LAST_MODEL
+    )
     return payload.get("result", "")
 
 

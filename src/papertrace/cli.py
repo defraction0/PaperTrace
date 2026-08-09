@@ -117,7 +117,11 @@ def ingest(
 def refs(
     manuscript: Path = typer.Argument(..., exists=True),
     case: Path = typer.Option(Path("case"), "--case", "-c"),
-    provided: Path = typer.Option(None, "--provided", help="Folder of PDFs you already have"),
+    provided: Path = typer.Option(
+        None, "--provided",
+        help="Folder of reference PDFs you already have; files match by name "
+             "<firstauthor>-<year>.pdf (e.g. pyrros-2023.pdf)",
+    ),
     email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
     parse_only: bool = typer.Option(False, "--parse-only", help="List references, no network"),
     backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
@@ -144,6 +148,13 @@ def refs(
         return
 
     _guard_case(case, manuscript)  # one case folder per paper
+    if provided is not None and provided.is_file():
+        console.print(
+            f"[red]--provided expects a folder of PDFs, got a file:[/red] {provided}\n"
+            "Put your PDFs into a folder, named so they match their reference — "
+            "[cyan]<firstauthor>-<year>.pdf[/cyan], e.g. [cyan]pyrros-2023.pdf[/cyan]."
+        )
+        raise typer.Exit(2)
     provided = provided or (case / "sources")
     dest = case / "sources_resolved"
     console.print(
@@ -265,8 +276,11 @@ def check(
     smap_path = case / "ingest" / "manuscript" / "source_map.json"
     converter = SourceMap.from_json(smap_path).converter if smap_path.exists() else "pymupdf"
 
+    from .check import last_model
+
     results = RunResults(
         manuscript=manifest.manuscript,
+        checker=f"claude -p · {model or last_model() or 'account default model'}",
         date=str(datetime.date.today()),
         refs_total=len(manifest.entries),
         refs_available=len(manifest.retrieved),
@@ -363,7 +377,11 @@ def report(
 def run(
     manuscript: Path = typer.Argument(..., exists=True),
     case: Path = typer.Option(Path("case"), "--case", "-c"),
-    provided: Path = typer.Option(None, "--provided", help="Folder of PDFs you already have"),
+    provided: Path = typer.Option(
+        None, "--provided",
+        help="Folder of reference PDFs you already have; files match by name "
+             "<firstauthor>-<year>.pdf (e.g. pyrros-2023.pdf)",
+    ),
     email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
     model: str = typer.Option(None, "--model"),
     png: bool = typer.Option(
