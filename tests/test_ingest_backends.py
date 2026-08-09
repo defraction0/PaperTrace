@@ -163,7 +163,10 @@ def test_write_outputs_renders_table_and_figure(tmp_path):
 
 
 def test_auto_falls_back_to_pymupdf_and_discloses(tmp_path):
-    import fitz
+    try:
+        import pymupdf as fitz
+    except ImportError:  # pragma: no cover
+        import fitz
 
     doc = fitz.open()
     page = doc.new_page()

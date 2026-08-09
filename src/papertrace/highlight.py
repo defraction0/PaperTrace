@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
+try:
+    import pymupdf as fitz  # PyMuPDF >= 1.24 module name (the bare `fitz` import is deprecated)
+except ImportError:  # pragma: no cover - older PyMuPDF exposes only `fitz`
+    import fitz
 from PIL import Image, ImageDraw
 
 RED = (214, 48, 42)
