@@ -12,7 +12,9 @@ planted on purpose:
 | — | "Routine imaging archives are among the largest untapped screening resources in medicine." — assertive, **no citation** | flagged in the uncited register |
 
 The remaining claims citing [2] and [3] state published cohort facts
-faithfully and should come back ✅ `supported`.
+faithfully and should come back ✅ `supported`. (Judgement calls like
+supported-vs-partial can vary a little between runs — the checker is a
+model. The planted contradictions are stable.)
 
 ## Run it
 
