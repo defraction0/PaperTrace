@@ -245,15 +245,21 @@ The pixel logo is generated: `python scripts/make_logo.py`.
 
 ## Roadmap
 
-Retraction & correction flags on cited references · superscript citation
-styles in the coverage audit (bare trailing numerals, as in Nature-family
-journals — the report currently says "not audited" instead of silently
-passing) · more scout backends (OpenAlex, Semantic Scholar) · support for
-other LLM backends (local and API models alongside headless Claude Code) ·
-Claude Desktop integration · an MCP server, so any MCP-capable client can
-drive PaperTrace as a tool · DOCX ingest · revision (R1) mode polish ·
-GROBID-grade reference parsing · figure-vs-text consistency pass (batch) ·
-PyPI release · journal review packs may be added in the future.
+- [ ] Retraction & correction flags on cited references
+- [ ] Superscript citation styles in the coverage audit (bare trailing
+      numerals, as in Nature-family journals — the report currently says
+      "not audited" instead of silently passing)
+- [ ] More scout backends (OpenAlex, Semantic Scholar)
+- [ ] Support for other LLM backends (local and API models alongside
+      headless Claude Code)
+- [ ] Claude Desktop integration
+- [ ] MCP server — drive PaperTrace as a tool from any MCP-capable client
+- [ ] DOCX ingest
+- [ ] Revision (R1) mode polish
+- [ ] GROBID-grade reference parsing
+- [ ] Figure-vs-text consistency pass (batch)
+- [ ] PyPI release
+- [ ] Journal review packs — may be added in the future
 
 ## License
 
