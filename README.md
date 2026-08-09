@@ -9,7 +9,7 @@ then check it against the literature that came after.</b><br>
 An agentic paper-audit tool. Your judgement stays in charge.</p>
 
 <p align="center">
-  <img src="docs/report_terminal.png" width="70%" alt="Terminal run: claims checked against their cited pages, evidence crops inline">
+  <img src="docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: 15 claims checked against their cited pages — a Methods claim its own cited source describes differently, a supported claim with the evidence boxed on the real page, and a two-reference claim split into its checked and unretrieved halves">
 </p>
 
 ---
@@ -51,6 +51,21 @@ What a run gives you:
 - **Discloses its ingest fidelity**: every run is stamped with the converter
   that read the PDF. The layout backend (docling) preserves tables, figures
   and lists; the flat fallback (PyMuPDF) says so, loudly, in the report.
+
+## What a real run looks like
+
+The excerpt above is from a real, unscripted audit of a published paper
+(Zhang et al., *Nature Mental Health* 3, 1168–1180, 2025 —
+[doi:10.1038/s44220-025-00501-8](https://doi.org/10.1038/s44220-025-00501-8)):
+86 cited references, of which 22 had legal open-access copies — the other 64
+are recorded as not obtainable, never guessed. 15 high-value claims were read
+against their cited pages: **8 supported, 7 partial, 0 contradicted**. The
+partials are the interesting part — a Methods sentence calling tests
+"well-established" whose own cited source describes them as "brief and
+bespoke, non-standard", and multi-reference claims where the retrieved source
+carries one half of the claim while the unretrieved co-citation is *named* as
+the possible carrier of the other half. Candidates for your judgement, not
+accusations.
 
 ## Tables and figures are evidence too
 
@@ -190,11 +205,13 @@ The pixel logo is generated: `python scripts/make_logo.py`.
 
 ## Roadmap
 
-Retraction & correction flags on cited references · more scout backends
-(OpenAlex, Semantic Scholar) · DOCX ingest · revision (R1) mode polish ·
-GROBID-grade reference parsing · figure-vs-text consistency pass (batch) ·
-PyPI release · more journal packs (contributions welcome — a pack is one
-markdown file).
+Superscript citation styles in the coverage audit (bare trailing numerals,
+as in Nature-family journals, are currently not recognized — the report says
+so instead of silently passing) · retraction & correction flags on cited
+references · more scout backends (OpenAlex, Semantic Scholar) · DOCX ingest ·
+revision (R1) mode polish · GROBID-grade reference parsing · figure-vs-text
+consistency pass (batch) · PyPI release · more journal packs (contributions
+welcome — a pack is one markdown file).
 
 ## License
 

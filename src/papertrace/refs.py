@@ -50,19 +50,45 @@ def parse_references(text: str) -> list[RefEntry]:
     for i, (_start, end, _num) in enumerate(seq):
         stop = seq[i + 1][0] if i + 1 < len(seq) else len(text)
         raw = re.sub(r"\s+", " ", text[end:stop]).strip()
-        if not raw:
-            continue
-        e = RefEntry(num=str(_num), raw=raw)
-        if m := DOI_RE.search(raw):
-            doi = m.group(0).rstrip(".,;")
-            while doi.endswith(")") and doi.count(")") > doi.count("("):
-                doi = doi[:-1].rstrip(".,;")
-            e.doi = doi
-        if m := YEAR_RE.search(raw):
-            e.year = m.group(1) or m.group(0)
-        e.slug = _slug(raw, e.year)
-        entries.append(e)
+        if raw:
+            entries.append(_entry(str(_num), raw))
+    if not entries:
+        entries = _parse_bulleted(text)
     return entries
+
+
+def _parse_bulleted(text: str) -> list[RefEntry]:
+    """Fallback for lists whose numerals the converter stripped.
+
+    docling flattens some journals' numbered hanging-indent reference lists
+    (e.g. Nature-family layouts) into plain bullets — number the bullets
+    sequentially by document order instead of giving up with zero entries.
+    """
+    items: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith(("- ", "• ", "* ")):
+            items.append(s[2:].strip())
+        elif items and s:
+            items[-1] += " " + s  # wrapped continuation of the previous entry
+    return [
+        _entry(str(i), re.sub(r"\s+", " ", raw).strip())
+        for i, raw in enumerate(items, 1)
+        if raw.strip()
+    ]
+
+
+def _entry(num: str, raw: str) -> RefEntry:
+    e = RefEntry(num=num, raw=raw)
+    if m := DOI_RE.search(raw):
+        doi = m.group(0).rstrip(".,;")
+        while doi.endswith(")") and doi.count(")") > doi.count("("):
+            doi = doi[:-1].rstrip(".,;")
+        e.doi = doi
+    if m := YEAR_RE.search(raw):
+        e.year = m.group(1) or m.group(0)
+    e.slug = _slug(raw, e.year)
+    return e
 
 
 def _slug(raw: str, year: str | None) -> str:

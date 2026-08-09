@@ -101,8 +101,10 @@
     <p class="meta" style="margin-top:-14px">
 {% if r.coverage.missing %}
       Citation coverage: <span style="color:var(--amber)">{{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} labels — unaddressed: [{{ r.coverage.missing|join('], [') }}]</span>
-{% else %}
+{% elif r.coverage.labels_in_text %}
       Citation coverage: <span style="color:var(--green)">all {{ r.coverage.labels_in_text|length }} labels covered</span>
+{% else %}
+      Citation coverage: <span style="color:var(--amber)">no numbered citation markers found — bare-superscript styles not yet recognized; coverage not audited</span>
 {% endif %}
       {% if r.converter == "pymupdf" %} &nbsp;·&nbsp; <span style="color:var(--amber)">⚠ ingest: flat text — tables linearized (install [docling])</span>{% endif %}
     </p>

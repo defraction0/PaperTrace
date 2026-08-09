@@ -130,3 +130,22 @@ def test_manifest_roundtrip(tmp_path):
     assert data["summary"]["total"] == 4
     m2 = RefManifest.from_json(tmp_path / "refs_manifest.json")
     assert [e.num for e in m2.entries] == ["1", "2", "3", "4"]
+
+
+def test_bullet_fallback_when_converter_strips_numerals():
+    """docling flattens some journals' numbered hanging-indent reference
+    lists to plain bullets — the parser must number them by document order
+    instead of returning zero entries (found in a real Nature-family run)."""
+    text = """References
+- Fixture F, Example E (2023) A first bulleted reference. J Synth 1:1-10.
+  doi:10.1000/bullet.1
+- Sample S (2019) A second one whose line
+  wraps onto a continuation line. J Synth 2:2-20.
+- Mystery M (1999) A third without a DOI.
+"""
+    entries = parse_references(text)
+    assert [e.num for e in entries] == ["1", "2", "3"]
+    assert entries[0].doi == "10.1000/bullet.1"
+    assert entries[0].slug == "fixture-2023"
+    assert "wraps onto a continuation line" in entries[1].raw
+    assert entries[2].doi is None

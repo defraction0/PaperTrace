@@ -107,7 +107,7 @@
     </div>
 
 {% if r.coverage %}
-    <div class="sumline"><span class="k">coverage</span>{% if r.coverage.missing %}<span class="amber">{{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} citation labels covered · unaddressed: [{{ r.coverage.missing|join('] [') }}]</span>{% else %}<span class="green">all {{ r.coverage.labels_in_text|length }} citation labels covered</span>{% endif %}</div>
+    <div class="sumline"><span class="k">coverage</span>{% if r.coverage.missing %}<span class="amber">{{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} citation labels covered · unaddressed: [{{ r.coverage.missing|join('] [') }}]</span>{% elif r.coverage.labels_in_text %}<span class="green">all {{ r.coverage.labels_in_text|length }} citation labels covered</span>{% else %}<span class="amber">no numbered citation markers found — bare-superscript styles not yet recognized; coverage not audited</span>{% endif %}</div>
 {% endif %}
 {% if r.uncited %}
     <div class="nr-head"><span class="amber">▲</span> assertions without citation <span class="c">({{ r.uncited|length }}) — your judgement required</span></div>

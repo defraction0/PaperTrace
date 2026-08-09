@@ -7,8 +7,10 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if r.coverage %}
 {% if r.coverage.missing %}
 **Citation coverage:** {{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} labels covered — ⚠️ unaddressed: [{{ r.coverage.missing|join('], [') }}]
-{% else %}
+{% elif r.coverage.labels_in_text %}
 **Citation coverage:** all {{ r.coverage.labels_in_text|length }} citation labels covered ✓
+{% else %}
+**Citation coverage:** ⚠️ no numbered citation markers found — bare-superscript citation styles are not yet recognized; coverage not audited.
 {% endif %}
 {% endif %}
 {% if r.converter == "pymupdf" %}

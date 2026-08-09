@@ -262,6 +262,12 @@ def check(
         )
     elif n_text:
         console.print(f"[green]coverage: all {n_text} citation labels covered[/green]")
+    elif claims:
+        console.print(
+            "[yellow]coverage: no numbered citation markers found in the text — "
+            "bare-superscript citation styles are not yet recognized; "
+            "coverage not audited[/yellow]"
+        )
     if uncited:
         console.print(f"[cyan]{len(uncited)} uncited assertions[/cyan] — see report section")
 

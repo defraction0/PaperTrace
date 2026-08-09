@@ -74,3 +74,21 @@ def test_results_roundtrip_with_uncited_and_coverage(tmp_path):
     )
     legacy = RunResults.from_json(old)
     assert legacy.uncited == [] and legacy.coverage == {} and legacy.converter == "pymupdf"
+
+
+def test_unrecognized_citation_style_is_disclosed(tmp_path):
+    """Zero bracketed labels + existing claims must yield the explicit
+    'not audited' disclosure, never a silent or green-zero coverage line."""
+    from papertrace.report import write_reports
+
+    r = RunResults(
+        manuscript="m.pdf",
+        claims=[ClaimResult(id=1, claim="c", location="L", refs=["1"], verdict="supported")],
+        coverage={"labels_in_text": [], "covered": [], "missing": []},
+    )
+    write_reports(r, None, tmp_path, png=False)
+    md = (tmp_path / "report.md").read_text()
+    assert "coverage not audited" in md
+    assert "all 0" not in md
+    term = (tmp_path / "report_terminal.html").read_text()
+    assert "coverage not audited" in term
