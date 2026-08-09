@@ -128,6 +128,9 @@ def _quiet_third_party_loggers() -> None:
         logging.getLogger(name).setLevel(logging.ERROR)
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     os.environ.setdefault("TQDM_DISABLE", "1")
+    # torch (re)configures its dynamo loggers lazily at first use, overriding
+    # plain setLevel — its own env var is the only pre-import control
+    os.environ.setdefault("TORCH_LOGS", "-dynamo,-inductor")
     warnings.filterwarnings("ignore", category=UserWarning, module=r"torch\.nn\.modules\.conv")
     try:
         from transformers.utils import logging as hf_logging
@@ -143,6 +146,15 @@ def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:
     _quiet_third_party_loggers()
     import docling
     from docling.document_converter import DocumentConverter
+
+    try:  # belt to the TORCH_LOGS braces — torch may already be imported
+        import logging as _logging
+
+        import torch._logging as _tlog
+
+        _tlog.set_logs(dynamo=_logging.ERROR)
+    except Exception:  # noqa: BLE001 — cosmetic only, never fatal
+        pass
 
     result = DocumentConverter().convert(str(pdf_path))
     doc = result.document
