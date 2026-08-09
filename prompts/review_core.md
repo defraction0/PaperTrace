@@ -1,8 +1,9 @@
 # Review craft — journal-neutral core
 
-The review skill choreographs the session; this file holds the standards. A
-journal pack in `journal_packs/` may add journal-specific template items and
-form fields on top — the pack wins where they overlap.
+The review skill choreographs the session; this file holds the standards.
+Journal packs (journal-specific template items and form fields, layered on
+top of this core) may be added in the future — a pack wins where they
+overlap.
 
 ## Posture
 

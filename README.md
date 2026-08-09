@@ -209,8 +209,7 @@ paper.pdf ─────ingest──▶ clean.md + source_map.json       (page 
 
 The JSON contracts are versioned in [`schemas/`](schemas/). The two skills in
 [`.claude/skills/`](.claude/skills/) drive the same tools interactively; the
-audit craft lives in [`prompts/review_core.md`](prompts/review_core.md) with
-journal-specific packs in [`journal_packs/`](journal_packs/).
+audit craft lives in [`prompts/review_core.md`](prompts/review_core.md).
 
 ## Ethics & scope
 
@@ -246,13 +245,15 @@ The pixel logo is generated: `python scripts/make_logo.py`.
 
 ## Roadmap
 
-Superscript citation styles in the coverage audit (bare trailing numerals,
-as in Nature-family journals, are currently not recognized — the report says
-so instead of silently passing) · retraction & correction flags on cited
-references · more scout backends (OpenAlex, Semantic Scholar) · DOCX ingest ·
-revision (R1) mode polish · GROBID-grade reference parsing · figure-vs-text
-consistency pass (batch) · PyPI release · more journal packs (contributions
-welcome — a pack is one markdown file).
+Retraction & correction flags on cited references · superscript citation
+styles in the coverage audit (bare trailing numerals, as in Nature-family
+journals — the report currently says "not audited" instead of silently
+passing) · more scout backends (OpenAlex, Semantic Scholar) · support for
+other LLM backends (local and API models alongside headless Claude Code) ·
+Claude Desktop integration · an MCP server, so any MCP-capable client can
+drive PaperTrace as a tool · DOCX ingest · revision (R1) mode polish ·
+GROBID-grade reference parsing · figure-vs-text consistency pass (batch) ·
+PyPI release · journal review packs may be added in the future.
 
 ## License
 

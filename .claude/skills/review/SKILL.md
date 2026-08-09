@@ -141,8 +141,9 @@ Also collect two registers the report must carry:
 ## 6 · Section-by-section pass
 
 With the fact-check table in hand, work through the paper itself per
-`review_core.md` (and the journal pack if one matches — check
-`journal_packs/`): abstract, methods scrutiny, statistics, results
+`review_core.md` (and a journal pack from `journal_packs/`, if that folder
+exists and one matches — packs may be added in the future): abstract,
+methods scrutiny, statistics, results
 consistency, discussion claims, figures/tables, reporting guideline
 compliance. Flag each finding ✅/⚠/❌/❓ and batch your questions to the user
 at the end of the phase — numbered, with the exact passage and why you're
