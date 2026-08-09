@@ -116,8 +116,18 @@ def blocks_from_docling(doc, page_heights: dict[int, float]) -> list[Block]:
     return blocks
 
 
+def _quiet_third_party_loggers() -> None:
+    """docling's model stack (RapidOCR, torch dynamo, transformers) logs at
+    INFO/WARNING and buries the pipeline ticker — keep errors only."""
+    import logging
+
+    for name in ("RapidOCR", "rapidocr", "torch._dynamo", "transformers", "docling"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+
 def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:
     """Run docling on a PDF. Returns (page_count, blocks, docling_version)."""
+    _quiet_third_party_loggers()
     import docling
     from docling.document_converter import DocumentConverter
 

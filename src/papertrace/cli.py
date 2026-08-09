@@ -342,6 +342,7 @@ def run(
 ) -> None:
     """Full pipeline: ingest → refs → scout → check → highlight → report."""
     console.print(BANNER)
+    email = _email(email)  # fail fast — before the ingest models load, not after
     ingest(manuscript, case / "ingest" / "manuscript", backend)
     refs(manuscript, case, provided, email, parse_only=False, backend=backend)
     if with_scout:
