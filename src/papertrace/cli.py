@@ -309,7 +309,10 @@ def highlight(
 @app.command()
 def report(
     case: Path = typer.Option(Path("case"), "--case", "-c"),
-    png: bool = typer.Option(True, "--png/--no-png", help="Also render PNGs (needs playwright)"),
+    png: bool = typer.Option(
+        False, "--png/--no-png",
+        help="Also export PNG images of the report looks (one-time: playwright install chromium)",
+    ),
 ) -> None:
     """Render report.md + the editor/terminal looks from results.json."""
     from .models import ScoutResults
@@ -332,7 +335,10 @@ def run(
     provided: Path = typer.Option(None, "--provided", help="Folder of PDFs you already have"),
     email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
     model: str = typer.Option(None, "--model"),
-    png: bool = typer.Option(True, "--png/--no-png"),
+    png: bool = typer.Option(
+        False, "--png/--no-png",
+        help="Also export PNG images of the report looks (one-time: playwright install chromium)",
+    ),
     backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
     with_scout: bool = typer.Option(
         True, "--scout/--no-scout",

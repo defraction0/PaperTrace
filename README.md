@@ -83,10 +83,7 @@ numbers boxed by text search on the real page:
 
 ```bash
 git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
-pip install -e ".[full]"     # standard install — layout-aware ingest + PNG rendering
-playwright install chromium  # optional — only for PNG exports of the report; skip it and
-                             # you still get report.md + the HTML looks (evidence crops
-                             # never need a browser — PyMuPDF draws them)
+pip install -e ".[full]"     # standard install — layout-aware ingest
 claude                       # start Claude Code here
 > /review
 ```
@@ -104,7 +101,6 @@ and batching its questions.
 
 ```bash
 pip install -e ".[full]"        # standard install (see matrix below)
-playwright install chromium     # optional — PNG report exports only (one-time download)
 export PAPERTRACE_EMAIL="you@example.org"     # Unpaywall asks for a contact
 papertrace run paper.pdf --provided ./my_pdfs -c case
 ```
@@ -124,10 +120,11 @@ linearized table is a degradation worth disclosing.
 
 Output in `case/out/`: `report.md` with inline evidence images, the same
 report as a dark **editor-window** page and as a **terminal-run** page
-(`report_editor.html/png`, `report_terminal.html/png`), plus machine-readable
+(`report_editor.html`, `report_terminal.html`), plus machine-readable
 `results.json`, `scout.json` and the retrieval manifest. The scout step is on
 by default (`--no-scout` to skip); pass `--doi` if the title lookup picks the
-wrong paper.
+wrong paper. Want shareable PNG images of the report looks? Add `--png`
+(one-time setup: `playwright install chromium`).
 
 Batch checking runs on headless Claude Code (`claude -p`) — it inherits your
 existing login, **no API key to configure**. Every other step (ingest,
