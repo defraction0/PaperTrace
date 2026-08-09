@@ -84,6 +84,7 @@ numbers boxed by text search on the real page:
 ```bash
 git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
 pip install -e ".[full]"     # standard install — layout-aware ingest + PNG rendering
+playwright install chromium  # one-time browser download (PNG reports + demo builder)
 claude                       # start Claude Code here
 > /review
 ```
@@ -101,6 +102,7 @@ and batching its questions.
 
 ```bash
 pip install -e ".[full]"        # standard install (see matrix below)
+playwright install chromium     # one-time, for the PNG report looks
 export PAPERTRACE_EMAIL="you@example.org"     # Unpaywall asks for a contact
 papertrace run paper.pdf --provided ./my_pdfs -c case
 ```

@@ -47,5 +47,12 @@ def html_to_png(html_path: Path, png_path: Path, width: int = WIDTH) -> bool:
             browser.close()
         return True
     except Exception as e:  # noqa: BLE001 — soft failure by design
-        print(f"· PNG skipped ({e})")
+        msg = str(e)
+        if "Executable doesn't exist" in msg or "playwright install" in msg:
+            print(
+                "· PNG skipped — Playwright's chromium is not installed. "
+                "One-time fix:  playwright install chromium"
+            )
+        else:
+            print(f"· PNG skipped ({msg})")
         return False

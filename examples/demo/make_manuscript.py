@@ -100,12 +100,21 @@ def main() -> None:
     hits = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))
     if hits:
         exe = hits[-1]
-    with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
-        page = browser.new_page()
-        page.goto(out_html.as_uri())
-        page.pdf(path=str(out_pdf), format="A4", print_background=True)
-        browser.close()
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=exe) if exe else p.chromium.launch()
+            page = browser.new_page()
+            page.goto(out_html.as_uri())
+            page.pdf(path=str(out_pdf), format="A4", print_background=True)
+            browser.close()
+    except Exception as e:
+        if "Executable doesn't exist" in str(e) or "playwright install" in str(e):
+            raise SystemExit(
+                "Playwright's chromium is not installed — run once:\n"
+                "    playwright install chromium\n"
+                "then re-run this script."
+            ) from None
+        raise
     out_html.unlink()
     print(f"wrote {out_pdf}")
     print("planted: [1] contradicted · [3] contradicted · [4] not retrievable · 1 uncited")

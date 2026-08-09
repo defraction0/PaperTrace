@@ -17,7 +17,8 @@ faithfully and should come back ✅ `supported`.
 ## Run it
 
 ```bash
-# 1) build the paper PDF (needs playwright + chromium once)
+# 1) build the paper PDF
+playwright install chromium     # once, if you haven't already
 python examples/demo/make_manuscript.py
 
 # 2) run the pipeline — the resolver fetches the open-access references live
