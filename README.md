@@ -9,7 +9,7 @@ then check it against the literature that came after.</b><br>
 An agentic paper-audit tool. Your judgement stays in charge.</p>
 
 <p align="center">
-  <img src="docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: 15 claims checked against their cited pages — a Methods claim its own cited source describes differently, a supported claim with the evidence boxed on the real page, and a two-reference claim split into its checked and unretrieved halves">
+  <img src="docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: three checked claims, each shown with the actual page of its cited source and the matched text boxed in red — a Methods claim its own cited source describes differently, a supported claim, and a two-reference claim split into its checked and unretrieved halves">
 </p>
 
 ---
