@@ -3,8 +3,14 @@
 *.pdf
 *.docx
 cases/
+case/
+demo_case/
 out/
 references/
+
+# the one committed exception: the pre-generated demo report (no source PDFs)
+!examples/demo/output/
+!examples/demo/output/**
 
 # --- python ----------------------------------------------------------------
 __pycache__/

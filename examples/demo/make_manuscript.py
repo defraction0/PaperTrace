@@ -79,7 +79,7 @@ Resource for Identifying the Causes of a Wide Range of Complex Diseases of
 Middle and Old Age. PLoS Med 12:e1001779. doi:10.1371/journal.pmed.1001779</li>
 <li>Littlejohns TJ, Holliday J, Gibson LM, et al (2020) The UK Biobank imaging
 enhancement of 100,000 participants: rationale, data collection, management
-and future directions. Nat Commun 11:2624. doi:10.1038/s41467-020-17438-4</li>
+and future directions. Nat Commun 11:2624. doi:10.1038/s41467-020-15948-9</li>
 <li>Rajpurkar P, Lungren MP (2023) The Current and Future State of AI
 Interpretation of Medical Images. N Engl J Med 388:1981–1990.
 doi:10.1056/NEJMra2301725</li>

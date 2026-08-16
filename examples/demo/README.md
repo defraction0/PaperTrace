@@ -1,5 +1,10 @@
 # Demo: a fictional paper with planted citation errors
 
+> **The finished result is committed** — read
+> [`output/report.md`](output/report.md) (with its evidence crops) or view
+> [`output/report_terminal.png`](output/report_terminal.png) without running
+> anything. The steps below reproduce it.
+
 The paper is invented and clearly watermarked as such — a two-page fictional
 mini-review whose references are **real, published papers**. The errors are
 planted on purpose:
@@ -52,4 +57,4 @@ registers (published-since / existed-but-uncited) fill up, or pass
 `--no-scout` to skip the step.
 
 If you already have some of the PDFs, drop them into `demo_case/sources/`
-before step 2 — the resolver prefers your copies over the network.
+before the `papertrace run` step — the resolver prefers your copies over the network.
