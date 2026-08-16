@@ -162,7 +162,12 @@ def test_write_outputs_renders_table_and_figure(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_auto_falls_back_to_pymupdf_and_discloses(tmp_path):
+def test_auto_falls_back_to_pymupdf_and_discloses(tmp_path, monkeypatch):
+    # simulate a docling-less install, whatever this environment actually has
+    import papertrace.ingest as ingest_mod
+
+    monkeypatch.setattr(ingest_mod, "_docling_available", lambda: False)
+
     try:
         import pymupdf as fitz
     except ImportError:  # pragma: no cover
@@ -178,7 +183,7 @@ def test_auto_falls_back_to_pymupdf_and_discloses(tmp_path):
     doc.close()
 
     smap = ingest_pdf(pdf, tmp_path / "out", backend="auto")
-    assert smap.converter == "pymupdf"  # docling not installed in CI
+    assert smap.converter == "pymupdf"
 
     import pytest
 

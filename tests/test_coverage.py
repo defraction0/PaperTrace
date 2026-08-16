@@ -94,6 +94,23 @@ def test_unrecognized_citation_style_is_disclosed(tmp_path):
     assert "coverage not audited" in term
 
 
+def test_coverage_line_is_its_own_paragraph(tmp_path):
+    """trim_blocks must not glue the coverage line onto the counts line —
+    the markdown bold breaks when '…Not retrieved: 0**Citation coverage:**…'
+    renders as one line (regression from the inline unchecked-bucket tag)."""
+    from papertrace.report import write_reports
+
+    r = RunResults(
+        manuscript="m.pdf",
+        claims=[ClaimResult(id=1, claim="c", location="L", refs=["1"], verdict="supported")],
+        coverage={"labels_in_text": ["1"], "covered": ["1"], "missing": []},
+    )
+    write_reports(r, None, tmp_path, png=False)
+    md = (tmp_path / "report.md").read_text()
+    assert "\n**Citation coverage:**" in md
+    assert "all 1 citation labels covered" in md
+
+
 def test_failed_check_is_unchecked_never_not_retrieved(tmp_path, monkeypatch):
     """A model-call failure on an AVAILABLE source must surface as `unchecked`
     (with the reason and a retry behind it), never as `not_retrieved` — the

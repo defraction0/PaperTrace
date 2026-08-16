@@ -88,7 +88,7 @@ class SourceMap:
 # references manifest (refs output)
 # ---------------------------------------------------------------------------
 
-REF_STATUSES = ("retrieved", "provided", "paywalled", "no_doi", "unpublished", "error")
+REF_STATUSES = ("retrieved", "provided", "paywalled", "mismatch", "no_doi", "unpublished", "error")
 
 
 @dataclass

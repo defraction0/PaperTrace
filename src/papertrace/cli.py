@@ -23,8 +23,8 @@ console = Console()
 BANNER = r"""[bold]
   ┌──────────────────────────┐
   │  ▛▀▜ PaperTrace          │
-  │  ▌█▐ every claim, traced │
-  │  ▙▄▟ back to its source  │
+  │  ▌█▐ claims traced back  │
+  │  ▙▄▟ to their sources    │
   └──────────────────────────┘[/bold]
 """
 
@@ -32,6 +32,7 @@ STATUS_MARK = {
     "retrieved": "[green]✓[/green]",
     "provided": "[green]✓[/green]",
     "paywalled": "[yellow]⚠[/yellow]",
+    "mismatch": "[yellow]⚠[/yellow]",
     "no_doi": "[yellow]⚠[/yellow]",
     "unpublished": "[yellow]⚠[/yellow]",
     "error": "[red]✗[/red]",

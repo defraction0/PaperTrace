@@ -52,6 +52,7 @@
               "retrieved",
               "provided",
               "paywalled",
+              "mismatch",
               "no_doi",
               "unpublished",
               "error"

@@ -3,7 +3,7 @@
 Checker: `{{ r.checker }}` · PaperTrace · {{ r.date }}
 Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs_total }}` cited references available
 
-**Claims:** {{ r.claims|length }} | ✅ **Supported:** {{ counts.supported }} | ⚠️ **Partial:** {{ counts.partial }} | ❌ **Contradicted:** {{ counts.contradicted }} | ⊘ **Not retrieved:** {{ counts.not_retrieved }}{% if counts.unchecked %} | ⚠ **Unchecked (check failed):** {{ counts.unchecked }}{% endif %}
+**Claims:** {{ r.claims|length }} | ✅ **Supported:** {{ counts.supported }} | ⚠️ **Partial:** {{ counts.partial }} | ❌ **Contradicted:** {{ counts.contradicted }} | ⊘ **Not retrieved:** {{ counts.not_retrieved }}{% if counts.unchecked %} | ⚠ **Unchecked (check failed):** {{ counts.unchecked }}{% endif +%}
 {% if r.coverage %}
 {% if r.coverage.missing %}
 **Citation coverage:** {{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} labels covered — ⚠️ unaddressed: [{{ r.coverage.missing|join('], [') }}]

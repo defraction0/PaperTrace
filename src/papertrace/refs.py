@@ -157,6 +157,69 @@ def _download_pdf(client: httpx.Client, url: str, dest: Path) -> bool:
         return False
 
 
+# journal names and boilerplate that appear on almost any first page —
+# they must not let a wrong paper pass the title check
+_TITLE_STOPWORDS = frozenset(
+    {"commun", "nature", "science", "journal", "lancet", "article",
+     "elsevier", "springer", "wiley", "volume", "press", "https"}
+)
+
+
+def _title_check_text(raw: str, page_text: str) -> str | None:
+    """Does the retrieved first page look like the cited reference?
+
+    Returns None on pass, else a human-readable reason. An empty/unreadable
+    page passes: unverifiable is not the same as wrong.
+    """
+    page = re.sub(r"\s+", " ", page_text).lower()
+    if not page.strip():
+        return None
+    tokens = set(re.findall(r"[a-z]{5,}", raw.lower())) - _TITLE_STOPWORDS
+    if not tokens:
+        return None
+    found = sum(1 for t in tokens if t in page)
+    if found / len(tokens) >= 0.35:
+        return None
+    return f"title check failed: {found}/{len(tokens)} reference tokens on the retrieved first page"
+
+
+def _first_page_text(pdf_path: Path) -> str:
+    try:
+        import pymupdf as fitz
+    except ImportError:  # pragma: no cover
+        import fitz
+    try:
+        with fitz.open(pdf_path) as doc:
+            meta_title = (doc.metadata or {}).get("title") or ""
+            return doc[0].get_text() + " " + meta_title
+    except Exception:
+        return ""  # corrupt/scanned/odd PDF — never crash resolution
+
+
+def _title_check(entry: RefEntry, pdf_path: Path) -> str | None:
+    return _title_check_text(entry.raw, _first_page_text(pdf_path))
+
+
+def _accept(
+    entry: RefEntry, client: httpx.Client, url: str, dest: Path, resolver: str, why: str
+) -> bool:
+    """Download one candidate copy and title-sanity-check it. On mismatch the
+    bytes are discarded, the reason is recorded, and the chain continues."""
+    if not _download_pdf(client, url, dest):
+        return False
+    if detail := _title_check(entry, dest):
+        dest.unlink(missing_ok=True)
+        entry.status = "mismatch"
+        entry.reason = (
+            f"retrieved PDF looks like a different paper ({detail}) — wrong or "
+            "mistyped DOI in the reference? Drop the correct copy into sources/"
+        )
+        return False
+    entry.status, entry.resolver, entry.pdf_path = "retrieved", resolver, str(dest)
+    entry.reason = why
+    return True
+
+
 def _match_provided(entry: RefEntry, provided_dir: Path | None) -> Path | None:
     if not provided_dir or not provided_dir.is_dir():
         return None
@@ -187,9 +250,7 @@ def resolve_entry(
     try:
         if arxiv := ARXIV_RE.search(entry.raw):
             url = f"https://arxiv.org/pdf/{arxiv.group(1)}"
-            if _download_pdf(client, url, dest):
-                entry.status, entry.resolver, entry.pdf_path = "retrieved", "arxiv", str(dest)
-                entry.reason = "arXiv"
+            if _accept(entry, client, url, dest, "arxiv", "arXiv"):
                 return entry
 
         if not entry.doi:
@@ -205,19 +266,16 @@ def resolve_entry(
             return entry
 
         if pdf_url := _unpaywall_pdf(client, entry.doi, email):
-            if _download_pdf(client, pdf_url, dest):
-                entry.status, entry.resolver, entry.pdf_path = "retrieved", "unpaywall", str(dest)
-                entry.reason = "open-access copy via Unpaywall"
+            if _accept(entry, client, pdf_url, dest, "unpaywall", "open-access copy via Unpaywall"):
                 return entry
 
         if pdf_url := _epmc_pdf(client, entry.doi):
-            if _download_pdf(client, pdf_url, dest):
-                entry.status, entry.resolver, entry.pdf_path = "retrieved", "europepmc", str(dest)
-                entry.reason = "open-access copy via Europe PMC"
+            if _accept(entry, client, pdf_url, dest, "europepmc", "open-access copy via Europe PMC"):
                 return entry
 
-        entry.status = "paywalled"
-        entry.reason = "DOI resolved but no legal open-access copy found"
+        if entry.status != "mismatch":  # a recorded mismatch is more informative
+            entry.status = "paywalled"
+            entry.reason = "DOI resolved but no legal open-access copy found"
     except httpx.HTTPError as e:
         entry.status, entry.reason = "error", f"network: {type(e).__name__}"
     return entry

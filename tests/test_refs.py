@@ -132,6 +132,147 @@ def test_manifest_roundtrip(tmp_path):
     assert [e.num for e in m2.entries] == ["1", "2", "3", "4"]
 
 
+# ---------------------------------------------------------------------------
+# title sanity check — a retrieved PDF must look like the cited paper
+# ---------------------------------------------------------------------------
+
+LITTLEJOHNS_REFS = """References
+1. Littlejohns TJ, Holliday J, Gibson LM, et al (2020) The UK Biobank imaging
+enhancement of 100,000 participants: rationale, data collection, management
+and future directions. Nat Commun 11:2624. doi:10.1038/s41467-020-15948-9
+"""
+
+WRONG_PAGE = (
+    "Mimicry of emergent traits amplifies coastal restoration success. "
+    "Restoration of salt marshes and seagrass beds often fails because "
+    "establishment thresholds are not met. Here we show that clustered "
+    "planting designs mimicking emergent ecosystem traits improve survival. "
+    "Nat Commun 11:3668. doi:10.1038/s41467-020-17438-4"
+)
+
+RIGHT_PAGE = (
+    "The UK Biobank imaging enhancement of 100,000 participants: rationale, "
+    "data collection, management and future directions. "
+    "Thomas J. Littlejohns, Jo Holliday, Lorna M. Gibson. "
+    "UK Biobank is a population-based cohort of half a million participants. "
+    "Nat Commun 11:2624. doi:10.1038/s41467-020-15948-9"
+)
+
+
+def _real_pdf_bytes(text: str) -> bytes:
+    try:
+        import pymupdf as fitz
+    except ImportError:  # pragma: no cover
+        import fitz
+
+    doc = fitz.open()
+    page = doc.new_page()
+    rect = fitz.Rect(72, 72, 540, 700)
+    page.insert_textbox(rect, text, fontsize=10)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def test_title_check_text_scorer():
+    from papertrace.refs import _title_check_text
+
+    entries = parse_references(LITTLEJOHNS_REFS)
+    raw = entries[0].raw
+    assert _title_check_text(raw, RIGHT_PAGE) is None  # matching paper passes
+    reason = _title_check_text(raw, WRONG_PAGE)
+    assert reason is not None and "title check failed" in reason
+    # unverifiable is not the same as wrong — empty page text passes
+    assert _title_check_text(raw, "") is None
+
+
+def test_wrong_pdf_rejected_by_title_check(tmp_path):
+    from papertrace.models import REF_STATUSES
+
+    assert "mismatch" in REF_STATUSES
+    entries = parse_references(LITTLEJOHNS_REFS)
+    e = entries[0]  # DOI in text (the mistyped one) -> unpaywall serves wrong paper
+    client = _client(
+        {
+            "api.unpaywall.org": httpx.Response(
+                200, json={"best_oa_location": {"url_for_pdf": "https://x/wrong.pdf"}}
+            ),
+            "https://x/wrong.pdf": httpx.Response(200, content=_real_pdf_bytes(WRONG_PAGE)),
+        }
+    )
+    resolve_entry(e, tmp_path, "t@example.org", client)
+    assert e.status == "mismatch"
+    assert "different paper" in e.reason
+    assert not (tmp_path / f"{e.slug}.pdf").exists()  # rejected bytes are not kept
+
+
+def test_matching_pdf_passes_title_check(tmp_path):
+    entries = parse_references(LITTLEJOHNS_REFS)
+    e = entries[0]
+    client = _client(
+        {
+            "api.unpaywall.org": httpx.Response(
+                200, json={"best_oa_location": {"url_for_pdf": "https://x/right.pdf"}}
+            ),
+            "https://x/right.pdf": httpx.Response(200, content=_real_pdf_bytes(RIGHT_PAGE)),
+        }
+    )
+    resolve_entry(e, tmp_path, "t@example.org", client)
+    assert e.status == "retrieved" and e.resolver == "unpaywall"
+
+
+def test_unparseable_pdf_skips_title_check(tmp_path):
+    """Bytes that fitz can't read (or an empty first page) must not be
+    rejected — unverifiable is not the same as wrong."""
+    entries = parse_references(LITTLEJOHNS_REFS)
+    e = entries[0]
+    client = _client(
+        {
+            "api.unpaywall.org": httpx.Response(
+                200, json={"best_oa_location": {"url_for_pdf": "https://x/opaque.pdf"}}
+            ),
+            "https://x/opaque.pdf": httpx.Response(200, content=PDF),
+        }
+    )
+    resolve_entry(e, tmp_path, "t@example.org", client)
+    assert e.status == "retrieved"
+
+
+def test_mismatch_falls_through_to_next_resolver(tmp_path):
+    """A rejected unpaywall copy must not end the chain — Europe PMC may
+    still hold the right paper."""
+    entries = parse_references(LITTLEJOHNS_REFS)
+    e = entries[0]
+    client = _client(
+        {
+            "api.unpaywall.org": httpx.Response(
+                200, json={"best_oa_location": {"url_for_pdf": "https://x/wrong.pdf"}}
+            ),
+            "https://x/wrong.pdf": httpx.Response(200, content=_real_pdf_bytes(WRONG_PAGE)),
+            "europepmc/webservices": httpx.Response(
+                200, json={"resultList": {"result": [{"pmcid": "PMC123"}]}}
+            ),
+            "ptpmcrender": httpx.Response(200, content=_real_pdf_bytes(RIGHT_PAGE)),
+        }
+    )
+    resolve_entry(e, tmp_path, "t@example.org", client)
+    assert e.status == "retrieved" and e.resolver == "europepmc"
+
+
+def test_mismatch_roundtrips_in_manifest(tmp_path):
+    from papertrace.models import RefManifest
+
+    entries = parse_references(LITTLEJOHNS_REFS)
+    entries[0].status = "mismatch"
+    entries[0].reason = "retrieved PDF looks like a different paper"
+    m = RefManifest(manuscript="m.pdf", entries=entries)
+    m.to_json(tmp_path / "refs_manifest.json")
+    data = json.loads((tmp_path / "refs_manifest.json").read_text())
+    assert data["summary"]["by_status"]["mismatch"] == 1
+    m2 = RefManifest.from_json(tmp_path / "refs_manifest.json")
+    assert m2.entries[0].status == "mismatch"
+
+
 def test_bullet_fallback_when_converter_strips_numerals():
     """docling flattens some journals' numbered hanging-indent reference
     lists to plain bullets — the parser must number them by document order
