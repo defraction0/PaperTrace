@@ -47,6 +47,5 @@ refuses `*.pdf` for the same reason. Text excerpts of the failing structure
 
 ## Licensing of contributions
 
-Code is MIT. Prompts, skills and journal packs are CC BY-SA 4.0
-(see `LICENSE-prompts`). By contributing you agree your contribution is
-licensed accordingly.
+Everything is MIT — code, prompts and skills alike (see `LICENSE`). By
+contributing you agree your contribution is licensed accordingly.

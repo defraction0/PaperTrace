@@ -275,5 +275,6 @@ generated: `python scripts/make_logo.py`. Changes are tracked in
 
 ## License
 
-Code is MIT. Prompts, skills and journal packs are CC BY-SA 4.0
-(see `LICENSE-prompts`). Bundled fonts are SIL OFL 1.1.
+MIT — code, prompts and skills alike (see [`LICENSE`](LICENSE)). The bundled
+fonts in `templates/assets/` are third-party, under the SIL Open Font
+License 1.1 (see the `*-OFL.txt` files there).
