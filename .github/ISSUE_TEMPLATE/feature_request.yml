@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose an improvement or a new capability.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the audit situation where PaperTrace currently falls short.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: |
+        What should happen instead? Keep the project's core rule in mind: an
+        unread source never receives a verdict, and degradation is disclosed,
+        never silent.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

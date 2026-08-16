@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "papertrace"
 version = "0.3.0"
-description = "Trace a published paper's claims back to what its cited sources actually say — then scout the literature that came after. Page-level visual evidence for every check."
+description = "Trace a published paper's claims back to what its cited sources actually say — then scout the literature that came after. High-value claims checked with page-level visual evidence; uncovered citation labels reported deterministically."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -40,6 +40,9 @@ papertrace = "papertrace.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/defraction0/PaperTrace"
+Issues = "https://github.com/defraction0/PaperTrace/issues"
+Changelog = "https://github.com/defraction0/PaperTrace/blob/main/CHANGELOG.md"
+Releases = "https://github.com/defraction0/PaperTrace/releases"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/papertrace"]

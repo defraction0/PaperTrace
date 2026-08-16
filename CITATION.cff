@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use PaperTrace in your research, please cite it as below."
+title: "PaperTrace"
+abstract: >-
+  Open-source paper auditor that checks scientific claims against cited
+  PDFs, with page-level evidence and explicit retrieval gaps.
+type: software
+authors:
+  - name: "PaperTrace contributors"
+repository-code: "https://github.com/defraction0/PaperTrace"
+url: "https://github.com/defraction0/PaperTrace"
+license: MIT
+version: 0.3.0
+date-released: 2026-08-16
+keywords:
+  - fact-checking
+  - citations
+  - research-integrity
+  - literature-review
+  - peer-review

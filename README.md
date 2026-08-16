@@ -4,80 +4,78 @@
 
 <h1 align="center">PaperTrace</h1>
 
-<p align="center"><b>Trace a published paper's claims back to what its cited sources actually say —<br>
-then check it against the literature that came after.</b><br>
-An agentic paper-audit tool. Your judgement stays in charge.</p>
+<p align="center"><b>Check what a scientific paper claims against what its cited sources actually say.</b></p>
+
+<p align="center">PaperTrace retrieves legally available cited PDFs, checks the paper's high-value<br>
+citation-backed claims against the actual source pages, and shows the evidence —<br>
+the matched text boxed in red on the real page.</p>
+
+<p align="center"><b>An unread source never receives a verdict.<br>
+A missed citation is reported, not silently skipped.</b></p>
 
 <p align="center">
-  <img src="docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: three checked claims, each shown with the actual page of its cited source and the matched text boxed in red — a Methods claim its own cited source describes differently, a supported claim, and a two-reference claim split into its checked and unretrieved halves">
+  <a href="examples/demo/output/report.md">See a completed report</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#ethics--scope">Ethics &amp; scope</a> ·
+  <a href="https://github.com/defraction0/PaperTrace/releases/latest">v0.3.0 (beta)</a>
+</p>
+
+<p align="center"><sub>Open source · runs locally · Python 3.10+ · <a href="https://claude.com/claude-code">Claude Code</a> currently required · built for published papers</sub></p>
+
+<p align="center">
+  <a href="examples/demo/output/report_terminal.png"><img src="docs/hero.png" width="80%" alt="One checked claim from the demo report: the paper claims an external validation AUC of 0.94, the verdict is CONTRADICTED, and the cited source's real page shows the matched text — an AUC of 0.77 — boxed in red. Click for the full report."></a>
 </p>
 
 ---
 
+> **See the result first — no install needed.** The demo report committed at
+> [`examples/demo/output/report.md`](examples/demo/output/report.md) audits a
+> fictional mini-review with planted citation errors and real, published
+> references: **2 supported · 2 contradicted · 1 not retrieved · 1 uncited
+> assertion** — the planted errors, and exactly them.
+
 Pick a paper that matters to you — the landmark your project builds on, the
 method paper you are about to adopt, your own published work. PaperTrace
-answers three questions about it:
+answers three questions about it: **do its citations say what it claims they
+say?** — **what has been published since?** — **what existed at the time but
+went uncited?**
 
-1. **Do its citations actually say what it claims they say?** Every
-   citation-backed sentence, read against the real pages of its cited source.
-2. **What has been published since?** Articles citing it, plus later keyword
-   neighbours — the literature the paper could not have known.
-3. **What existed at the time but went uncited?** Candidates that were in
-   print by the paper's year and are absent from its reference list.
+## What it does — and what it does not
 
-It works on **published papers by design** — no confidentiality question
-arises, because everything it reads is already public. (Many journals
-prohibit sharing unpublished manuscripts with AI tools; see
-[Ethics & scope](#ethics--scope).)
+**PaperTrace does**
 
-What a run gives you:
+- Retrieve what the paper cites through legal open-access routes only
+  (Crossref → Unpaywall → Europe PMC → arXiv) — and reject a downloaded PDF
+  that doesn't look like the cited paper (title sanity check), rather than
+  judge claims against the wrong text.
+- Check the paper's high-value citation-backed claims against the actual
+  text of the cited pages, with page-level provenance for every verdict.
+- Show the evidence: real page crops with the matched text boxed in red —
+  placed by text search, never by hand. Tables and figures included.
+- Preserve unavailable sources as explicit gaps: a claim whose source
+  couldn't be retrieved is `⊘ not retrieved` — recorded, never guessed.
+- Deterministically report every citation label the checks did not cover,
+  and register assertions carrying no citation at all.
+- Disclose its ingest fidelity: every report is stamped with the converter
+  that read the PDF, and a flat-text fallback says so loudly.
+- Keep the human responsible for interpretation — it prepares evidence and
+  drafts; the conclusions are yours.
 
-- **Retrieves** what the paper cites (Crossref → Unpaywall → Europe PMC →
-  arXiv, open access only) and tells you honestly what it couldn't get.
-- **Reads** every citation-backed claim against the actual text of its cited
-  source — with page-level provenance for every statement.
-- **Shows** the evidence: real page crops with the matched text boxed in red,
-  placed by text search, never by hand.
-- **Reports** the gap: a claim whose source couldn't be retrieved is marked
-  `⊘ not retrieved` — recorded, never guessed. *The gap is an output, not a
-  silence.*
-- **Scouts** the literature around the paper: what appeared after it and what
-  existed but went uncited — as candidates for your judgement, never as
-  accusations. Search-based, so absence from those lists proves nothing.
-- **Audits itself**: a deterministic check compares every citation label in
-  the text against the claims actually extracted ("labels 7, 12 unaddressed"),
-  and assertions carrying **no** citation land in their own register for your
-  judgement.
-- **Discloses its ingest fidelity**: every run is stamped with the converter
-  that read the PDF. The layout backend (docling) preserves tables, figures
-  and lists; the flat fallback (PyMuPDF) says so, loudly, in the report.
+**PaperTrace does not**
 
-## What a real run looks like
+- Bypass paywalls — what it can't get legally, it reports as not obtainable.
+- Treat model memory as evidence — verdicts come only from retrieved or
+  user-provided pages.
+- Check literally every citation-bearing sentence — it selects high-value
+  claims, then tells you exactly which citation labels were not covered.
+- Prove that an uncited article *should* have been cited — scout hits are
+  candidates for your judgement, never accusations.
+- Guarantee an exhaustive literature search — the scout is search-based, and
+  absence from its lists proves nothing.
+- Replace peer review or your research judgement.
 
-The excerpt above is from a real, unscripted audit of a published paper
-(Zhang et al., *Nature Mental Health* 3, 1168–1180, 2025 —
-[doi:10.1038/s44220-025-00501-8](https://doi.org/10.1038/s44220-025-00501-8)):
-86 cited references, of which 22 had legal open-access copies — the other 64
-are recorded as not obtainable, never guessed. 15 high-value claims were read
-against their cited pages: **8 supported, 7 partial, 0 contradicted**. The
-partials are the interesting part — a Methods sentence calling tests
-"well-established" whose own cited source describes them as "brief and
-bespoke, non-standard", and multi-reference claims where the retrieved source
-carries one half of the claim while the unretrieved co-citation is *named* as
-the possible carrier of the other half. Candidates for your judgement, not
-accusations.
-
-## Tables and figures are evidence too
-
-With the standard install, a claim that lives in a table cell or inside a
-figure is found, checked, and shown like any other — cell and in-figure
-numbers boxed by text search on the real page:
-
-<p align="center">
-  <img src="docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
-</p>
-
-## Two ways to run it
+## Quick start
 
 ### Interactive — the `/review` skill (recommended)
 
@@ -135,58 +133,64 @@ Batch checking runs on headless Claude Code (`claude -p`) — it inherits your
 existing login, **no API key to configure**. Every other step (ingest,
 retrieval, scout, crops, reports) is deterministic Python.
 
-## Try the demo
+## What a real run looks like
 
-A fictional mini-review with **planted citation errors** and real, published
-references — the resolver fetches the open-access ones live, then the checker
-catches the plants: an AUC quoted as 0.94 where the cited paper says 0.77, an
+A real, unscripted audit of a published paper (Zhang et al., *Nature Mental
+Health* 3, 1168–1180, 2025 —
+[doi:10.1038/s44220-025-00501-8](https://doi.org/10.1038/s44220-025-00501-8)):
+86 cited references, of which 22 had legal open-access copies — the other 64
+are recorded as not obtainable, never guessed. 15 high-value claims were read
+against their cited pages: **8 supported, 7 partial, 0 contradicted**. The
+partials are the interesting part — a Methods sentence calling tests
+"well-established" whose own cited source describes them as "brief and
+bespoke, non-standard", and multi-reference claims where the retrieved source
+carries one half of the claim while the unretrieved co-citation is *named* as
+the possible carrier of the other half. Candidates for your judgement, not
+accusations.
+
+<p align="center">
+  <a href="docs/real_audit_terminal.png"><img src="docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: three checked claims, each shown with the actual page of its cited source and the matched text boxed in red — a Methods claim its own cited source describes differently, a supported claim, and a two-reference claim split into its checked and unretrieved halves"></a>
+</p>
+
+## Tables and figures are evidence too
+
+With the standard install, a claim that lives in a table cell or inside a
+figure is found, checked, and shown like any other — cell and in-figure
+numbers boxed by text search on the real page:
+
+<p align="center">
+  <img src="docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
+</p>
+
+## Try the demo yourself
+
+The committed report above was produced by this exact sequence — a fictional
+mini-review with **planted citation errors** and real, published references.
+The resolver fetches the open-access sources live, then the checker catches
+the plants: an AUC quoted as 0.94 where the cited paper says 0.77, an
 attendance figure that contradicts the cited flow chart, a headline resting
 on a paywalled source that is honestly reported as unverifiable, and one
 assertive sentence with no citation at all.
 
-The run itself takes about five minutes; the first time adds two one-time
-downloads (chromium ~150 MB, docling's layout models ~500 MB).
-**Prerequisite:** [Claude Code](https://claude.com/claude-code) installed and
-logged in — the claim checker runs on `claude -p`.
-
-Run these four steps **in this order**, each from the repo root, waiting for
-one to finish before the next:
-
-**1 · Install** (skip anything you've already done)
+The run takes about five minutes; the first time adds two one-time downloads
+(chromium ~150 MB, docling's layout models ~500 MB). **Prerequisite:**
+[Claude Code](https://claude.com/claude-code) installed and logged in — the
+claim checker runs on `claude -p`.
 
 ```bash
-pip install -e ".[full]"
-playwright install chromium
+pip install -e ".[full]" && playwright install chromium   # 1 · install
+export PAPERTRACE_EMAIL="you@example.org"                 # 2 · Unpaywall contact
+python examples/demo/make_manuscript.py                   # 3 · build the demo paper
+papertrace run examples/demo/demo_manuscript.pdf -c demo_case   # 4 · audit it
 ```
 
-**2 · Set your contact email** — Unpaywall's API requires one; the run
-refuses to start without it:
-
-```bash
-export PAPERTRACE_EMAIL="you@example.org"   # use your real address
-```
-
-**3 · Build the fictional demo paper** — wait for
-`wrote … demo_manuscript.pdf` before continuing:
-
-```bash
-python examples/demo/make_manuscript.py
-```
-
-**4 · Run the audit** — retrieval ticker, claim checking, evidence crops,
-reports:
-
-```bash
-papertrace run examples/demo/demo_manuscript.pdf -c demo_case
-```
-
-When it finishes, open `demo_case/out/report.md` — or the same report as
-`report_terminal.html` / `report_editor.html`. Expected result:
+When it finishes, open `demo_case/out/report.md`. Expected result:
 **2 supported · 2 contradicted · 1 not retrieved**, one uncited assertion
-flagged, all 4 citation labels covered — the planted errors, and exactly
-them. (The scout step reports the fictional paper as *not identified* in
-Europe PMC — the tool would rather say so than invent neighbours.) Details
-per plant: [`examples/demo/`](examples/demo/).
+flagged, all 4 citation labels covered. (The scout step reports the fictional
+paper as *not identified* in Europe PMC — the tool would rather say so than
+invent neighbours. Verdict wording can vary slightly run to run; the planted
+errors are always caught.) Details per plant:
+[`examples/demo/`](examples/demo/).
 
 ## How it works
 
@@ -194,8 +198,8 @@ per plant: [`examples/demo/`](examples/demo/).
 paper.pdf ─────ingest──▶ clean.md + source_map.json       (page + bbox for every block)
       │
       └─refs──▶ refs_manifest.json                        (per-ref: retrieved / provided /
-                + sources_resolved/*.pdf                    paywalled / no_doi / error + reason)
-      │
+                + sources_resolved/*.pdf                    paywalled / mismatch / no_doi /
+      │                                                     error + reason)
       └─scout─▶ out/scout.json                            (europe pmc: published-since +
                                                             existed-but-uncited candidates)
       │
@@ -216,7 +220,7 @@ audit craft lives in [`prompts/review_core.md`](prompts/review_core.md).
 - **Built for published papers.** Everything PaperTrace reads is already
   public, so no confidentiality question arises in its primary use.
 - **A note on peer review.** The interactive workflow also handles a full
-  reviewer's job — reading the journal's form, checking every claim, drafting
+  reviewer's job — reading the journal's form, checking the claims, drafting
   comments — and remains fully supported. But many journals prohibit sharing
   unpublished manuscripts with AI tools: if you use it on a manuscript under
   review, confirm your journal's policy first and disclose AI assistance
@@ -241,7 +245,10 @@ pytest          # fixtures only — no network, no LLM
 ruff check src tests scripts
 ```
 
-The pixel logo is generated: `python scripts/make_logo.py`.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to report paper-format
+failures — the feedback that improves the tool fastest. The pixel logo is
+generated: `python scripts/make_logo.py`. Changes are tracked in
+[`CHANGELOG.md`](CHANGELOG.md); cite the tool via [`CITATION.cff`](CITATION.cff).
 
 ## Roadmap
 

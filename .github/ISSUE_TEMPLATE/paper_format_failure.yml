@@ -1,0 +1,62 @@
+name: Paper-format failure
+description: A specific paper's layout, reference list, or citation style broke a pipeline step.
+labels: [paper-format]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Papers break parsers in creative ways — this is exactly the feedback
+        that improves PaperTrace. **Do not attach the PDF**; paste the failing
+        text structure instead (a few reference-list lines, a mangled table).
+  - type: input
+    id: paper
+    attributes:
+      label: Paper (DOI or citation)
+      description: Only if it is a published, public paper.
+      placeholder: doi:10.1038/s41467-023-39631-x
+  - type: input
+    id: journal
+    attributes:
+      label: Journal / publisher
+      placeholder: Nature Communications / Springer Nature
+    validations:
+      required: true
+  - type: dropdown
+    id: step
+    attributes:
+      label: Which step misbehaved?
+      options:
+        - ingest (PDF → text/tables)
+        - refs (reference parsing / retrieval)
+        - check (claim extraction / verdicts)
+        - highlight (evidence crops)
+        - report (rendering)
+        - scout (literature search)
+        - not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: citation-style
+    attributes:
+      label: Citation style in the text
+      options:
+        - bracketed numbers [1]
+        - plain numbers 1.
+        - superscripts
+        - author-year (Smith, 2020)
+        - other / not sure
+  - type: textarea
+    id: excerpt
+    attributes:
+      label: Failing structure (text excerpt)
+      description: Paste the reference-list lines or text block that was mishandled.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: What did PaperTrace do with it?
+      placeholder: "refs parsed 0 entries / coverage said 'no numbered citation markers found' / ..."
+    validations:
+      required: true

@@ -1,6 +1,6 @@
 ---
 name: review
-description: Run an agentic audit of a scientific paper — collect the paper, sources and the user's questions, retrieve cited references, fact-check every citation-backed claim against the actual source pages with visual evidence, scout newer and uncited literature, and draft the findings. Use when the user wants to audit a paper's citations, fact-check a paper, review a manuscript, or prepare a reviewer report.
+description: Run an agentic audit of a scientific paper — collect the paper, sources and the user's questions, retrieve cited references, fact-check the high-value citation-backed claims against the actual source pages with visual evidence, deterministically report every citation label the checks did not cover, scout newer and uncited literature, and draft the findings. Use when the user wants to audit a paper's citations, fact-check a paper, review a manuscript, or prepare a reviewer report.
 ---
 
 # PaperTrace — interactive audit

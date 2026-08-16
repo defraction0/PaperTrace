@@ -1,0 +1,47 @@
+name: Bug report
+description: Something crashed, hung, or produced wrong output.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please do not attach manuscripts or source PDFs** — many are
+        paywalled or confidential. Text excerpts are enough.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, what did you get?
+      placeholder: |
+        Command: papertrace run paper.pdf -c case
+        Expected: ...
+        Got: ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Terminal output / traceback
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: PaperTrace version / commit
+      placeholder: v0.3.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS and Python version
+      placeholder: macOS 15 / Python 3.12
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install variant
+      options:
+        - full (docling + png)
+        - docling only
+        - png only
+        - minimal core
+        - not sure
