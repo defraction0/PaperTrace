@@ -10,7 +10,7 @@ authors:
 repository-code: "https://github.com/defraction0/PaperTrace"
 url: "https://github.com/defraction0/PaperTrace"
 license: MIT
-version: 0.3.0
+version: 0.3.1
 date-released: 2026-08-16
 keywords:
   - fact-checking

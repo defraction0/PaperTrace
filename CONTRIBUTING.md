@@ -1,6 +1,7 @@
 # Contributing to PaperTrace
 
-Thanks for considering a contribution — issues, packs and PRs are all welcome.
+Thanks for considering a contribution — issues, paper-format reports and PRs
+are all welcome.
 
 ## Dev setup
 

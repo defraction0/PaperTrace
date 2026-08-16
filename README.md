@@ -21,7 +21,7 @@ A missed citation is reported, not silently skipped.</b></p>
   <a href="https://github.com/defraction0/PaperTrace/releases/latest">v0.3.0 (beta)</a>
 </p>
 
-<p align="center"><sub>Open source · runs locally · Python 3.10+ · <a href="https://claude.com/claude-code">Claude Code</a> currently required · built for published papers</sub></p>
+<p align="center"><sub>Open source · Python 3.10+ · local CLI and case files · claim checking currently uses <a href="https://claude.com/claude-code">Claude Code</a> · built for published papers</sub></p>
 
 <p align="center">
   <a href="examples/demo/output/report_terminal.png"><img src="docs/hero.png" width="80%" alt="One checked claim from the demo report: the paper claims an external validation AUC of 0.94, the verdict is CONTRADICTED, and the cited source's real page shows the matched text — an AUC of 0.77 — boxed in red. Click for the full report."></a>
@@ -225,9 +225,11 @@ audit craft lives in [`prompts/review_core.md`](prompts/review_core.md).
   comments — and remains fully supported. But many journals prohibit sharing
   unpublished manuscripts with AI tools: if you use it on a manuscript under
   review, confirm your journal's policy first and disclose AI assistance
-  where required. Case folders are gitignored by design and the repo's
-  `.gitignore` refuses `*.pdf`/`*.docx` outright — whatever you audit stays
-  local.
+  where required. PDFs and case folders remain outside Git (the repo's
+  `.gitignore` refuses `*.pdf`/`*.docx` outright), but relevant text is
+  processed through Claude Code during checking — so confirm the journal's
+  AI and confidentiality policies before using PaperTrace on an unpublished
+  manuscript.
 - **You are the judge.** The tool prepares evidence and drafts; the
   conclusions are yours. Scout hits are candidates, not accusations — verify
   before you act on any finding.

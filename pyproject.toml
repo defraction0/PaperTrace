@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "papertrace"
-version = "0.3.0"
+version = "0.3.1"
 description = "Trace a published paper's claims back to what its cited sources actually say — then scout the literature that came after. High-value claims checked with page-level visual evidence; uncovered citation labels reported deterministically."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,7 +48,7 @@ Releases = "https://github.com/defraction0/PaperTrace/releases"
 packages = ["src/papertrace"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "templates", "prompts", "journal_packs", "schemas", "README.md", "LICENSE"]
+include = ["src", "templates", "prompts", "schemas", "README.md", "LICENSE"]
 
 [tool.ruff]
 line-length = 100

@@ -4,6 +4,22 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.3.1] — 2026-08-16 (beta)
+
+### Changed
+
+- **Single license: MIT for everything** — code, prompts and skills alike.
+  The CC BY-SA carve-out for prompts (`LICENSE-prompts`) is removed; bundled
+  fonts remain third-party under SIL OFL 1.1. (The v0.3.0 source archive
+  still contains the old dual-license file — this release supersedes it.)
+- Honest "local" wording: the CLI and case files are local, and the README
+  now says plainly that claim checking processes relevant text through
+  Claude Code — confirm journal AI/confidentiality policies before auditing
+  an unpublished manuscript.
+- Removed stale `journal_packs` references (sdist include list,
+  CONTRIBUTING) left over from the packs' removal; an `--exhaustive`
+  checking mode joined the roadmap.
+
 ## [0.3.0] — 2026-08-16 (beta)
 
 First public release under the PaperTrace name.
@@ -53,4 +69,5 @@ Versions 0.1–0.2 were developed under the working name *ManuscriptAgent*
 (manuscript-review focus). 0.3.0 reframes the tool to post-publication paper
 auditing: published papers by design, retrieval gaps as first-class results.
 
+[0.3.1]: https://github.com/defraction0/PaperTrace/releases/tag/v0.3.1
 [0.3.0]: https://github.com/defraction0/PaperTrace/releases/tag/v0.3.0
