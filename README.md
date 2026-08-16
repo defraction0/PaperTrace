@@ -67,8 +67,9 @@ went uncited?**
 - Bypass paywalls — what it can't get legally, it reports as not obtainable.
 - Treat model memory as evidence — verdicts come only from retrieved or
   user-provided pages.
-- Check literally every citation-bearing sentence — it selects high-value
-  claims, then tells you exactly which citation labels were not covered.
+- Check literally every citation-bearing sentence — yet. It selects
+  high-value claims, then tells you exactly which citation labels were not
+  covered (an `--exhaustive` mode is on the roadmap).
 - Prove that an uncited article *should* have been cited — scout hits are
   candidates for your judgement, never accusations.
 - Guarantee an exhaustive literature search — the scout is search-based, and
@@ -256,6 +257,10 @@ generated: `python scripts/make_logo.py`. Changes are tracked in
 - [ ] Superscript citation styles in the coverage audit (bare trailing
       numerals, as in Nature-family journals — the report currently says
       "not audited" instead of silently passing)
+- [ ] `--exhaustive` mode — check every citation-bearing sentence, not just
+      the high-value claims: uncovered labels get a focused extraction pass,
+      and a citation with no checkable assertion ("see [12]") is classified
+      as a pointer rather than forced into a verdict
 - [ ] More scout backends (OpenAlex, Semantic Scholar)
 - [ ] Support for other LLM backends (local and API models alongside
       headless Claude Code)
