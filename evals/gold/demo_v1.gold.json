@@ -1,0 +1,116 @@
+{
+  "set_id": "demo-v1",
+  "kind": "demonstration",
+  "title": "PaperTrace demo manuscript — planted citation defects",
+  "created": "2026-08-26",
+  "labelling": {
+    "labellers": ["maintainer"],
+    "independent": false,
+    "authored_the_prompts": true,
+    "protocol": "The defects were planted at manuscript-authoring time in examples/demo/make_manuscript.py; the gold verdicts restate that plant list and were checked against the cited sources. One labeller, who also wrote the prompts. This set demonstrates that the harness runs end to end. It measures nothing."
+  },
+  "manuscript": {
+    "name": "demo_manuscript.pdf",
+    "builder": "examples/demo/make_manuscript.py",
+    "synthetic": true,
+    "sha256": null
+  },
+  "sources": [
+    { "slug": "pyrros-2023", "label": "1", "doi": "10.1038/s41467-023-39631-x", "expected_ref_status": "retrieved" },
+    { "slug": "sudlow-2015", "label": "2", "doi": "10.1371/journal.pmed.1001779", "expected_ref_status": "retrieved" },
+    { "slug": "littlejohns-2020", "label": "3", "doi": "10.1038/s41467-020-15948-9", "expected_ref_status": "retrieved" },
+    { "slug": "rajpurkar-2023", "label": "4", "doi": "10.1056/NEJMra2301725", "expected_ref_status": "paywalled" }
+  ],
+  "coverage_gold": {
+    "labels_in_text": ["1", "2", "3", "4"]
+  },
+  "uncited_gold": [
+    {
+      "text": "Routine imaging archives are among the largest untapped screening resources in medicine.",
+      "location": "Background ¶1",
+      "must_flag": true
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "demo-v1-c01",
+      "claim_text": "Deep learning applied to frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94.",
+      "claim_location": "Background ¶1",
+      "citation_labels": ["1"],
+      "gold_verdict": "contradicted",
+      "gold_source_slug": "pyrros-2023",
+      "gold_source_page": 4,
+      "decisive_passage": "external validation ROC AUC of 0.77",
+      "gold_anchor_phrases": ["0.77"],
+      "why": "The cited paper's external validation AUC is 0.77 (Emory cohort). 0.94 appears nowhere in it.",
+      "match_keys": { "must_contain_any": ["0.94", "AUC"] },
+      "provenance": "planted",
+      "difficulty": "easy",
+      "ambiguity": "none"
+    },
+    {
+      "case_id": "demo-v1-c02",
+      "claim_text": "Regulators are clearing AI systems for clinical imaging use at an accelerating pace.",
+      "claim_location": "Background ¶1",
+      "citation_labels": ["4"],
+      "gold_verdict": "not_retrieved",
+      "gold_source_slug": null,
+      "gold_source_page": null,
+      "decisive_passage": null,
+      "gold_anchor_phrases": [],
+      "expected_unavailability": "paywalled",
+      "why": "An NEJM review with no legal open-access copy. The correct behaviour is to decline, not to judge.",
+      "match_keys": { "must_contain_any": ["Regulators", "clearing"] },
+      "provenance": "planted",
+      "difficulty": "easy",
+      "ambiguity": "none"
+    },
+    {
+      "case_id": "demo-v1-c03",
+      "claim_text": "The UK Biobank cohort profile describes recruitment of approximately 500,000 adults aged 40-69 years.",
+      "claim_location": "Population imaging ¶1",
+      "citation_labels": ["2"],
+      "gold_verdict": "supported",
+      "gold_source_slug": "sudlow-2015",
+      "gold_source_page": 1,
+      "decisive_passage": "recruited over 500,000 participants aged 40-69 years in 2006-2010",
+      "gold_anchor_phrases": ["500,000", "40-69"],
+      "why": "Cohort size and age range are both stated in the summary; the claim restates them faithfully.",
+      "provenance": "observed",
+      "difficulty": "easy",
+      "ambiguity": "none"
+    },
+    {
+      "case_id": "demo-v1-c04",
+      "claim_text": "The UK Biobank imaging enhancement targets 100,000 participants.",
+      "claim_location": "Population imaging ¶1",
+      "citation_labels": ["3"],
+      "gold_verdict": "supported",
+      "gold_source_slug": "littlejohns-2020",
+      "gold_source_page": 1,
+      "decisive_passage": "aims to re-invite 100,000 participants for multi-modal imaging",
+      "gold_anchor_phrases": ["100,000"],
+      "why": "Stated in the abstract and repeated throughout the paper.",
+      "match_keys": { "must_contain_any": ["100,000"], "must_not_contain": ["attend"] },
+      "provenance": "observed",
+      "difficulty": "easy",
+      "ambiguity": "none"
+    },
+    {
+      "case_id": "demo-v1-c05",
+      "claim_text": "Nearly one in five confirmed participants had not attended an imaging assessment centre.",
+      "claim_location": "Population imaging ¶1",
+      "citation_labels": ["3"],
+      "gold_verdict": "contradicted",
+      "gold_source_slug": "littlejohns-2020",
+      "gold_source_page": 3,
+      "decisive_passage": "97% of confirmed, eligible participants who booked an appointment attended an imaging assessment centre",
+      "gold_anchor_phrases": ["97%"],
+      "why": "3% had not yet attended, not ~20%. The ~29% in the flow chart is pre-screen ineligibility — a different quantity, and the distractor this case exists to test.",
+      "match_keys": { "must_contain_any": ["one in five", "not attended"], "must_not_contain": ["100,000"] },
+      "provenance": "planted",
+      "difficulty": "moderate",
+      "ambiguity": "none"
+    }
+  ]
+}

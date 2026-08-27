@@ -1,0 +1,33 @@
+{
+  "manuscript": "mini.pdf",
+  "checker": "claude -p · test-model",
+  "date": "2026-01-01",
+  "refs": { "total": 3, "available": 2 },
+  "converter": "pymupdf",
+  "claims": [
+    { "id": 1, "claim": "The reported AUC was 0.91.", "location": "Results", "refs": ["1"],
+      "verdict": "supported", "note": "matches",
+      "source_slug": "a-2020", "source_page": 2, "source_block": "block_0002",
+      "anchor_phrases": ["0.91"], "evidence_image": null },
+    { "id": 2, "claim": "The reported AUC was 0.99.", "location": "Results", "refs": ["1"],
+      "verdict": "contradicted", "note": "source says 0.91",
+      "source_slug": "a-2020", "source_page": 2, "source_block": "block_0002",
+      "anchor_phrases": ["0.91"], "evidence_image": null },
+    { "id": 3, "claim": "The method was validated in kids.", "location": "Methods", "refs": ["2"],
+      "verdict": "supported", "note": "wrongly generous",
+      "source_slug": "b-2021", "source_page": 6, "source_block": "block_0011",
+      "anchor_phrases": ["nothing relevant"], "evidence_image": null },
+    { "id": 4, "claim": "Prevalence is rising worldwide.", "location": "Intro", "refs": ["3"],
+      "verdict": "not_retrieved", "note": "cited source not available (paywalled)",
+      "source_slug": null, "source_page": null, "source_block": null,
+      "anchor_phrases": [], "evidence_image": null },
+    { "id": 7, "claim": "A prediction with no gold case whatsoever.", "location": "Discussion",
+      "refs": ["9"], "verdict": "supported", "note": "out of scope",
+      "source_slug": "z-1999", "source_page": 1, "source_block": "block_0001",
+      "anchor_phrases": [], "evidence_image": null }
+  ],
+  "uncited": [
+    { "id": 1, "claim": "An assertion carrying no citation at all.", "location": "Intro" }
+  ],
+  "coverage": { "labels_in_text": ["1", "2", "3", "4"], "covered": ["1", "2", "3"], "missing": ["4"] }
+}

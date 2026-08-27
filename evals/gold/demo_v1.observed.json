@@ -1,0 +1,88 @@
+{
+  "_note": "Transcribed from the committed examples/demo/output/report.md so the harness has a real run to score offline. That report does NOT record anchor_phrases, so they are left empty here rather than reconstructed — the anchor metric therefore reports as undefined for this fixture, which is the honest outcome. 'checker' is the literal string in the committed report; it predates the model-disclosure change, so the judging model for this run is unrecoverable.",
+  "manuscript": "demo_manuscript.pdf",
+  "checker": "Claude",
+  "date": "2026-08-16",
+  "refs": { "total": 4, "available": 3 },
+  "converter": "docling",
+  "counts": { "supported": 2, "partial": 0, "contradicted": 2, "not_retrieved": 1, "unchecked": 0 },
+  "claims": [
+    {
+      "id": 1,
+      "claim": "Deep learning on frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94.",
+      "location": "Background ¶1",
+      "refs": ["1"],
+      "verdict": "contradicted",
+      "note": "The source reports an external validation ROC AUC of 0.77 (Emory cohort), not 0.94; even the internal prospective test AUC was only 0.84.",
+      "source_slug": "pyrros-2023",
+      "source_page": 4,
+      "source_block": "block_0094",
+      "anchor_phrases": [],
+      "evidence_image": "evidence/claim_01_pyrros-2023_p4.png"
+    },
+    {
+      "id": 2,
+      "claim": "Regulators are clearing AI systems for clinical imaging use at an accelerating pace.",
+      "location": "Background ¶1",
+      "refs": ["4"],
+      "verdict": "not_retrieved",
+      "note": "cited source not available (paywalled)",
+      "source_slug": null,
+      "source_page": null,
+      "source_block": null,
+      "anchor_phrases": [],
+      "evidence_image": null
+    },
+    {
+      "id": 3,
+      "claim": "The UK Biobank cohort profile describes recruitment of approximately 500,000 adults aged 40-69 years.",
+      "location": "Population imaging ¶1",
+      "refs": ["2"],
+      "verdict": "supported",
+      "note": "The summary states UK Biobank recruited over 500,000 participants aged 40-69 years in 2006-2010, matching the claim's cohort size and age range.",
+      "source_slug": "sudlow-2015",
+      "source_page": 1,
+      "source_block": "block_0006",
+      "anchor_phrases": [],
+      "evidence_image": "evidence/claim_03_sudlow-2015_p1.png"
+    },
+    {
+      "id": 4,
+      "claim": "The UK Biobank imaging enhancement targets 100,000 participants.",
+      "location": "Population imaging ¶1",
+      "refs": ["3"],
+      "verdict": "supported",
+      "note": "The abstract states the imaging study aims to re-invite 100,000 participants for multi-modal imaging, and this target is repeated throughout the paper.",
+      "source_slug": "littlejohns-2020",
+      "source_page": 1,
+      "source_block": "block_0004",
+      "anchor_phrases": [],
+      "evidence_image": "evidence/claim_04_littlejohns-2020_p1.png"
+    },
+    {
+      "id": 5,
+      "claim": "Nearly one in five confirmed participants had not attended an imaging assessment centre.",
+      "location": "Population imaging ¶1",
+      "refs": ["3"],
+      "verdict": "contradicted",
+      "note": "The source says 97% of confirmed, eligible participants who booked an appointment attended an imaging assessment centre — only 3% had not yet attended, not nearly one in five. The ~29% figure in the flow chart refers to confirmed participants ineligible after pre-screen, not non-attendance.",
+      "source_slug": "littlejohns-2020",
+      "source_page": 3,
+      "source_block": "block_0027",
+      "anchor_phrases": [],
+      "evidence_image": "evidence/claim_05_littlejohns-2020_p3.png"
+    }
+  ],
+  "uncited": [
+    {
+      "id": 1,
+      "claim": "Routine imaging archives are among the largest untapped screening resources in medicine.",
+      "location": "Background ¶1"
+    }
+  ],
+  "coverage": {
+    "labels_in_text": ["1", "2", "3", "4"],
+    "covered": ["1", "2", "3", "4"],
+    "missing": []
+  }
+}

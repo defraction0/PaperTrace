@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "eval_gold",
+  "description": "A hand-labelled evaluation set for the claim checker. Each case is one (manuscript claim, cited source) pair with a human-assigned verdict and the passage that justifies it. A gold set is frozen: editing it means minting a new set_id. `kind: demonstration` means the set was authored by this project's own maintainers and/or built from planted defects — it demonstrates that the harness works, it does not measure accuracy on real manuscripts.",
+  "type": "object",
+  "required": ["set_id", "kind", "manuscript", "sources", "cases"],
+  "properties": {
+    "set_id": { "type": "string", "description": "Frozen identifier including a version, e.g. 'demo-v1'." },
+    "kind": { "enum": ["demonstration", "benchmark"] },
+    "title": { "type": "string" },
+    "created": { "type": "string" },
+    "labelling": {
+      "type": "object",
+      "properties": {
+        "labellers": { "type": "array", "items": { "type": "string" } },
+        "independent": { "type": "boolean" },
+        "authored_the_prompts": {
+          "type": "boolean",
+          "description": "true = conflict of interest; the set cannot support a validity claim."
+        },
+        "adjudicator": { "type": "string" },
+        "protocol": { "type": "string" }
+      }
+    },
+    "manuscript": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "builder": { "type": ["string", "null"], "description": "Script that regenerates it, if synthetic." },
+        "synthetic": { "type": "boolean" },
+        "sha256": { "type": ["string", "null"] }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slug", "label"],
+        "properties": {
+          "slug": { "type": "string" },
+          "label": { "type": "string", "description": "Citation label as printed, e.g. '3'." },
+          "doi": { "type": ["string", "null"] },
+          "expected_ref_status": {
+            "enum": ["retrieved", "provided", "paywalled", "mismatch", "no_doi", "unpublished", "error"],
+            "description": "Environment-dependent. The runner compares this against refs_manifest.json and invalidates affected cases when it has drifted."
+          }
+        }
+      }
+    },
+    "coverage_gold": {
+      "type": "object",
+      "description": "Human-verified citation labels present in the body text. Grades the tool's own regex, which would otherwise grade itself.",
+      "properties": {
+        "labels_in_text": { "type": "array", "items": { "type": "string" } },
+        "occurrences_in_text": {
+          "type": "array",
+          "description": "Optional. Every PLACE the body text makes a citation, so the regex can be graded per occurrence rather than per label. Keyed by (label, page, ordinal): a block id would tie the gold set to whichever ingest backend ran, which this set refuses everywhere else for the same reason. A set that omits this array reports the occurrence metrics as absent — not as zero.",
+          "items": {
+            "type": "object",
+            "required": ["label", "page"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string" },
+              "page": { "type": "integer", "minimum": 1 },
+              "ordinal": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1,
+                "description": "1-based rank among the occurrences sharing this label and page, in reading order."
+              },
+              "sentence": { "type": "string", "description": "The citing sentence, for the human reading the gold file." },
+              "location": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "uncited_gold": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string" },
+          "location": { "type": "string" },
+          "must_flag": { "type": "boolean", "default": true }
+        }
+      }
+    },
+    "cases": { "type": "array", "items": { "$ref": "#/$defs/case" } }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "required": ["case_id", "claim_text", "citation_labels", "gold_verdict"],
+      "properties": {
+        "case_id": { "type": "string" },
+        "claim_text": { "type": "string", "description": "The manuscript sentence, verbatim." },
+        "claim_location": { "type": "string" },
+        "citation_labels": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "gold_verdict": {
+          "enum": ["supported", "partial", "contradicted", "not_retrieved", null],
+          "description": "`unchecked` is deliberately NOT a legal gold verdict: it is a harness error state, never a correct answer. null means the labellers could not agree — the case is kept and excluded from every denominator."
+        },
+        "gold_source_slug": { "type": ["string", "null"] },
+        "gold_source_page": {
+          "type": ["integer", "null"],
+          "description": "1-based page in the cited source PDF. No block id: block ids depend on the ingest backend."
+        },
+        "decisive_passage": { "type": ["string", "null"], "description": "Verbatim text from that page that settles the verdict." },
+        "gold_anchor_phrases": {
+          "type": "array", "items": { "type": "string" },
+          "description": "Each must be a substring of decisive_passage (enforced by test)."
+        },
+        "why": { "type": "string", "description": "One sentence: why this verdict and not the neighbouring one." },
+        "expected_unavailability": {
+          "enum": ["paywalled", "no_doi", "unpublished", "mismatch", "error"],
+          "description": "Required when gold_verdict is 'not_retrieved'."
+        },
+        "match_keys": {
+          "type": "object",
+          "description": "Human-authored disambiguators for the aligner, needed when two claims cite the same label.",
+          "properties": {
+            "must_contain_any": { "type": "array", "items": { "type": "string" } },
+            "must_not_contain": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "pair": {
+          "type": "object",
+          "required": ["pair_id", "role"],
+          "description": "Faithful/altered pairing, encoded inline so every case stays one self-contained row.",
+          "properties": {
+            "pair_id": { "type": "string" },
+            "role": { "enum": ["faithful", "altered"] },
+            "derived_from": { "type": ["string", "null"] },
+            "alteration": {
+              "enum": ["numeric_substitution", "magnitude_inflation", "population_swap",
+                       "direction_flip", "strength_upgrade", "attribution_swap", "none"]
+            },
+            "alteration_detail": { "type": "string" }
+          }
+        },
+        "provenance": { "enum": ["planted", "observed"] },
+        "difficulty": { "enum": ["easy", "moderate", "hard"] },
+        "ambiguity": {
+          "enum": ["none", "scope", "strength", "object", "multi_reference",
+                   "figure_evidence", "unresolved"]
+        },
+        "adjudication": {
+          "type": "object",
+          "properties": {
+            "initial_labels": { "type": "object", "additionalProperties": { "type": "string" } },
+            "initial_agreement": { "type": "boolean" },
+            "resolved_by": { "type": "string" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "gold_verdict": { "const": "not_retrieved" } }, "required": ["gold_verdict"] },
+          "then": {
+            "required": ["expected_unavailability"],
+            "properties": { "decisive_passage": { "const": null }, "gold_source_page": { "const": null } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "gold_verdict": { "enum": ["supported", "partial", "contradicted"] } },
+            "required": ["gold_verdict"]
+          },
+          "then": { "required": ["gold_source_slug", "gold_source_page", "decisive_passage"] }
+        }
+      ]
+    }
+  }
+}

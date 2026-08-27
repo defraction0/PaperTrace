@@ -1,0 +1,238 @@
+{#- occurrence figures carry their denominator inline rather than naming a
+    population, so they need their own formatter. `—` means the run could not
+    answer the question at all, which is not the same as 0%. -#}
+{% macro occ(m) %}{% if m and m.value is not none %}{{ "%.0f%%"|format(m.value * 100) }} ({{ m.numerator }}/{{ m.denominator }}){% else %}—{% endif %}{% endmacro %}
+# Evaluation — {{ r.gold.set_id }}
+
+> **{% if r.gold.kind == "demonstration" %}This is a demonstration, not a benchmark.{% else %}Read the caveats before the numbers.{% endif %}**
+> {{ r.gold.n_scored }} hand-labelled case{{ "" if r.gold.n_scored == 1 else "s" }}{% if r.gold.title %} from *{{ r.gold.title }}*{% endif %}.
+> The figures below describe **this run of this set**. They do not estimate
+> accuracy on real manuscripts, they do not establish clinical or research
+> validity, and they are not comparable across gold sets, ingest backends or
+> prompt versions.
+{% for c in r.caveats %}
+> - {{ c }}
+{% endfor %}
+
+{% if banners %}
+{% for b in banners %}
+⚠️ **{{ b }}**
+{% endfor %}
+{% endif %}
+
+## Provenance
+
+| | |
+|---|---|
+| Model | {% if r.provenance.model_unidentified %}**unidentified** — the run did not record which model judged{% else %}`{{ r.provenance.model_reported }}`{% endif %} |
+| Checker string | `{{ r.provenance.checker_string or "—" }}` |
+| Prompt fingerprint | {% for k, v in (r.provenance.prompt_fingerprint or {}).items() %}{% if k != "scheme" %}`{{ k }}={{ v }}` {% endif %}{% endfor %} |
+| PaperTrace | `{{ r.provenance.papertrace_version or "—" }}`{% if r.provenance.version_mismatch %} ⚠️ disagrees with `__version__`{% endif %} |
+| Commit | `{{ r.provenance.git_commit or "—" }}`{% if r.provenance.git_dirty %} (**dirty tree**){% endif %} |
+| Ingest converter | `{{ r.provenance.converter or "—" }}` |
+| Run | {{ r.provenance.started_at or "—" }} → {{ r.provenance.finished_at or "—" }} |
+
+## Alignment
+
+Gold cases are matched to predictions by citation label and normalized claim
+text; ids are model-assigned and unstable, so exact matching is not possible.
+**Every figure below is conditional on these matches being right.**
+
+| Matched | Exact | Similarity | Discriminator | Unmatched gold | Out-of-scope predictions | Ambiguous |
+|---|---|---|---|---|---|---|
+| {{ r.alignment.matched }} | {{ r.alignment.exact }} | {{ r.alignment.similarity }} | {{ r.alignment.discriminator }} | {{ r.alignment.unmatched_gold|length }} | {{ r.alignment.unmatched_predictions|length }} | {{ r.alignment.ambiguous|length }} |
+{% if r.alignment.fuzzy_fraction > 0.25 %}
+
+⚠️ {{ "%.0f"|format(r.alignment.fuzzy_fraction * 100) }}% of matches were fuzzy — read the per-case table before trusting any rate.
+{% endif %}
+{% if r.alignment.unmatched_gold %}
+
+**Gold cases with no prediction** — counted as misses in `recall_pessimistic`:
+{% for u in r.alignment.unmatched_gold %}
+- `{{ u.case_id }}` — {{ u.reason }}
+{% endfor %}
+{% endif %}
+{% if r.alignment.unmatched_predictions %}
+
+**Predictions with no gold case** (ids {{ r.alignment.unmatched_predictions|join(', ') }}) —
+the gold set is not exhaustive over the manuscript, so **these are not errors**
+and no true precision figure can be computed from this set.
+{% endif %}
+{% if r.alignment.ambiguous %}
+
+**Ambiguous** — add `match_keys.must_contain_any` to these cases:
+{% for a in r.alignment.ambiguous %}
+- `{{ a.case_id }}` — candidates {{ a.candidates|join(', ') }}
+{% endfor %}
+{% endif %}
+
+## Verdicts
+{% if r.gold.n_scored < 30 %}
+
+*Small sample — illustrative only.*
+{% endif %}
+
+| Metric | Value | Population |
+|---|---|---|
+| Judgement accuracy | {{ pct(r.metrics.judgment_accuracy) }} | both sides a judgement |
+| Contradiction detection (binary) | {{ pct(r.metrics.binary_contradiction_detection) }} | same, collapsed to contradicted vs not |
+| Macro F1 | {{ num(r.metrics.macro_f1.value) }} | over {{ r.metrics.macro_f1.classes_included|join(', ') or "—" }}{% if r.metrics.macro_f1.classes_excluded %} (excluded: {{ r.metrics.macro_f1.classes_excluded|join(', ') }}){% endif %} |
+
+| Class | Precision | Recall | Recall (pessimistic) | F1 |
+|---|---|---|---|---|
+{% for cls, v in r.metrics.per_class.items() %}
+| {{ cls }} | {{ pct(v.precision) }} | {{ pct(v.recall) }} | {{ pct(v.recall_pessimistic) }} | {{ num(v.f1) }} |
+{% endfor %}
+
+*Recall (pessimistic) counts every attrition path — unmatched, `not_retrieved`,
+`unchecked` — as a miss; plain recall is conditional on the pair being judged.*
+
+*F1 is undefined only when a class appears in **neither** column of J. A class
+that is present and always wrong scores `0.00` and stays in the macro mean —
+dropping it would delete the run's failures from its own grade.*
+{% if r.metrics.macro_f1.exclusions %}
+
+**Classes left out of macro F1** — the reason is derived from the counts, not
+asserted:
+{% for e in r.metrics.macro_f1.exclusions %}
+- `{{ e.class }}` — **{{ e.kind }}**: {{ e.detail }}
+  (tp {{ e.counts.tp }}, predicted in J {{ e.counts.predicted_in_j }}, gold in J {{ e.counts.gold_in_j }}, gold total {{ e.counts.gold_total }})
+{% endfor %}
+{% endif %}
+
+### Confusion (gold ↓ / predicted →)
+
+| | supported | partial | contradicted |
+|---|---|---|---|
+{% for g, row in r.confusion.items() %}
+| **{{ g }}** | {{ row.supported }} | {{ row.partial }} | {{ row.contradicted }} |
+{% endfor %}
+
+## Retrieval, evidence and coverage
+
+| Metric | Value | What it means |
+|---|---|---|
+| Retrieval outcome accuracy | {{ pct(r.metrics.retrieval.retrieval_outcome_accuracy) }} | declined exactly when it should have |
+| False gap rate | {{ pct(r.metrics.retrieval.false_gap_rate) }} | claimed a gap that shouldn't exist |
+| **Missed gap rate** | {{ pct(r.metrics.retrieval.missed_gap_rate) }} | **verdict issued against an unavailable source** |
+| Source page accuracy | {{ pct(r.metrics.pages.source_page_accuracy) }} | exact page of the decisive passage |
+| Source page accuracy ±1 | {{ pct(r.metrics.pages.source_page_accuracy_pm1) }} | tolerant of a page-break straddle |
+| Page missing rate | {{ pct(r.metrics.pages.page_missing_rate) }} | answered with no page at all |
+| Anchor in gold passage | {{ pct(r.metrics.anchors.anchor_in_gold_passage) }} | quoted text that actually settles it |
+| Anchor empty rate | {{ pct(r.metrics.anchors.anchor_empty_rate) }} | returned no anchor phrase |
+| Label detection accuracy | {{ pct(r.metrics.coverage.label_detection_accuracy) }} | grades the citation **regex** against a human |
+| Claim label coverage | {{ pct(r.metrics.coverage.claim_label_coverage) }} | grades the **extractor**, per label |
+| Claim occurrence coverage | {{ occ(r.metrics.coverage.claim_occurrence_coverage) }} | grades the **extractor**, per place a citation is made |
+| Occurrence uncertain rate | {{ occ(r.metrics.coverage.occurrence_uncertain_rate) }} | a claim reached the label; **which** place is unknown |
+| Occurrence detection accuracy | {{ occ(r.metrics.coverage.occurrence_detection_accuracy) }} | grades the **regex** per occurrence, keyed (label, page, ordinal) |
+| Uncited recall | {{ pct(r.metrics.coverage.uncited_recall) }} | planted uncited assertions found |
+| Unchecked rate | {{ pct(r.metrics.errors.unchecked_rate) }} | harness failures, not wrong answers |
+| Not-retrieved rate | {{ pct(r.metrics.errors.not_retrieved_rate) }} | sources never obtained |
+{% if r.metrics.pairs.n_pairs %}
+| Pair discrimination | {{ pct(r.metrics.pairs.pair_discrimination) }} | both members of a faithful/altered pair correct |
+| Pair collapse rate | {{ pct(r.metrics.pairs.pair_collapse_rate) }} | **same verdict for both** — pattern-matching, not reading |
+{% endif %}
+
+*`—` means undefined (denominator 0), never zero.*
+{% if not r.metrics.coverage.claim_occurrence_coverage %}
+
+*The occurrence figures are **absent**, not zero: this run's coverage audit is
+label-level (`coverage/1`), so it records no citation occurrences to count.*
+{% elif not r.metrics.coverage.occurrence_detection_accuracy %}
+
+*Occurrence detection accuracy is **absent**, not zero: this gold set records no
+`coverage_gold.occurrences_in_text`, or the run's occurrences carry no page
+(the `clean.md` fallback), so the (label, page, ordinal) comparison cannot be
+made. Nobody asked the question, so the tool is not graded on it.*
+{% endif %}
+{% if r.metrics.pairs.incomplete %}
+
+**Incomplete pair groups — not scored.** A half-pair is not a pair: scoring a
+one-member group would report `pair_discrimination` 1/1 = 100% for a
+comparison that never happened.
+{% for g in r.metrics.pairs.incomplete %}
+- `{{ g.pair_id }}` ({{ g.members|join(', ') }}) — {{ g.why }}
+{% endfor %}
+{% endif %}
+{% if not r.metrics.pairs.n_pairs %}
+
+> **No paired cases in this set.** Faithful/altered pairs are the only design
+> that separates "read the source" from "guessed a plausible verdict". This
+> set has none — see the open item in `evals/DESIGN.md`.
+{% endif %}
+
+{% if r.eligibility.excluded %}
+## Excluded cases
+
+Kept in the record, not scored. Deleting them would quietly make the set
+easier, which is the move this harness exists to catch.
+
+| Case | Reason | Why |
+|---|---|---|
+{% for e in r.eligibility.excluded %}
+| `{{ e.case_id }}` | `{{ e.reason }}` | {{ e.detail }} |
+{% endfor %}
+
+These cases left every family that consumes the gold verdict or the gold
+evidence — judgement, retrieval, pages, anchors, pairs. They are **still
+counted in**:
+{% for w in r.eligibility.still_counted_in %}
+- {{ w }}
+{% endfor %}
+
+Those percentages are printed above, beside the ones that shrank. Read the
+denominators, not the headline.
+{% endif %}
+{% if r.eligibility.refs_verification %}
+
+## Source availability — not verified
+
+The freeze check did not complete for these sources, so **unchanged is not
+being claimed**. They are still scored: unverifiable is not the same as wrong.
+
+| Source | Frozen as | Why not verified |
+|---|---|---|
+{% for d in r.eligibility.refs_verification %}
+| `[{{ d.label }}]` {{ d.slug or "—" }} | `{{ d.expected }}` | {{ d.why }} |
+{% endfor %}
+{% endif %}
+
+## Populations
+
+Every denominator above, named. Two rates with the same `n` drawn from
+different sets are indistinguishable otherwise — which is exactly how a
+denominator drifts away from the population it claims.
+
+| Population | n | What it is |
+|---|---|---|
+{% for name, pop in r.populations.items() %}
+| `{{ name }}` | {{ pop.n }} | {{ pop.definition }} |
+{% endfor %}
+
+## Per case
+
+| Case | Gold | Predicted | | Match | Page | Claim |
+|---|---|---|---|---|---|---|
+{% for c in r.per_case %}
+| `{{ c.case_id }}`{% if not c.eligible %} *(excluded)*{% endif %} | {{ c.gold or "—" }} | {{ c.predicted or "**no prediction**" }} | {% if not c.eligible %}—{% else %}{{ "✓" if c.correct else "✗" }}{% endif %} | {{ c.match_stage }}{% if c.match_score %} {{ c.match_score }}{% endif %} | {{ c.gold_page or "—" }}→{{ c.pred_page or "—" }} | {{ c.claim[:60] }}{% if c.claim|length > 60 %}…{% endif %} |
+{% endfor %}
+{% set wrong = r.per_case|selectattr("eligible")|rejectattr("correct")|selectattr("predicted")|list %}
+{% if wrong %}
+
+## Disagreements
+
+Adjudicate these yourself — the tally is not the point.
+{% for c in wrong %}
+
+**`{{ c.case_id }}`** — gold `{{ c.gold }}`, predicted `{{ c.predicted }}`
+> {{ c.claim }}
+- *Gold rationale:* {{ c.why or "—" }}
+- *Model note:* {{ c.pred_note or "—" }}
+{% endfor %}
+{% endif %}
+
+---
+
+*Generated by the PaperTrace evaluation harness. A demonstration set shows the
+harness works; it does not establish accuracy, and no clinical or research
+validity follows from it.*
