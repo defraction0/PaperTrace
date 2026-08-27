@@ -9,8 +9,19 @@ are all welcome.
 git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
 pip install -e ".[dev,png]"
 pytest          # fixtures only — no network, no LLM, CI-safe
-ruff check src tests scripts
+ruff check src tests scripts evals
 ```
+
+Or with uv, without managing a venv yourself (verified working):
+
+```bash
+uv run --with-editable . papertrace --help
+```
+
+`pytest` covers `tests/` and `evals/tests/`. The evaluation *harness* is
+tested like any other code; running an actual evaluation against a live
+model is a separate script that no test and no CI job invokes — see
+[`evals/README.md`](evals/README.md).
 
 Tests must stay offline: resolver tests run on `httpx.MockTransport`, PDFs
 are generated in-test with pymupdf. If your change needs a model call, put
@@ -34,6 +45,25 @@ publisher, citation style, and which pipeline step misbehaved.
 paywalled and some manuscripts are confidential; the repo's `.gitignore`
 refuses `*.pdf` for the same reason. Text excerpts of the failing structure
 (a few reference-list lines, a mangled table) are enough.
+
+## What to contribute
+
+Ranked by how much they help, with where the code lives:
+
+| Contribution | Where | What a good one looks like |
+|---|---|---|
+| **PDF-format regression fixture** | the `tests/test_pipeline.py` pattern — PDFs built in-test with pymupdf, no binaries committed | a real journal layout that breaks a step, reproduced in ≤30 lines |
+| **Reference-resolution fixture** | `tests/test_refs.py`, on `httpx.MockTransport` | an actual resolver response shape that currently mis-parses |
+| **Gold evaluation case** | `evals/gold/` against [`schemas/eval_gold.schema.json`](schemas/eval_gold.schema.json) | a claim, its source, the decisive passage, page and anchor phrases — see [`evals/DESIGN.md`](evals/DESIGN.md) |
+| **New citation style** | `_LABEL_GROUP` in `src/papertrace/check.py` + a case in `tests/test_coverage.py` | the style *plus* the test proving it is audited rather than silently passed — **and** an occurrence case: two sentences citing the same label, proving the second is reported |
+| **A new report disclosure** | `src/papertrace/disclosures.py`, then all three templates | the rule in one place with its own `token`, and `tests/test_disclosure_parity.py` asserting that token reaches every format. Adding a disclosure straight to a template is the drift this codebase already suffered once |
+| **Another model backend** | the `_ask` seam in `src/papertrace/check.py` | a backend behind the same seam, with the model recorded in the report |
+
+Gold cases are the highest-leverage thing right now: the evaluation set is the
+piece this project most obviously lacks, and it needs labellers who did **not**
+write the prompts. Two rules from the design doc are worth restating —
+`unchecked` is never a legal gold verdict, and a case labellers cannot agree on
+is kept with `gold_verdict: null`, not deleted.
 
 ## Code contributions
 
