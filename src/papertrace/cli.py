@@ -15,7 +15,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from .models import RefManifest, RunResults
+from .models import RefManifest, RunResults, manuscript_fingerprint
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich", no_args_is_help=True)
 console = Console()
@@ -39,26 +39,46 @@ STATUS_MARK = {
 }
 
 
-def _case_conflict(case: Path, manuscript_name: str) -> str | None:
+def _case_conflict(case: Path, manuscript: Path) -> tuple[str | None, str]:
     """A case folder belongs to one paper. Returns the previous paper's name
-    when `case` already holds an audit of a different one, else None."""
+    when `case` already holds an audit of a different one (else None), and what
+    that answer rests on: "content" (hashes compared), "name" (a pre-hash
+    manifest, so only the file name could be compared) or "empty" (no manifest).
+    """
     marker = case / "refs_manifest.json"
     if not marker.exists():
-        return None
-    previous = RefManifest.from_json(marker).manuscript
-    return previous if previous != manuscript_name else None
+        return None, "empty"
+    previous = RefManifest.from_json(marker)
+    if previous.manuscript_sha256:
+        same = previous.manuscript_sha256 == manuscript_fingerprint(manuscript)
+        return (None if same else previous.manuscript), "content"
+    # a legacy manifest genuinely holds no better information than the name
+    same = previous.manuscript == manuscript.name
+    return (None if same else previous.manuscript), "name"
 
 
 def _guard_case(case: Path, manuscript: Path) -> None:
-    if previous := _case_conflict(case, manuscript.name):
+    previous, basis = _case_conflict(case, manuscript)
+    if previous:
+        # without this clause the message is baffling: it names the same file
+        # name back at you as if it were a different paper
+        collision = " — same file name, different file" if previous == manuscript.name else ""
         console.print(
             f"[red]case folder [bold]{case}[/bold] already holds an audit of "
-            f"[bold]{previous}[/bold].[/red]\n"
+            f"[bold]{previous}[/bold]{collision}.[/red]\n"
             f"One case per paper — give this one its own, e.g. "
             f"[cyan]-c {manuscript.stem}[/cyan], or delete [cyan]{case}/[/cyan] "
             f"to reuse the name. (Re-running the [i]same[/i] paper in its case is fine.)"
         )
         raise typer.Exit(2)
+    if basis == "name":
+        # warn, never hard-fail: refusing a legacy case would be equally
+        # uninformed and less usable, and it self-heals on the next `refs`
+        console.print(
+            "[yellow]⚠ this case folder predates content hashing, so its identity is "
+            "unverified — only the file name was compared. A different file with the "
+            "same name would not be caught. Re-running `papertrace refs` fixes it.[/yellow]"
+        )
 
 
 def _email(cli_value: str | None) -> str:
@@ -110,7 +130,9 @@ def ingest(
     if smap.converter == "pymupdf":
         console.print(
             "  [yellow]⚠ flat-text ingest — tables are linearized and figures invisible."
-            " Install the layout backend: pip install 'papertrace[docling]'[/yellow]"
+            # rich eats [docling] as a style tag - escaping it is what makes the
+            # instruction say 'papertrace[docling]' instead of 'papertrace'
+            r" Install the layout backend: pip install 'papertrace\[docling]'" "[/yellow]"
         )
 
 
@@ -170,7 +192,11 @@ def refs(
 
     resolve_all(entries, dest, _email(email), provided_dir=provided, progress=tick)
 
-    manifest = RefManifest(manuscript=manuscript.name, entries=entries)
+    manifest = RefManifest(
+        manuscript=manuscript.name,
+        entries=entries,
+        manuscript_sha256=manuscript_fingerprint(manuscript),  # identity, not the name
+    )
     case.mkdir(parents=True, exist_ok=True)
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)
@@ -234,7 +260,7 @@ def check(
     model: str = typer.Option(None, "--model", help="Model override for claude -p"),
 ) -> None:
     """Extract citation-backed claims and judge each against its cited source (claude -p)."""
-    from .check import check_claims, claude_available, extract_claims
+    from .check import Truncations, check_claims, claude_available, extract_claims
 
     if not claude_available():
         console.print(
@@ -245,8 +271,9 @@ def check(
         raise typer.Exit(2)
 
     manifest = RefManifest.from_json(case / "refs_manifest.json")
+    truncations = Truncations()  # one accumulator per run — never module state
     with console.status("extracting claims (cited + uncited)…"):
-        claims, uncited = extract_claims(case, model)
+        claims, uncited = extract_claims(case, model, truncations=truncations)
     console.print(
         f"[green]✓[/green] {len(claims)} citation-backed claims · "
         f"{len(uncited)} uncited assertions flagged"
@@ -268,7 +295,10 @@ def check(
         )
 
     with console.status("reading claims against their cited pages…"):
-        check_claims(claims, manifest, case, model, progress=tick, on_error=fail)
+        check_claims(
+            claims, manifest, case, model, progress=tick, on_error=fail,
+            truncations=truncations,
+        )
 
     from .check import coverage_audit
     from .models import SourceMap
@@ -289,6 +319,7 @@ def check(
         claims=claims,
         uncited=uncited,
         coverage=coverage,
+        truncated=truncations.report(),
     )
     (case / "out").mkdir(parents=True, exist_ok=True)
     results.to_json(case / "out" / "results.json")
@@ -300,19 +331,23 @@ def check(
         f"[yellow]● {c['partial']} partial[/yellow]   [red]● {c['contradicted']} contradicted[/red]   "
         f"[dim]○ {c['not_retrieved']} not retrieved[/dim]{unchecked}"
     )
-    n_text, n_missing = len(coverage["labels_in_text"]), len(coverage["missing"])
-    if n_missing:
+    from .disclosures import coverage_headline
+
+    occ = coverage.get("occurrences") or {}
+    headline = coverage_headline(coverage)
+    # the uncertain count travels with the ratio, here as in the report: a run
+    # whose attributions were mostly refused has a nearly meaningless ratio
+    unresolved = (occ.get("uncovered", 0) + occ.get("uncertain", 0)) if occ \
+        else len(coverage["missing"])
+    if headline:
         console.print(
-            f"[yellow]coverage: {n_text - n_missing}/{n_text} citation labels covered — "
-            f"missing: {', '.join(coverage['missing'])}[/yellow]"
+            f"[{'yellow' if unresolved else 'green'}]coverage: {headline}"
+            f"[/{'yellow' if unresolved else 'green'}]"
         )
-    elif n_text:
-        console.print(f"[green]coverage: all {n_text} citation labels covered[/green]")
     elif claims:
         console.print(
-            "[yellow]coverage: no numbered citation markers found in the text — "
-            "bare-superscript citation styles are not yet recognized; "
-            "coverage not audited[/yellow]"
+            "[yellow]coverage: no bracketed numeric citation markers found — only "
+            "[12]/[7,8]/[9-11] styles are audited; coverage not audited[/yellow]"
         )
     if uncited:
         console.print(f"[cyan]{len(uncited)} uncited assertions[/cyan] — see report section")
@@ -324,7 +359,7 @@ def highlight(
     claim: int = typer.Option(None, "--claim", help="Only this claim id"),
 ) -> None:
     """Produce red-box evidence crops for every claim with a page anchor."""
-    from .highlight import crop_for_claim
+    from .highlight import crop_for_claim, source_page_count
 
     results = RunResults.from_json(case / "out" / "results.json")
     out_dir = case / "out" / "evidence"
@@ -347,7 +382,23 @@ def highlight(
         if img:
             c.evidence_image = str(Path(img).relative_to(case / "out"))
             done += 1
-            console.print(f"  [green]✓[/green] claim {c.id}: {c.evidence_image}")
+            if c.anchor_located:
+                console.print(f"  [green]✓[/green] claim {c.id}: {c.evidence_image}")
+            else:
+                console.print(
+                    f"  [yellow]○ claim {c.id}: {c.evidence_image} — no anchor phrase "
+                    f"found on the page; crop written unboxed[/yellow]"
+                )
+        elif c.source_slug and c.source_page:
+            # a page the source does not have is not the same as a page that
+            # held nothing — say which it was rather than just writing no crop
+            pdf = case / "sources_resolved" / f"{c.source_slug}.pdf"
+            if pdf.exists() and c.source_page > (n := source_page_count(pdf)):
+                console.print(
+                    f"  [yellow]○ claim {c.id}: the check named page {c.source_page}, "
+                    f"but {c.source_slug} has {n} — no page to read, so no crop "
+                    f"and no anchor claim[/yellow]"
+                )
     results.to_json(case / "out" / "results.json")
     console.print(f"[bold]{done}[/bold] evidence crops written")
 

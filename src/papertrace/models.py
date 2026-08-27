@@ -8,6 +8,7 @@ JSON Schemas for them live in `schemas/`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -91,6 +92,19 @@ class SourceMap:
 REF_STATUSES = ("retrieved", "provided", "paywalled", "mismatch", "no_doi", "unpublished", "error")
 
 
+def manuscript_fingerprint(path: Path) -> str:
+    """Streamed sha256 of a manuscript's bytes — a case folder's real identity.
+
+    A file name is not an identity: two different papers are routinely both
+    called `manuscript.pdf`, and one paper is routinely renamed between drafts.
+    """
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 @dataclass
 class RefEntry:
     num: str  # citation label as used in the manuscript, e.g. "14"
@@ -109,6 +123,10 @@ class RefEntry:
 class RefManifest:
     manuscript: str
     entries: list[RefEntry] = field(default_factory=list)
+    # content identity of the audited manuscript. Absent on manifests written
+    # before content hashing — those fall back to comparing the file name, and
+    # say so; they self-heal on the next `papertrace refs`.
+    manuscript_sha256: str | None = None
 
     @property
     def retrieved(self) -> list[RefEntry]:
@@ -121,6 +139,7 @@ class RefManifest:
     def to_json(self, path: Path) -> None:
         payload = {
             "manuscript": self.manuscript,
+            "manuscript_sha256": self.manuscript_sha256,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -138,6 +157,7 @@ class RefManifest:
         return cls(
             manuscript=data["manuscript"],
             entries=[RefEntry(**e) for e in data["entries"]],
+            manuscript_sha256=data.get("manuscript_sha256"),
         )
 
 
@@ -145,7 +165,13 @@ class RefManifest:
 # claim results (check output)
 # ---------------------------------------------------------------------------
 
-VERDICTS = ("supported", "partial", "contradicted", "not_retrieved", "unchecked")
+# a model may answer these — they are judgements about a source it read
+JUDGMENT_VERDICTS = ("supported", "partial", "contradicted")
+# only pipeline code assigns these — a model returning one is out of contract
+PIPELINE_STATES = ("not_retrieved", "unchecked")
+# concatenated in this order to reproduce the historical tuple exactly:
+# counts() key order, the schema enum and every rendered report stay identical
+VERDICTS = JUDGMENT_VERDICTS + PIPELINE_STATES
 
 VERDICT_LABEL = {
     "supported": "✅ SUPPORTED",
@@ -172,6 +198,13 @@ class ClaimResult:
     source_block: str | None = None  # block id in the source's source_map
     anchor_phrases: list[str] = field(default_factory=list)  # phrases to box in red
     evidence_image: str | None = None  # relative path, filled by highlight step
+    # batch judges a multi-ref claim against the first AVAILABLE source only;
+    # the co-cited sources listed here were never opened and must not be read
+    # as having backed the verdict
+    unjudged_refs: list[str] = field(default_factory=list)
+    # False when no anchor phrase was found on the page: the crop is still
+    # written for context, but it carries no red box and must not claim one
+    anchor_located: bool | None = None
 
     @property
     def label(self) -> str:
@@ -201,6 +234,9 @@ class RunResults:
     # deterministic citation-label audit: which [N] labels appear in the text,
     # and which of them no extracted claim covers
     coverage: dict = field(default_factory=dict)
+    # inputs the character limits cut short — text past the cut was never read,
+    # so the run cannot claim to have checked it
+    truncated: dict = field(default_factory=dict)
 
     def counts(self) -> dict[str, int]:
         return {v: sum(1 for c in self.claims if c.verdict == v) for v in VERDICTS}
@@ -210,7 +246,7 @@ class RunResults:
         itself failed (`unchecked`). Both are gaps to report, never silence."""
         out: dict[str, list[ClaimResult]] = {}
         for c in self.claims:
-            if c.verdict in ("not_retrieved", "unchecked"):
+            if c.verdict in PIPELINE_STATES:
                 key = c.location.split("§")[0].split("¶")[0].strip() or "Other"
                 out.setdefault(key, []).append(c)
         return out
@@ -226,6 +262,7 @@ class RunResults:
             "claims": [asdict(c) for c in self.claims],
             "uncited": [asdict(u) for u in self.uncited],
             "coverage": self.coverage,
+            "truncated": self.truncated,
         }
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
 
@@ -242,6 +279,7 @@ class RunResults:
             claims=[ClaimResult(**c) for c in data["claims"]],
             uncited=[UncitedClaim(**u) for u in data.get("uncited", [])],
             coverage=data.get("coverage", {}),
+            truncated=data.get("truncated", {}),
         )
 
 

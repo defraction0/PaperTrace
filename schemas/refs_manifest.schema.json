@@ -10,6 +10,13 @@
     "manuscript": {
       "type": "string"
     },
+    "manuscript_sha256": {
+      "description": "sha256 of the audited manuscript's bytes — the case folder's content identity. Absent on manifests written before content hashing, which fall back to comparing the file name.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "summary": {
       "type": "object"
     },
