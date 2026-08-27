@@ -54,6 +54,7 @@
   .src li{position:relative;padding-left:16px;}
   .src li::before{content:"-";position:absolute;left:2px;color:var(--dim);}
   .src b{color:#cfcfcf;} .src code{font-family:"Mono",monospace;font-size:11.5px;color:var(--dim);}
+  .cov{font-size:12.5px;color:var(--muted);margin:-8px 0 10px 0;padding-left:18px;line-height:1.55;max-width:850px;}
   figure{margin:2px 0 0;}
   .crop{display:block;max-width:600px;max-height:230px;border:1px solid var(--edge);border-radius:3px;background:#fff;}
   figcaption{font-family:"Mono",monospace;font-size:11px;color:var(--dim);margin-top:5px;}
@@ -98,22 +99,32 @@
       <b class="n">⊘ Not retrieved:</b> <span class="cnt n">{{ counts.not_retrieved }}</span>{% if counts.unchecked %}<span class="sep">|</span>
       <b class="r">⚠ Unchecked:</b> <span class="cnt r">{{ counts.unchecked }}</span>{% endif %}
     </p>
-{% if r.coverage %}
+{% for d in disclosures if d.key in ("coverage", "coverage_caveat") %}
     <p class="meta" style="margin-top:-14px">
-{% if r.coverage.missing %}
-      Citation coverage: <span style="color:var(--amber)">{{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} labels — unaddressed: [{{ r.coverage.missing|join('], [') }}]</span>
-{% elif r.coverage.labels_in_text %}
-      Citation coverage: <span style="color:var(--green)">all {{ r.coverage.labels_in_text|length }} labels covered</span>
-{% else %}
-      Citation coverage: <span style="color:var(--amber)">no numbered citation markers found — bare-superscript styles not yet recognized; coverage not audited</span>
-{% endif %}
-      {% if r.converter == "pymupdf" %} &nbsp;·&nbsp; <span style="color:var(--amber)">⚠ ingest: flat text — tables linearized (install [docling])</span>{% endif %}
+      Citation coverage: <span style="color:var(--{{ 'amber' if d.level == 'warn' else 'green' }})">{{ d.text }}</span>
     </p>
+{% if d.rows %}
+    <ul class="cov">
+{% for row in d.rows[:25] %}
+      <li>{{ row }}</li>
+{% endfor %}
+{% if d.rows|length > 25 %}
+      <li>… {{ d.rows|length - 25 }} more in results.json</li>
 {% endif %}
+    </ul>
+{% endif %}
+{% endfor %}
+{# siblings, not nested: a run with truncation and no coverage disclosed nothing #}
+{% for d in disclosures if d.key not in ("coverage", "coverage_caveat") %}
+    <p class="meta" style="margin-top:-14px"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
+{% endfor %}
 
 {% for c in checked %}
     <h2><span class="hx">##</span> Claim {{ c.id }}: <span class="q">“{{ c.claim }}”</span></h2>
     <div class="status {{ c.verdict }}"><span class="lbl">Status:</span> <span class="val">{{ c.label }}</span></div>
+{% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
+    <p class="cap"><span style="color:var(--amber)">⚠ {{ d.text }}</span></p>
+{% endfor %}
 {% if c.source_slug %}
     <h3><span class="hx">###</span> Evidence from: <span class="slug">{{ c.source_slug }}</span></h3>
     <ul class="src"><li><b>Source:</b> Page {{ c.source_page }}, {{ c.location }}{% if c.source_block %} <code>({{ c.source_block }})</code>{% endif %}</li></ul>
@@ -121,7 +132,7 @@
 {% if c.evidence_image %}
     <figure>
       <img class="crop" src="{{ c.evidence_image }}">
-      <figcaption>![evidence] {{ c.source_slug }} · page {{ c.source_page }} · red box = matched text</figcaption>
+      <figcaption>![evidence] {{ c.source_slug }} · page {{ c.source_page }} · {% for d in claim_disclosures(c) if d.key == "anchor" %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}</figcaption>
     </figure>
 {% endif %}
 {% if c.note %}
@@ -169,7 +180,8 @@
 {% endif %}
 
     <div class="foot"><b>PaperTrace</b> · evidence images are pages of the cited sources ·
-      red box = matched text · the judgement is yours — verify before you rely on it.</div>
+      each crop states whether its anchor phrase was located on the page ·
+      the judgement is yours — verify before you rely on it.</div>
   </div>
 
   <div class="statusbar">

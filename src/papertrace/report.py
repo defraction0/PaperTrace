@@ -9,13 +9,17 @@ Optional PNGs of the two HTML looks via render.html_to_png.
 from __future__ import annotations
 
 import shutil
+from importlib import resources
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from .models import RefManifest, RunResults, ScoutResults
+from . import __version__
+from .disclosures import anchor_state, claim_disclosures, run_disclosures
+from .models import JUDGMENT_VERDICTS, RefManifest, RunResults, ScoutResults
 
-TEMPLATES = Path(__file__).resolve().parent.parent.parent / "templates"
+# package data, not a repo-relative path: an installed wheel has no repo
+TEMPLATES = Path(str(resources.files("papertrace") / "templates"))
 
 
 def _env() -> Environment:
@@ -38,7 +42,9 @@ def write_reports(
     out_dir.mkdir(parents=True, exist_ok=True)
     env = _env()
 
-    checked = [c for c in results.claims if c.verdict not in ("not_retrieved", "unchecked")]
+    # `in JUDGMENT_VERDICTS`, not `not in PIPELINE_STATES`: a junk verdict is
+    # not a judgement, and must never be counted as checked
+    checked = [c for c in results.claims if c.verdict in JUDGMENT_VERDICTS]
     gaps = results.gaps_by_location()
     ctx = {
         "r": results,
@@ -49,6 +55,12 @@ def write_reports(
         "gap_total": sum(len(v) for v in gaps.values()),
         "manifest": manifest,
         "scout": scout,
+        "version": __version__,
+        # disclosures are decided here, once, and only styled by the templates —
+        # a format cannot silently drop one without failing the parity test
+        "disclosures": run_disclosures(results),
+        "claim_disclosures": claim_disclosures,
+        "anchor_state": anchor_state,
     }
 
     written: list[Path] = []

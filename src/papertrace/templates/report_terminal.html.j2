@@ -72,7 +72,12 @@
     <div class="log"><span class="step">▸ ingest</span><span class="k">{{ r.manuscript }} → </span><span class="cyan">clean.md</span><span class="k"> · </span><span class="cyan">source_map.json</span><span class="k"> </span><span class="green">✓</span></div>
     <div class="log"><span class="step">▸ resolve</span><span class="k">{{ r.refs_total }} cited refs · crossref → unpaywall → europepmc → arxiv</span></div>
     <div class="log"><span class="step"></span><span class="green">✓</span> available <b>{{ r.refs_available }}/{{ r.refs_total }}</b>{% if r.refs_total > r.refs_available %}<span class="k"> · </span><span class="amber">{{ r.refs_total - r.refs_available }} not obtainable</span><span class="dim"> (paywall / no doi / unpublished)</span>{% endif %}</div>
-    <div class="log"><span class="step">▸ ingest</span><span class="k">converter: </span><span class="cyan">{{ r.converter }}</span>{% if r.converter == "pymupdf" %}<span class="k"> · </span><span class="amber">⚠ flat text — tables linearized (install [docling])</span>{% endif %}</div>
+{% for d in disclosures if d.key == "converter" %}
+    <div class="log"><span class="step">▸ ingest</span><span class="cyan">{{ d.token }}</span>{% if d.level == "warn" %}<span class="k"> · </span><span class="amber">⚠ {{ d.short }}</span>{% endif %}</div>
+{% endfor %}
+{% for d in disclosures if d.key == "truncation" %}
+    <div class="log"><span class="step">▸ limits</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
     <div class="log"><span class="step">▸ check</span><span class="k">{{ r.claims|length }} citation-backed claims · reading each against its cited page{% if r.uncited %} · </span><span class="amber">{{ r.uncited|length }} uncited assertions flagged</span><span class="k">{% endif %}</span></div>
 {% if scout and not scout.error %}
     <div class="log"><span class="step">▸ scout</span><span class="k">europe pmc · citing articles + keyword neighbourhood · </span><span class="cyan">{{ scout.newer|length }} newer</span><span class="k"> · </span><span class="cyan">{{ scout.overlooked|length }} possibly overlooked</span></div>
@@ -83,6 +88,8 @@
 {% for c in checked %}
     <div class="claim">
       <div class="cl-head"><span class="idx">[{{ c.id }}]</span> <span class="q">“{{ c.claim }}”</span>{% if c.refs|length > 1 %} <span class="dim">[{{ c.refs|length }} refs]</span>{% endif %}</div>
+{% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
       <div class="cl-meta">
         <span style="display:inline-block;width:190px"><span class="lab">status </span><span class="st {{ c.verdict }}"><span class="dot">●</span> {{ c.verdict|upper }}</span></span>
         {% if c.source_slug %}<span class="lab">from </span><span class="from">{{ c.source_slug }}</span>
@@ -90,6 +97,9 @@
       </div>
 {% if c.evidence_image %}
       <div class="imgwrap" data-src="{{ c.source_slug }} · page {{ c.source_page }}"><img src="{{ c.evidence_image }}"></div>
+{% for d in claim_disclosures(c) if d.key == "anchor" %}
+      <div class="cl-meta"><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
+{% endfor %}
 {% endif %}
 {% if c.note %}
       <div class="note"><span class="a">└─</span> {{ c.note }}</div>
@@ -106,9 +116,18 @@
       <span class="dim"><span class="dot">○</span> {{ counts.not_retrieved }} not retrieved</span>{% if counts.unchecked %}&nbsp;&nbsp;&nbsp;<span class="red"><span class="dot">●</span> {{ counts.unchecked }} unchecked (check failed)</span>{% endif %}
     </div>
 
-{% if r.coverage %}
-    <div class="sumline"><span class="k">coverage</span>{% if r.coverage.missing %}<span class="amber">{{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} citation labels covered · unaddressed: [{{ r.coverage.missing|join('] [') }}]</span>{% elif r.coverage.labels_in_text %}<span class="green">all {{ r.coverage.labels_in_text|length }} citation labels covered</span>{% else %}<span class="amber">no numbered citation markers found — bare-superscript styles not yet recognized; coverage not audited</span>{% endif %}</div>
+{% for d in disclosures if d.key in ("coverage", "coverage_caveat") %}
+    <div class="sumline"><span class="k">coverage</span><span class="{{ 'amber' if d.level == 'warn' else 'green' }}">{{ d.short }}</span></div>
+{% for row in d.rows[:8] %}
+    <div class="sumline"><span class="k"></span><span class="dim">{{ row }}</span></div>
+{% endfor %}
+{% if d.rows|length > 8 %}
+    <div class="sumline"><span class="k"></span><span class="dim">… {{ d.rows|length - 8 }} more in results.json</span></div>
 {% endif %}
+{% endfor %}
+{% for d in disclosures if d.key == "coverage_attribution" %}
+    <div class="sumline"><span class="k">caveat</span><span class="amber">{{ d.short }}</span></div>
+{% endfor %}
 {% if r.uncited %}
     <div class="nr-head"><span class="amber">▲</span> assertions without citation <span class="c">({{ r.uncited|length }}) — your judgement required</span></div>
     <div class="nr-sub">would normally carry a reference but don't — not verified, flagged for you to weigh.</div>
@@ -141,8 +160,8 @@
 {% endif %}
 {% endif %}
 
-    <div class="foot"># evidence crops are real pages of the cited sources · red box = matched text<br>
-    # your judgement stays in charge · candidates, not accusations · papertrace v0.3</div>
+    <div class="foot"># evidence crops are real pages of the cited sources · each crop states whether its anchor phrase was located<br>
+    # your judgement stays in charge · candidates, not accusations · papertrace v{{ version }}</div>
 
     <div class="prompt-end">❯<span class="cur"></span></div>
   </div>

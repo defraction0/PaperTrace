@@ -4,21 +4,22 @@ Checker: `{{ r.checker }}` · PaperTrace · {{ r.date }}
 Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs_total }}` cited references available
 
 **Claims:** {{ r.claims|length }} | ✅ **Supported:** {{ counts.supported }} | ⚠️ **Partial:** {{ counts.partial }} | ❌ **Contradicted:** {{ counts.contradicted }} | ⊘ **Not retrieved:** {{ counts.not_retrieved }}{% if counts.unchecked %} | ⚠ **Unchecked (check failed):** {{ counts.unchecked }}{% endif +%}
-{% if r.coverage %}
-{% if r.coverage.missing %}
-**Citation coverage:** {{ r.coverage.covered|length }}/{{ r.coverage.labels_in_text|length }} labels covered — ⚠️ unaddressed: [{{ r.coverage.missing|join('], [') }}]
-{% elif r.coverage.labels_in_text %}
-**Citation coverage:** all {{ r.coverage.labels_in_text|length }} citation labels covered ✓
-{% else %}
-**Citation coverage:** ⚠️ no numbered citation markers found — bare-superscript citation styles are not yet recognized; coverage not audited.
-{% endif %}
-{% endif %}
-{% if r.converter == "pymupdf" %}
+{% for d in disclosures if d.key in ("coverage", "coverage_caveat") %}
+**Citation coverage:** {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
+{% if d.rows %}
 
-> ⚠️ **Ingest: flat text (pymupdf).** Tables were linearized and figures are not
-> represented in this run — claims living inside tables may be under-checked.
-> Install the layout backend for structured tables: `pip install 'papertrace[docling]'`.
+{% for row in d.rows[:25] %}
+- {{ row }}
+{% endfor %}
+{% if d.rows|length > 25 %}
+- … {{ d.rows|length - 25 }} more in `results.json`
 {% endif %}
+{% endif %}
+{% endfor %}
+{% for d in disclosures if d.key not in ("coverage", "coverage_caveat") %}
+
+> {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
+{% endfor %}
 
 ---
 {% for c in checked %}
@@ -27,6 +28,10 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 
 **Status:** {{ c.label }}
 **Location:** {{ c.location }}{% if c.refs %} · cites [{{ c.refs|join(', ') }}]{% endif %}
+{% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
+
+> ⚠️ {{ d.text }}
+{% endfor %}
 {% if c.source_slug %}
 
 ### Evidence from: `{{ c.source_slug }}`
@@ -35,7 +40,7 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if c.evidence_image %}
 
 ![evidence]({{ c.evidence_image }})
-*red box = matched text*
+{% for d in claim_disclosures(c) if d.key == "anchor" %}{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}{% endfor %}
 {% endif %}
 {% endif %}
 {% if c.note %}
