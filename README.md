@@ -28,7 +28,7 @@ A missed citation is reported, not silently skipped.</b></p>
 <p align="center"><sub>Open source · Python 3.10+ · local CLI and case files · claim checking currently uses <a href="https://claude.com/claude-code">Claude Code</a> · built for published papers</sub></p>
 
 <p align="center">
-  <a href="examples/demo/output/report_terminal.png"><img src="docs/hero.png" width="80%" alt="One checked claim from the demo report: the paper claims an external validation AUC of 0.94, the verdict is CONTRADICTED, and the cited source's real page shows the matched text — an AUC of 0.77 — boxed in red. Click for the full report."></a>
+  <a href="https://github.com/defraction0/PaperTrace/blob/main/examples/demo/output/report_terminal.png"><img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/hero.png" width="80%" alt="One checked claim from the demo report: the paper claims an external validation AUC of 0.94, the verdict is CONTRADICTED, and the cited source's real page shows the matched text — an AUC of 0.77 — boxed in red. Click for the full report."></a>
 </p>
 
 ---
@@ -123,7 +123,31 @@ went uncited?**
 
 ## Quick start
 
-### Interactive — the `/review` skill (recommended)
+### Guided — `papertrace`, and answer the questions
+
+```bash
+pip install -e ".[full]"     # standard install — layout-aware ingest
+papertrace                   # asks for the paper, the DOI and your email
+```
+
+Nothing to memorise. It checks your setup first — so a missing `claude` CLI is
+a sentence before you type anything, not a traceback twenty minutes in — then
+asks one question at a time: the paper (drag the file in; quotes and escaped
+spaces are fine), where to keep the audit, whether the paper is published, and
+a contact email it offers to remember. Before spending anything it tells you
+how many model calls the run will make and asks you to confirm, and when you
+say yes it prints the equivalent one-line command so you can repeat or script
+it next time.
+
+`papertrace start` does the same thing explicitly. Without an interactive
+terminal — a pipe, a CI job — bare `papertrace` prints help instead of waiting
+on stdin.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, a DOI found on the first page offered for confirmation, a contact email it offers to remember — and finally the cost stated as up to 25 model calls before asking permission to start.">
+</p>
+
+### Interactive — the `/review` skill (deepest mode)
 
 ```bash
 git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
@@ -141,7 +165,7 @@ journal's reviewer form, which it reads and answers question by question.
 Then it retrieves, checks, crops, and drafts, showing you evidence as it goes
 and batching its questions.
 
-### Batch — one command, markdown out
+### Batch — one command, scriptable
 
 ```bash
 pip install -e ".[full]"        # standard install (see matrix below)
@@ -156,7 +180,17 @@ Install options:
 | `pip install -e ".[full]"` | ⭐ **standard install** — layout-aware ingest (real tables, figures, lists) + PNG rendering. Pulls torch; first run downloads docling's layout models (~500 MB, once) |
 | `pip install -e ".[docling]"` | layout-aware ingest only |
 | `pip install -e ".[png]"` | PNG report rendering only |
+| `pip install -e ".[dev]"` | the test and lint tooling — `pytest`, `ruff`, `jsonschema`. This is what CI installs |
+| `pip install -e ".[dev,full]"` | everything: run audits **and** run the suite |
 | `pip install -e .` | minimal core — flat-text ingest. For CI and constrained machines; every report will carry a "tables linearized" warning |
+
+> **`[full]` does not include the test tooling.** The extras are independent:
+> `full` is user features, `dev` is `pytest` + `ruff`. Installing `[full]` and
+> then running `pytest` finds whatever `pytest` happens to be on your `PATH` —
+> usually a system one, with none of this project's dependencies — and fails
+> with `ModuleNotFoundError: No module named 'pymupdf'`. If you intend to run
+> the suite, install `".[dev,full]"` and invoke it as `python -m pytest`, which
+> fails loudly instead of silently using the wrong interpreter.
 
 `--backend auto` (default) uses docling when installed and falls back to flat
 text otherwise — and the report always says which one ran, because a
@@ -166,10 +200,22 @@ Output in `case/out/`: `report.md` with inline evidence images, the same
 report as a dark **editor-window** page and as a **terminal-run** page
 (`report_editor.html`, `report_terminal.html`), plus machine-readable
 `results.json` and `scout.json`. The retrieval manifest is written one level
-up, at `case/refs_manifest.json`. The scout step is on
-by default (`--no-scout` to skip); pass `--doi` if the title lookup picks the
-wrong paper. Want shareable PNG images of the report looks? Add `--png`
-(one-time setup: `playwright install chromium`).
+up, at `case/refs_manifest.json`. Want shareable PNG images of the report
+looks? Add `--png` (one-time setup: `playwright install chromium`).
+
+**`--doi` is the DOI of the paper you are auditing** — not of anything it
+cites. It is optional, and it feeds only the literature scout, which has to
+identify your paper in Europe PMC before it can look for work published since
+or work in the field you did not cite. Nothing else in the audit uses it: the
+verdicts, evidence crops and coverage figures are identical with or without.
+
+- **Published paper** → pass it. Without it the scout falls back to matching by
+  title, and a *wrong* match is silent: the scan anchors to somebody else's
+  paper and the two registers describe that one instead. The report flags
+  `resolved_via: title`, but it does not error.
+- **Unpublished manuscript** → there is no DOI to pass, and the scout can never
+  identify it. Use `--no-scout` to skip the step rather than reading an empty
+  result as "nothing to find". The guided flow does this for you.
 
 **One case folder per paper.** `case` is only the default name — give each
 paper its own (`papertrace run zhang2025.pdf -c zhang2025`). Re-running the
@@ -208,7 +254,7 @@ the possible carrier of the other half. Candidates for your judgement, not
 accusations.
 
 <p align="center">
-  <a href="docs/real_audit_terminal.png"><img src="docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: three checked claims, each shown with the actual page of its cited source and the matched text boxed in red — a Methods claim its own cited source describes differently, a supported claim, and a two-reference claim split into its checked and unretrieved halves"></a>
+  <a href="https://github.com/defraction0/PaperTrace/blob/main/docs/real_audit_terminal.png"><img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: three checked claims, each shown with the actual page of its cited source and the matched text boxed in red — a Methods claim its own cited source describes differently, a supported claim, and a two-reference claim split into its checked and unretrieved halves"></a>
 </p>
 
 ## Tables and figures are evidence too
@@ -218,7 +264,7 @@ figure is found, checked, and shown like any other — cell and in-figure
 numbers boxed by text search on the real page:
 
 <p align="center">
-  <img src="docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
 </p>
 
 That layout fidelity is spent on the **audited paper**. In batch mode a cited
@@ -327,7 +373,7 @@ integration tests. They make **no network calls and no model calls**: the
 reference resolver runs against `httpx.MockTransport`, PDFs are generated
 in-test with pymupdf, and the single `claude -p` touchpoint sits behind a seam
 that tests replace. They run in CI on every pull request and on every push to
-`main`, across Python 3.10–3.13 (see the badge above). A push to a feature
+`main`, across Python 3.10–3.14 (see the badge above). A push to a feature
 branch with no open PR triggers nothing — run `pytest -q` locally. They tell you the *plumbing* is correct — ingest, retrieval,
 coverage arithmetic, crop placement, report rendering, JSON round-trips.
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import sys
 from pathlib import Path
 
 import typer
@@ -17,7 +18,7 @@ from rich.console import Console
 
 from .models import RefManifest, RunResults, manuscript_fingerprint
 
-app = typer.Typer(add_completion=False, rich_markup_mode="rich", no_args_is_help=True)
+app = typer.Typer(add_completion=False, rich_markup_mode="rich", invoke_without_command=True)
 console = Console()
 
 BANNER = r"""[bold]
@@ -83,21 +84,57 @@ def _guard_case(case: Path, manuscript: Path) -> None:
 
 def _email(cli_value: str | None) -> str:
     # MANUSCRIPTAGENT_EMAIL is honored as a fallback for pre-rename setups
+    from .config import load as _load_config
+
     email = (
         cli_value
         or os.environ.get("PAPERTRACE_EMAIL", "")
         or os.environ.get("MANUSCRIPTAGENT_EMAIL", "")
-    )
+        # last, so an explicit flag or env var always wins over a saved default
+        or (_load_config().get("email") or "")
+    ).strip()
     if not email:
         console.print(
-            "[yellow]No contact email set — Unpaywall requires one "
-            "(pass --email or set PAPERTRACE_EMAIL).[/yellow]"
+            "[yellow]No contact email set — Unpaywall requires one.[/yellow]\n"
+            "Pass [cyan]--email you@example.org[/cyan], set "
+            "[cyan]PAPERTRACE_EMAIL[/cyan], or run [cyan]papertrace[/cyan] "
+            "once to save it."
         )
         raise typer.Exit(2)
     return email
 
 
-@app.command()
+@app.callback()
+def _root(ctx: typer.Context) -> None:
+    """Fact-check a paper's citations against the actual cited sources.
+
+    New here? Run [bold]papertrace[/bold] with no arguments and answer the
+    questions — it checks your setup, asks what it needs, and prints the
+    equivalent one-line command when it is done.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    # A bare `papertrace` is what a first-time user types. Walk them through it
+    # when there is somebody there to answer; print help when there is not, so
+    # a pipe or a CI job can never sit waiting on stdin.
+    if sys.stdin.isatty():
+        from .wizard import run_wizard
+
+        run_wizard()
+        raise typer.Exit(0)
+    console.print(ctx.get_help())
+    raise typer.Exit(0)
+
+
+@app.command(rich_help_panel="Start here")
+def start() -> None:
+    """Guided audit — asks for the paper, the DOI and your email, one at a time."""
+    from .wizard import run_wizard
+
+    run_wizard()
+
+
+@app.command(rich_help_panel="Utilities")
 def init(case: Path = typer.Argument(Path("case"), help="Case folder to create")) -> None:
     """Create a case folder skeleton (gitignored by design — keep manuscripts local)."""
     for sub in ("sources", "form", "ingest", "out/evidence"):
@@ -109,16 +146,23 @@ def init(case: Path = typer.Argument(Path("case"), help="Case folder to create")
     console.print("  put your questions or form-field screenshots into [cyan]form/[/cyan]")
 
 
-@app.command()
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def ingest(
     pdf: Path = typer.Argument(..., exists=True, help="PDF to convert"),
-    out: Path = typer.Option(None, "--out", "-o", help="Output dir (default case/ingest/<stem>)"),
+    out: Path = typer.Option(None, "--out", "-o", help="Output dir (default <case>/ingest/<stem>)"),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder; writes <case>/ingest/<stem>. Ignored when --out is given",
+    ),
     backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
 ) -> None:
     """PDF → clean.md + annotated.md + source_map.json (page + bbox provenance)."""
     from .ingest import ingest_pdf
 
-    out = out or Path("case") / "ingest" / pdf.stem
+    # -c means the same thing here as in every other subcommand; `papertrace
+    # ingest -c foo` used to fail with "No such option: -c" while its
+    # neighbours all took it. --out stays authoritative and unchanged.
+    out = out or (case or Path("case")) / "ingest" / pdf.stem
     smap = ingest_pdf(pdf, out, backend=backend)
     by_type = {t: sum(1 for b in smap.blocks if b.type == t) for t in
                ("sectionheader", "text", "table", "picture", "list")}
@@ -136,7 +180,7 @@ def ingest(
         )
 
 
-@app.command()
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def refs(
     manuscript: Path = typer.Argument(..., exists=True),
     case: Path = typer.Option(Path("case"), "--case", "-c"),
@@ -209,14 +253,13 @@ def refs(
                   " unverifiable, never guessed.[/dim]")
 
 
-@app.command()
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def scout(
     case: Path = typer.Option(Path("case"), "--case", "-c"),
     doi: str = typer.Option(None, "--doi", help="DOI of the paper itself (skips the title lookup)"),
     email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
 ) -> None:
-    """Scan Europe PMC for what the reference list doesn't know: literature
-    published since the paper, and candidates that existed but went uncited."""
+    """Scan Europe PMC for literature the reference list doesn't know."""
     from .scout import scout_case
 
     if not (case / "refs_manifest.json").exists():
@@ -254,7 +297,7 @@ def scout(
     )
 
 
-@app.command()
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def check(
     case: Path = typer.Option(Path("case"), "--case", "-c"),
     model: str = typer.Option(None, "--model", help="Model override for claude -p"),
@@ -353,7 +396,7 @@ def check(
         console.print(f"[cyan]{len(uncited)} uncited assertions[/cyan] — see report section")
 
 
-@app.command()
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def highlight(
     case: Path = typer.Option(Path("case"), "--case", "-c"),
     claim: int = typer.Option(None, "--claim", help="Only this claim id"),
@@ -413,7 +456,7 @@ def highlight(
     console.print(f"[bold]{done}[/bold] evidence crops written")
 
 
-@app.command()
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def report(
     case: Path = typer.Option(Path("case"), "--case", "-c"),
     png: bool = typer.Option(
@@ -435,7 +478,7 @@ def report(
         console.print(f"  [green]✓[/green] {p.relative_to(case)}")
 
 
-@app.command()
+@app.command(rich_help_panel="Start here")
 def run(
     manuscript: Path = typer.Argument(..., exists=True),
     case: Path = typer.Option(Path("case"), "--case", "-c"),

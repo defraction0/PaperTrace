@@ -159,7 +159,7 @@ gap — which is the shape this release exists to remove.*
 - `schemas/eval_gold.schema.json`, `schemas/eval_run.schema.json`, plus the
   first automated validation of the four pre-existing schemas.
 - `docs/RELEASING.md` and `evals/PROPOSAL.md` (draft benchmark issue, unposted).
-- CI badge, and a Python 3.10–3.13 matrix in place of 3.11 alone.
+- CI badge, and a Python 3.10–3.14 matrix in place of 3.11 alone.
 - `src/papertrace/disclosures.py` — the single place a report disclosure is
   defined, so the three formats differ in styling only.
 - `evals/eligibility.py` (one mechanism deciding which cases are scored, and
@@ -173,6 +173,39 @@ gap — which is the shape this release exists to remove.*
 - **A regression test for every finding above**, plus the disclosure parity
   loop and the sdist assertions. The suite more than doubled from 119; the
   CI badge is the live count, because a number written here goes stale.
+
+### Added
+
+- **A guided audit: run `papertrace` with no arguments.** Simulating a
+  first-time, non-technical user surfaced nine bumps, and none of them were
+  bugs — every flag was correct and documented, but a newcomer had to assemble
+  six decisions from a `--help` screen before anything happened, and three of
+  the ways a run can fail only surfaced minutes in. The wizard checks the
+  environment *first* (a missing `claude` CLI is now a sentence, not a
+  traceback twenty minutes later), then asks one question at a time, and states
+  the cost — counted from the paper — before spending it. It ends by printing
+  the equivalent `papertrace run` line, because a wizard that hides the CLI
+  leaves its user unable to repeat or script what they just did. Without an
+  interactive terminal it prints help rather than waiting on stdin.
+- **`--doi` no longer has to be explained.** It means the DOI of the paper being
+  audited, not of anything it cites — and saying so did not stop it being
+  misread, including once by this project's own documentation. The wizard reads
+  the DOI off the paper's first page and asks "is that this paper's own DOI?",
+  turning a definition into a yes/no. Only the front matter is read: a reference
+  list is full of other papers' DOIs, and picking one up would anchor the
+  literature scout to somebody else's work with no error to notice.
+- **A saved contact email.** `~/.config/papertrace/config.json`, read after
+  `--email` and the environment so an explicit value always wins. JSON, not
+  TOML, on purpose: `requires-python` is `>=3.10` and `tomllib` is 3.11+.
+  A missing, empty or corrupt file reads as `{}` — a convenience may not become
+  a hard failure.
+- **Python 3.14 in the CI matrix.** `requires-python` said `>=3.10` while CI
+  tested 3.10–3.13, so anyone installing on 3.14 — which is what Homebrew's
+  `python3` now is — ran on a version nothing verified. It passes, so the
+  matrix says so rather than the metadata over-promising.
+- **`papertrace ingest -c`.** `-c` meant the case folder in every subcommand
+  except `ingest`, which failed with `No such option: -c`. `-o/--out` is
+  unchanged.
 
 ### Changed
 
