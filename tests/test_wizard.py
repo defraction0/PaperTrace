@@ -322,3 +322,156 @@ def test_the_help_screen_says_which_of_nine_commands_to_type():
     start_at, stages_at = out.index("Start here"), out.index("Pipeline stages")
     assert start_at < stages_at, "the guided entry point must come first"
     assert out.index("start") < stages_at
+
+
+# --- run must hand the stages real values, not Typer's option objects -------
+
+
+def test_run_forwards_the_backend_it_was_given(tmp_path, monkeypatch):
+    """`run` calls the stage commands as plain Python functions, where Typer's
+    declared defaults are `OptionInfo` objects rather than the strings they
+    display. So a positional call is a trap: adding one parameter to a stage
+    signature shifts every later argument, and the shifted-in default is an
+    OptionInfo that equals none of the expected values.
+
+    That is exactly what happened — `ingest` gained `--case`, `run`'s
+    `ingest(manuscript, out, backend)` bound the backend string to `case`, and
+    `backend` became an OptionInfo. `ingest_pdf` then took the else branch and
+    used pymupdf while the wizard's preflight had just promised docling.
+
+    Keyword arguments make the insertion harmless.
+    """
+    import papertrace.cli as cli
+
+    seen: dict[str, tuple] = {}
+
+    def spy(name):
+        def f(*a, **kw):
+            seen[name] = (a, kw)
+        return f
+
+    for stage in ("ingest", "refs", "scout", "check", "highlight", "report"):
+        monkeypatch.setattr(cli, stage, spy(stage))
+    monkeypatch.setattr(cli, "_guard_case", lambda case, manuscript: None)
+
+    paper = tmp_path / "p.pdf"
+    paper.write_bytes(b"%PDF-1.4\n")
+    cli.run(
+        manuscript=paper, case=tmp_path / "c", provided=None, email="a@b.org",
+        model=None, png=False, backend="pymupdf", with_scout=True, doi=None,
+    )
+
+    for stage, (args, _kw) in seen.items():
+        assert not args, f"{stage} is called positionally — one inserted parameter shifts it"
+    assert seen["ingest"][1]["backend"] == "pymupdf"
+    assert isinstance(seen["ingest"][1]["backend"], str)
+    assert seen["refs"][1]["backend"] == "pymupdf"
+
+
+def test_an_unknown_backend_raises_instead_of_quietly_meaning_pymupdf(tmp_path):
+    """`ingest_pdf` treated every value that was not "docling" as pymupdf, so a
+    typo, a stale flag or an OptionInfo silently downgraded the ingest and the
+    report blamed the user for not installing a backend they already had.
+
+    An unrecognised backend is a caller bug and says so.
+    """
+    from papertrace.ingest import ingest_pdf
+
+    with pytest.raises(ValueError, match="unknown ingest backend"):
+        ingest_pdf(tmp_path / "nope.pdf", tmp_path / "out", backend="pymudpf")
+
+
+# --- a References heading the ingest did not classify as one ----------------
+
+
+def test_references_are_found_when_the_heading_is_typed_as_body_text():
+    """Flat-text ingest guesses headings from font size, and on a real Elsevier
+    paper it guessed wrong: it classified three author lines as headings and
+    left `References` as body text. `references_section` only ever started
+    collecting at a `sectionheader`, so it returned "" and the whole audit
+    stopped at "No numbered references found" on a paper with 34 of them.
+
+    A block whose entire text is the word is the heading, whatever the ingest
+    backend decided to call it.
+    """
+    from papertrace.ingest import references_section
+    from papertrace.models import Block, SourceMap
+
+    def blk(i, typ, text, page=1):
+        return Block(id=f"block_{i:04d}", type=typ, page=page,
+                     bbox=(0.0, 0.0, 1.0, 1.0), heading_path=[], text=text)
+
+    smap = SourceMap(doc="p.pdf", pages=1, converter="pymupdf", blocks=[
+        blk(1, "sectionheader", "Gul Gizem Pamuk a, Murat Yuce b"),   # misread author line
+        blk(2, "text", "Body text citing things [1] and [2]."),
+        blk(3, "text", "References"),                                  # NOT typed as a header
+        blk(4, "text", "[1] A. Pinto, Errors in imaging, Br. J. Radiol. 89 (2016)."),
+        blk(5, "text", "[2] L. Berlin, Radiologic errors, Diagnosis 1 (2014) 79-84."),
+    ])
+    refs = references_section(smap)
+    assert "A. Pinto" in refs and "L. Berlin" in refs
+    assert "Body text citing things" not in refs, "the body must stay out"
+
+
+def test_a_sentence_merely_starting_with_references_is_not_the_heading():
+    """The relaxation must not fire on prose. 'References were checked by hand'
+    is a Methods sentence, and treating it as the heading would swallow the
+    rest of the paper into the reference list."""
+    from papertrace.ingest import references_section
+    from papertrace.models import Block, SourceMap
+
+    def blk(i, typ, text):
+        return Block(id=f"block_{i:04d}", type=typ, page=1,
+                     bbox=(0.0, 0.0, 1.0, 1.0), heading_path=[], text=text)
+
+    smap = SourceMap(doc="p.pdf", pages=1, converter="pymupdf", blocks=[
+        blk(1, "text", "References were checked by hand against the originals [3]."),
+        blk(2, "text", "More body text that must not be read as a reference."),
+    ])
+    assert references_section(smap) == ""
+
+
+def test_references_split_when_the_next_marker_is_mid_line():
+    """Elsevier's PDFs extract with entries running together: `[2]` and `[3]`
+    land mid-line, not at a line start. The marker regex required a line start,
+    so a 34-reference list parsed as ONE entry whose text swallowed the rest —
+    and `_entry` then took its DOI from reference [2] and its "year" from a
+    journal issue number. A wrong reference is worse than a missing one: the
+    resolver would have downloaded [2]'s paper and judged [1]'s claim against
+    it, and the title check is the only thing that might have caught it.
+    """
+    from papertrace.refs import parse_references
+
+    text = (
+        "[1] A. Pinto, A. Reginelli, F. Pinto, et al., Errors in imaging patients\n"
+        "\n"
+        "setting, Br. J. Radiol. 89 (1061) (2016) 20150914, "
+        "https://doi.org/10.1259/bjr.20150914. [2] L. Berlin, Radiologic errors, "
+        "past, present and future, Diagnosis 1 (1) (2014) 79-84,\n"
+        "\n"
+        "https://doi.org/10.1515/dx-2013-0012. [3] S. Sharma, Artificial "
+        "intelligence for fracture diagnosis, SICOT J. 9 (2023) 21, "
+        "https://doi.org/10.1051/sicotj/2023018.\n"
+    )
+    entries = parse_references(text)
+    assert [e.num for e in entries] == ["1", "2", "3"]
+    assert "A. Pinto" in entries[0].raw and "L. Berlin" not in entries[0].raw
+    # each DOI stays with the reference it belongs to
+    assert entries[0].doi == "10.1259/bjr.20150914"
+    assert entries[1].doi == "10.1515/dx-2013-0012"
+    assert entries[2].doi == "10.1051/sicotj/2023018"
+
+
+def test_a_journal_issue_number_in_parens_is_not_read_as_a_year():
+    """`Br. J. Radiol. 89 (1061) (2016)` — the parenthesised branch of YEAR_RE
+    accepted any four digits, so the issue number won and the entry was slugged
+    `a-1061`. A slug is user-visible and feeds the resolved filename, so a
+    wrong one is a wrong label on real evidence.
+    """
+    from papertrace.refs import parse_references
+
+    raw = ("[1] A. Pinto, A. Reginelli, F. Pinto, et al., Errors in imaging patients "
+           "in the emergency setting, Br. J. Radiol. 89 (1061) (2016) 20150914.\n")
+    e = parse_references(raw)[0]
+    assert e.year == "2016", f"got {e.year!r}"
+    assert e.slug == "a-2016"

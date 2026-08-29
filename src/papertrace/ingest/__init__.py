@@ -41,6 +41,14 @@ def ingest_pdf(pdf_path: Path, out_dir: Path, backend: str = "auto") -> SourceMa
     """Convert one PDF with the chosen backend and write the three outputs."""
     if backend == "auto":
         backend = "docling" if _docling_available() else "pymupdf"
+    if backend not in ("docling", "pymupdf"):
+        # NOT a silent downgrade to pymupdf. Treating every unrecognised value
+        # as flat text is what hid a caller passing a Typer OptionInfo instead
+        # of a backend name: the run ingested as flat text and then told the
+        # user to install a layout backend they already had.
+        raise ValueError(
+            f"unknown ingest backend {backend!r} — expected 'auto', 'docling' or 'pymupdf'"
+        )
     if backend == "docling":
         if not _docling_available():
             raise RuntimeError(

@@ -172,11 +172,21 @@ def ingest(
         f"converter [cyan]{smap.converter}[/cyan] · {parts}"
     )
     if smap.converter == "pymupdf":
-        console.print(
-            "  [yellow]⚠ flat-text ingest — tables are linearized and figures invisible."
+        from .ingest import _docling_available
+
+        # WHY it was flat text, not just that it was. Advising an install to
+        # somebody who already has docling installed reads as a broken tool and
+        # sends them to fix the wrong thing.
+        why = (
+            "docling is installed, so this was a --backend choice"
+            if _docling_available()
             # rich eats [docling] as a style tag - escaping it is what makes the
             # instruction say 'papertrace[docling]' instead of 'papertrace'
-            r" Install the layout backend: pip install 'papertrace\[docling]'" "[/yellow]"
+            else r"install the layout backend: pip install 'papertrace\[docling]'"
+        )
+        console.print(
+            "  [yellow]⚠ flat-text ingest — tables are linearized and figures "
+            f"invisible. {why}[/yellow]"
         )
 
 
@@ -504,13 +514,22 @@ def run(
     console.print(BANNER)
     email = _email(email)  # fail fast — before the ingest models load, not after
     _guard_case(case, manuscript)  # one case folder per paper — never mix two audits
-    ingest(manuscript, case / "ingest" / "manuscript", backend)
-    refs(manuscript, case, provided, email, parse_only=False, backend=backend)
+    # KEYWORDS ONLY, deliberately. These stages are Typer commands called as
+    # plain functions, and Typer's declared defaults are OptionInfo objects
+    # rather than the values they display. A positional call therefore breaks
+    # silently the moment any stage gains a parameter: the arguments shift, the
+    # shifted-in default is an OptionInfo that equals none of the expected
+    # strings, and the stage takes a fallback branch. Adding `--case` to
+    # `ingest` did exactly that — the backend became an OptionInfo and every
+    # audit ingested as flat text while claiming layout-aware ingest.
+    ingest(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
+    refs(manuscript=manuscript, case=case, provided=provided, email=email,
+         parse_only=False, backend=backend)
     if with_scout:
-        scout(case, doi, email)
-    check(case, model)
-    highlight(case, None)
-    report(case, png)
+        scout(case=case, doi=doi, email=email)
+    check(case=case, model=model)
+    highlight(case=case, claim=None)
+    report(case=case, png=png)
     console.print(
         "\n[bold green]done[/bold green] — open "
         f"[cyan]{case/'out'/'report.md'}[/cyan] · the gap register is part of the result."

@@ -174,6 +174,41 @@ gap — which is the shape this release exists to remove.*
   loop and the sdist assertions. The suite more than doubled from 119; the
   CI badge is the live count, because a number written here goes stale.
 
+### Fixed
+
+- **`run` handed the stage commands Typer option objects instead of values.**
+  The stages are Typer commands called as plain functions, where a declared
+  default is an `OptionInfo`, not the string it displays — and `run` called them
+  positionally. Adding `--case` to `ingest` shifted every later argument, so
+  `backend` became an `OptionInfo`, matched neither `"auto"` nor `"docling"`,
+  and every audit silently ingested as flat text while the wizard's preflight
+  had just reported layout-aware ingest as available. All six calls are keyword
+  arguments now, which makes a future insertion harmless.
+- **An unrecognised ingest backend silently meant pymupdf.** That is what hid
+  the bug above: `ingest_pdf` treated every value that was not `"docling"` as
+  flat text, so a typo or a wrong type downgraded the run and the report then
+  told the user to install a backend they already had. It raises now.
+- **The flat-ingest warning said why.** It advised `pip install
+  'papertrace[docling]'` unconditionally, including to people who had docling
+  installed and had simply run with `--backend pymupdf`.
+- **A References heading the ingest did not classify as one was invisible.**
+  `references_section` only started collecting at a `sectionheader` block.
+  Flat-text ingest guesses headings from font size, and on a real Elsevier paper
+  it made three author lines into headings and left `References` as body text —
+  so a paper with 34 references reported "No numbered references found" and the
+  audit stopped. A block whose entire text is the word now counts, whatever the
+  backend called it; a sentence merely *starting* with it still does not.
+- **Reference entries running together were parsed as one.** The marker regex
+  required `[N]` at a line start, but Elsevier PDFs extract with entries
+  mid-line. All 34 references collapsed into entry `[1]`, which then took its
+  DOI from reference `[2]` — a mis-attribution, not a shortfall: the resolver
+  would have fetched the wrong paper and judged `[1]`'s claim against it. The
+  bracketed form is now recognised anywhere in a line; the bare `12.` form
+  still needs a line start, because mid-sentence it is prose.
+- **A journal issue number in parentheses was read as a year.** `Br. J. Radiol.
+  89 (1061) (2016)` slugged the entry `a-1061`. `YEAR_RE`'s parenthesised branch
+  now requires a plausible century.
+
 ### Added
 
 - **A guided audit: run `papertrace` with no arguments.** Simulating a

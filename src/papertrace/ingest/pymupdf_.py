@@ -74,17 +74,32 @@ def ingest_blocks_pymupdf(pdf_path: Path) -> tuple[int, list[Block]]:
 
 
 def references_section(smap: SourceMap) -> str:
-    """Return the text of the References/Bibliography section, if found."""
+    """Return the text of the References/Bibliography section, if found.
+
+    A block whose *entire* text is the heading word counts as the heading even
+    when ingest typed it as body text. Flat-text ingest guesses headings from
+    font size, and on a real Elsevier paper it guessed wrong — three author
+    lines became headings and `References` stayed body text, so the audit
+    stopped at "No numbered references found" on a paper with 34 of them.
+
+    Requiring the whole block to be the word, not merely to start with it, is
+    what keeps "References were checked by hand" from swallowing the paper.
+    """
     pat = re.compile(r"^(references|bibliography|literature)\b", re.I)
+    # "7. References" / "References:" / "REFERENCES" and nothing else
+    exact = re.compile(r"^(?:\d+\.?\s*)?(references|bibliography|literature)\s*:?$", re.I)
     started = False
     out: list[str] = []
     for b in smap.blocks:
-        if b.type == "sectionheader":
+        text = b.text.strip()
+        is_heading = pat.match(text) if b.type == "sectionheader" else bool(exact.match(text))
+        if is_heading:
             if started:
                 break
-            if pat.match(b.text.strip()):
-                started = True
+            started = True
             continue
+        if b.type == "sectionheader" and started:
+            break  # the next real heading ends the list
         if started:
             out.append(b.text)
     return "\n".join(out)

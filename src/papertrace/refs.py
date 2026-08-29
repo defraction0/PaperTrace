@@ -19,7 +19,10 @@ from .models import RefEntry
 UA = "PaperTrace/0.3 (+https://github.com/defraction0/PaperTrace; mailto:{email})"
 DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"'<>]+")
 ARXIV_RE = re.compile(r"arxiv[:\s]*(\d{4}\.\d{4,5})(v\d+)?", re.I)
-YEAR_RE = re.compile(r"\((\d{4})\)|\b(19|20)\d{2}\b")
+# a parenthesised four-digit group is not automatically a year: journal
+# citations carry issue numbers the same way — "Br. J. Radiol. 89 (1061)
+# (2016)" made 1061 the year and slugged the entry `a-1061`
+YEAR_RE = re.compile(r"\(((?:19|20)\d{2})\)|\b((?:19|20)\d{2})\b")
 
 ProgressCb = Callable[[RefEntry], None]
 
@@ -32,12 +35,30 @@ ProgressCb = Callable[[RefEntry], None]
 def parse_references(text: str) -> list[RefEntry]:
     """Split a References section into numbered entries.
 
-    Handles `1. Foo`, `[1] Foo` and `1 Foo` markers at line starts, and keeps
-    only a strictly ascending sequence so stray numbers inside an entry (DOIs,
-    page ranges) don't split it.
+    Handles `1. Foo`, `[1] Foo` and `1 Foo` markers at line starts, plus the
+    bracketed `[1] Foo` form **anywhere in a line**, and keeps only a strictly
+    ascending sequence so stray numbers inside an entry (DOIs, page ranges)
+    don't split it.
+
+    The mid-line case is not exotic: Elsevier PDFs extract with entries running
+    together, so `[2]` and `[3]` sit mid-line. Requiring a line start turned a
+    34-reference list into one entry that swallowed the rest — and took its DOI
+    from reference [2]. That is a mis-attribution, not a shortfall: the resolver
+    would fetch the wrong paper and judge a claim against it.
+
+    Only the *bracketed* form is allowed mid-line. A bare `12.` mid-sentence is
+    ordinary prose, and splitting on it would invent entries; the ascending-run
+    filter is the second guard behind that.
     """
-    marker = re.compile(r"(?:(?<=\n)|\A)\s*\[?(\d{1,3})[\].:]?\s+", re.M)
-    hits = [(m.start(), m.end(), int(m.group(1))) for m in marker.finditer(text)]
+    marker = re.compile(
+        r"(?:(?<=\n)|\A)\s*\[?(\d{1,3})[\].:]?\s+"  # line start: `1.` `[1]` `1 `
+        r"|\[(\d{1,3})\]\s+",  # bracketed, anywhere in the line
+        re.M,
+    )
+    hits = [
+        (m.start(), m.end(), int(m.group(1) or m.group(2)))
+        for m in marker.finditer(text)
+    ]
 
     seq: list[tuple[int, int, int]] = []
     expected = 1
@@ -86,7 +107,7 @@ def _entry(num: str, raw: str) -> RefEntry:
             doi = doi[:-1].rstrip(".,;")
         e.doi = doi
     if m := YEAR_RE.search(raw):
-        e.year = m.group(1) or m.group(0)
+        e.year = m.group(1) or m.group(2)
     e.slug = _slug(raw, e.year)
     return e
 

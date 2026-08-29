@@ -303,19 +303,35 @@ def test_crop_evidence_refuses_an_out_of_range_page(fixture_pdf, tmp_path):
     assert not (tmp_path / "nope.png").exists()
 
 
-def test_the_flat_ingest_warning_names_the_extra_to_install(fixture_pdf, tmp_path):
-    """rich reads `[docling]` as a style tag and silently drops it, so this
-    warning used to read `pip install 'papertrace'` — telling the reader to
-    install the thing they already have. An instruction that cannot be followed
-    is worse than none, and the escape is the whole fix.
+@pytest.mark.parametrize("docling_installed", [False, True])
+def test_the_flat_ingest_warning_says_why_it_was_flat(fixture_pdf, tmp_path,
+                                                      monkeypatch, docling_installed):
+    """Two different situations, two different sentences.
+
+    Not installed: name the extra, and name it correctly — rich reads
+    `[docling]` as a style tag and silently drops it, so this once read
+    `pip install 'papertrace'`, telling the reader to install what they already
+    had. Installed but unused: say so, because repeating the install advice to
+    somebody who already ran it reads as a broken tool and sends them to fix
+    the wrong thing. A real run hit exactly that.
     """
     from typer.testing import CliRunner
 
+    import papertrace.cli as cli_mod
+    import papertrace.ingest as ingest_mod
     from papertrace.cli import app
 
+    monkeypatch.setattr(ingest_mod, "_docling_available", lambda: docling_installed)
+    monkeypatch.setattr(cli_mod, "_docling_available", lambda: docling_installed,
+                        raising=False)
     res = CliRunner().invoke(
         app,
         ["ingest", str(fixture_pdf), "-o", str(tmp_path / "ing"), "--backend", "pymupdf"],
     )
     assert res.exit_code == 0, res.output
-    assert "papertrace[docling]" in " ".join(res.output.split())
+    out = " ".join(res.output.split())
+    if docling_installed:
+        assert "docling is installed" in out
+        assert "pip install" not in out, "do not tell them to install what they have"
+    else:
+        assert "papertrace[docling]" in out
