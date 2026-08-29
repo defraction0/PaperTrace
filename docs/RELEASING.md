@@ -73,7 +73,7 @@ maintainer's machine; `python3` on PATH may be a different install).
       tar -xzf dist/papertrace-*.tar.gz -C /tmp && grep -rIl '/Users/' /tmp/papertrace-*/
       # both must print nothing
       ```
-- [ ] CI green on all four Python versions (3.10–3.13).
+- [ ] CI green on all five Python versions (3.10–3.14).
 
 ### A note on what the sdist deliberately leaves out
 
