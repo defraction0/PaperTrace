@@ -13,7 +13,10 @@ the page height — getting this wrong mirrors every red box vertically.
 
 from __future__ import annotations
 
+import logging
+import os
 import re
+from contextlib import contextmanager
 from pathlib import Path
 
 from ..models import Block
@@ -120,8 +123,6 @@ def _quiet_third_party_loggers() -> None:
     """docling's model stack (RapidOCR, torch dynamo, transformers) floods the
     terminal with INFO/WARNING logs, tqdm weight-loading bars and torch
     UserWarnings, burying the pipeline ticker — keep errors only."""
-    import logging
-    import os
     import warnings
 
     for name in ("RapidOCR", "rapidocr", "torch._dynamo", "transformers", "docling"):
@@ -130,7 +131,14 @@ def _quiet_third_party_loggers() -> None:
     os.environ.setdefault("TQDM_DISABLE", "1")
     # torch (re)configures its dynamo loggers lazily at first use, overriding
     # plain setLevel — its own env var is the only pre-import control
+    had_torch_logs = "TORCH_LOGS" in os.environ
     os.environ.setdefault("TORCH_LOGS", "-dynamo,-inductor")
+    # ...and calling set_logs() as well makes torch print "Using TORCH_LOGS
+    # environment variable for log settings, ignoring call to set_logs" — a
+    # warning that existed only because we did both. The env var wins, so it is
+    # the one we keep.
+    if not had_torch_logs and not os.environ.get("TORCH_LOGS"):
+        _set_torch_logs()
     warnings.filterwarnings("ignore", category=UserWarning, module=r"torch\.nn\.modules\.conv")
     try:
         from transformers.utils import logging as hf_logging
@@ -141,13 +149,11 @@ def _quiet_third_party_loggers() -> None:
         pass
 
 
-def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:
-    """Run docling on a PDF. Returns (page_count, blocks, docling_version)."""
-    _quiet_third_party_loggers()
-    import docling
-    from docling.document_converter import DocumentConverter
-
-    try:  # belt to the TORCH_LOGS braces — torch may already be imported
+def _set_torch_logs() -> None:
+    """Quiet torch's dynamo logger through its API, for when the env var is not
+    ours to set. Never called alongside TORCH_LOGS — torch warns when both are
+    used, and that warning is louder than what it suppresses."""
+    try:
         import logging as _logging
 
         import torch._logging as _tlog
@@ -156,7 +162,41 @@ def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:
     except Exception:  # noqa: BLE001 — cosmetic only, never fatal
         pass
 
-    result = DocumentConverter().convert(str(pdf_path))
+
+@contextmanager
+def _silence_model_stack():
+    """Suppress third-party INFO chatter for the duration of one conversion.
+
+    Blunt on purpose, because there is no seam to be precise in.
+    `rapidocr/utils/log.py` creates its logger, calls `setLevel` on it *itself*,
+    and attaches its **own** console handler — all while docling builds the OCR
+    models, which happens inside a single `convert()` call. A level set before
+    the import is overwritten, and a private handler emits regardless of what
+    the parent logger is set to. `logging.disable` is the documented mechanism
+    that holds whenever a logger appears and whatever handlers it owns.
+
+    This is not the hiding this project forbids: what goes quiet is third-party
+    model-loading chatter, never a statement PaperTrace makes about its own
+    fidelity — every one of those travels by `rich` console print, not
+    `logging`. WARNING and above still get through, the scope is one call, and
+    the previous level is restored even when the conversion raises.
+    """
+    previous = logging.root.manager.disable
+    logging.disable(logging.INFO)
+    try:
+        yield
+    finally:
+        logging.disable(previous)
+
+
+def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:
+    """Run docling on a PDF. Returns (page_count, blocks, docling_version)."""
+    _quiet_third_party_loggers()
+    import docling
+    from docling.document_converter import DocumentConverter
+
+    with _silence_model_stack():
+        result = DocumentConverter().convert(str(pdf_path))
     doc = result.document
 
     page_heights: dict[int, float] = {}

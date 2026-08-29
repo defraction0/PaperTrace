@@ -82,6 +82,51 @@ def _guard_case(case: Path, manuscript: Path) -> None:
         )
 
 
+def _verdict_line(c: dict[str, int]) -> str:
+    """The one-line tally, built so a reader's own arithmetic works.
+
+    Every bucket that is non-zero is printed. `not_addressed` was added to the
+    three report templates and missed here, so a real run announced 31 of its 34
+    claims — the console is the surface read first, and a tally that does not add
+    up is the same class of defect as a report that does not.
+
+    Zero-valued optional buckets stay out: an ordinary audit must not grow empty
+    columns for verdicts it never produced.
+    """
+    parts = [
+        f"[green]● {c['supported']} supported[/green]",
+        f"[yellow]● {c['partial']} partial[/yellow]",
+        f"[red]● {c['contradicted']} contradicted[/red]",
+    ]
+    if c.get("not_addressed"):
+        parts.append(f"[yellow]◌ {c['not_addressed']} does not address[/yellow]")
+    parts.append(f"[dim]○ {c['not_retrieved']} not retrieved[/dim]")
+    if c.get("unchecked"):
+        parts.append(f"[red]⚠ {c['unchecked']} unchecked (check failed)[/red]")
+    return "\n[bold]verdicts[/bold]  " + "   ".join(parts)
+
+
+def _provenance_line(converter: str) -> str:
+    """Which backend read the manuscript, and how the sources were read.
+
+    Both halves matter. The manuscript's backend decides whether tables and
+    figures exist at all. The sources are ingested flat-text *always* and on
+    purpose (`check.py` passes `backend="pymupdf"`), which no reader can infer
+    from a line that names docling — so it is said rather than assumed.
+    """
+    flat = converter.startswith("pymupdf")
+    manuscript = (
+        f"[yellow]{converter} — flat text, tables linearized[/yellow]"
+        if flat
+        else f"[cyan]{converter}[/cyan] — layout-aware"
+    )
+    return (
+        f"  read with: {manuscript}\n"
+        f"  [dim]cited sources are always read as flat text — text anchors are what "
+        f"verdicts and crops need[/dim]"
+    )
+
+
 def _email(cli_value: str | None) -> str:
     # MANUSCRIPTAGENT_EMAIL is honored as a fallback for pre-rename setups
     from .config import load as _load_config
@@ -377,13 +422,7 @@ def check(
     (case / "out").mkdir(parents=True, exist_ok=True)
     results.to_json(case / "out" / "results.json")
 
-    c = results.counts()
-    unchecked = f"   [red]⚠ {c['unchecked']} unchecked (check failed)[/red]" if c["unchecked"] else ""
-    console.print(
-        f"\n[bold]verdicts[/bold]  [green]● {c['supported']} supported[/green]   "
-        f"[yellow]● {c['partial']} partial[/yellow]   [red]● {c['contradicted']} contradicted[/red]   "
-        f"[dim]○ {c['not_retrieved']} not retrieved[/dim]{unchecked}"
-    )
+    console.print(_verdict_line(results.counts()))
     from .disclosures import coverage_headline
 
     occ = coverage.get("occurrences") or {}
@@ -483,6 +522,10 @@ def report(
     manifest = RefManifest.from_json(manifest_path) if manifest_path.exists() else None
     scout_path = case / "out" / "scout.json"
     scout_res = ScoutResults.from_json(scout_path) if scout_path.exists() else None
+    # how the paper was read, restated where it can be seen. `ingest` says this
+    # once, minutes earlier and above a wall of model-loading logs; a standalone
+    # `papertrace report` never said it at all.
+    console.print(_provenance_line(results.converter))
     paths = write_reports(results, manifest, case / "out", png=png, scout=scout_res)
     for p in paths:
         console.print(f"  [green]✓[/green] {p.relative_to(case)}")
@@ -530,9 +573,16 @@ def run(
     check(case=case, model=model)
     highlight(case=case, claim=None)
     report(case=case, png=png)
+    # a four-minute run should not need scrolling to learn how the paper was
+    # read, so the backend rides on the last line too
+    smap_path = case / "ingest" / "manuscript" / "source_map.json"
+    from .models import SourceMap
+
+    backend_used = SourceMap.from_json(smap_path).converter if smap_path.exists() else "unknown"
     console.print(
         "\n[bold green]done[/bold green] — open "
-        f"[cyan]{case/'out'/'report.md'}[/cyan] · the gap register is part of the result."
+        f"[cyan]{case/'out'/'report.md'}[/cyan] · read with [bold]{backend_used}[/bold]"
+        " · the gap register is part of the result."
     )
 
 
