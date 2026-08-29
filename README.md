@@ -115,6 +115,18 @@ went uncited?**
 - Tell you *why* a co-cited source was never opened, beyond its retrieval
   status. Every cited source that could be obtained is judged; one listed as
   unopened could not be retrieved, and the manifest carries the reason.
+- **Read the audited paper's supplemental material.** Only the single PDF you
+  pass is ingested. A claim living in an eTable, appendix or supporting-
+  information file is not extracted, its citation labels are not counted in the
+  coverage audit, and it is **not** reported as unread — it is simply absent.
+  This is the one gap in the tool that is silent rather than disclosed, so it is
+  named here. Merge the supplement into the main PDF before running if you need
+  it audited.
+- **Fetch the supplements of cited sources.** The resolver chain returns the
+  article. A claim resting on a source's supplementary figure or table is judged
+  against its main text alone, which can come back `partial` or `does not
+  address the claim` for a reason that belongs to retrieval rather than to the
+  source.
 - Prove that an uncited article *should* have been cited — scout hits are
   candidates for your judgement, never accusations.
 - Guarantee an exhaustive literature search — the scout is search-based, and
@@ -195,6 +207,19 @@ Install options:
 `--backend auto` (default) uses docling when installed and falls back to flat
 text otherwise — and the report always says which one ran, because a
 linearized table is a degradation worth disclosing.
+
+**`--provided` matches by filename**, so the name decides which file stands for
+a reference. Files must contain the reference's author and year (`pyrros-2023`
+matches `pyrros-2023.pdf` and `pyrros-et-al-2023-chest-radiographs.pdf`), and
+where several match, an exact `<author>-<year>.pdf` wins, else the shortest
+name. A filename that reads as supplemental material — `supplement`, `appendix`,
+`supporting information`, `ESM`, `online only` — is **not** used as the source,
+and if it is the only match the reference is left to the online resolver
+instead: a supplement is not the paper it accompanies. Rename it to the plain
+`<author>-<year>.pdf` if you do mean it to stand in. Provided files are
+title-checked like downloaded ones, but a mismatch is recorded in the manifest
+rather than refused — you named the file, so it is used and the doubt is
+disclosed.
 
 Output in `case/out/`: `report.md` with inline evidence images, the same
 report as a dark **editor-window** page and as a **terminal-run** page

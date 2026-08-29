@@ -155,6 +155,23 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ### Fixed
 
+- **`--provided` could hand a supplement to the judge instead of the paper.**
+  `_match_provided` returned the first filename containing every slug token over
+  an *unsorted* `Path.glob`, so a sources folder holding both an article and its
+  supplement produced an undefined choice — the same folder could yield different
+  audits on different machines — and a folder holding only a supplement supplied
+  it as the source. Candidates are ranked now (exact `<slug>.pdf`, else shortest
+  name), supplement-looking filenames are excluded rather than ranked last, and a
+  supplement-only match falls through to the online resolver. The marker list
+  contains nothing shorter than five characters: `si` would have rejected the
+  real slug `si-mohamed-2021`.
+- **A provided file was accepted with no verification at all.** The title check
+  runs inside `_accept`, which only ever sees downloaded candidates, so
+  `--provided` bypassed it entirely. Provided files are checked now, and a
+  mismatch is recorded in the manifest rather than refused — the user named the
+  file and there is nothing to fall back to. An unreadable or scanned PDF still
+  passes, per the existing rule that unverifiable is not the same as wrong.
+
 *An external review of the changes below found 14 further defects. All 14
 reproduced, and all are fixed here. They shared one shape — a component that
 could not answer honestly emitted a favourable answer instead of admitting the

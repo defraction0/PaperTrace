@@ -241,15 +241,50 @@ def _accept(
     return True
 
 
-def _match_provided(entry: RefEntry, provided_dir: Path | None) -> Path | None:
+# Filenames that name supplemental material rather than the paper. Nothing
+# shorter than five characters goes in here: `si` would reject the real slug
+# `si-mohamed-2021`, and an author's name must never read as a marker.
+_SUPPLEMENT_RE = re.compile(
+    r"suppl|appendix|supporting[-_ ]?info|\besm\b|online[-_ ]?only", re.I
+)
+
+
+def _provided_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Path]:
+    """Every file in the folder that could be this reference, best first.
+
+    Token containment stays loose on purpose — real filenames carry author lists
+    and titles, and `tests/test_refs.py` pins that. What is tightened is the
+    choice among the matches:
+
+    * an exact `<slug>.pdf` wins outright;
+    * otherwise the shortest stem, tie-broken by name. Shortest means fewest
+      extra tokens, and the sort makes the answer the same on every machine —
+      the old code took the first `glob` hit, which is filesystem order, so one
+      folder could produce different audits in different places.
+
+    Supplements are excluded rather than ranked last. Judging a claim against an
+    appendix while calling it the cited source is the laundering this codebase
+    exists to prevent, and returning nothing lets the online chain try for the
+    real article instead.
+    """
     if not provided_dir or not provided_dir.is_dir():
-        return None
-    tokens = [t for t in (entry.slug or "").split("-") if len(t) > 3]
-    for pdf in provided_dir.glob("*.pdf"):
-        name = pdf.name.lower()
-        if tokens and all(t in name for t in tokens):
-            return pdf
-    return None
+        return []
+    slug = (entry.slug or "").lower()
+    tokens = [t for t in slug.split("-") if len(t) > 3]
+    if not tokens:
+        return []
+    matches = [
+        pdf
+        for pdf in sorted(provided_dir.glob("*.pdf"))
+        if all(t in pdf.name.lower() for t in tokens)
+        and not _SUPPLEMENT_RE.search(pdf.stem)
+    ]
+    return sorted(matches, key=lambda p: (p.stem.lower() != slug, len(p.stem), p.name))
+
+
+def _match_provided(entry: RefEntry, provided_dir: Path | None) -> Path | None:
+    candidates = _provided_candidates(entry, provided_dir)
+    return candidates[0] if candidates else None
 
 
 def resolve_entry(
@@ -262,10 +297,18 @@ def resolve_entry(
     """Resolve one reference in place. Never raises — failures land in status/reason."""
     dest = dest_dir / f"{entry.slug}.pdf"
 
-    if provided := _match_provided(entry, provided_dir):
+    if candidates := _provided_candidates(entry, provided_dir):
+        provided = candidates[0]
         entry.status, entry.resolver = "provided", "user"
         entry.pdf_path = str(provided)
-        entry.reason = f"matched {provided.name} in your sources folder"
+        others = f" ({len(candidates)} candidates matched; picked the closest name)" \
+            if len(candidates) > 1 else ""
+        # a provided file is title-checked like a downloaded one, but a failure
+        # is DISCLOSED, not fatal: the user named this file, there is nothing to
+        # fall back to, and a scanned PDF yields no text at all
+        unconfirmed = _title_check(entry, provided)
+        note = f" — unverified: {unconfirmed}" if unconfirmed else ""
+        entry.reason = f"matched {provided.name} in your sources folder{others}{note}"
         return entry
 
     try:

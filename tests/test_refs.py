@@ -290,3 +290,119 @@ def test_bullet_fallback_when_converter_strips_numerals():
     assert entries[0].slug == "fixture-2023"
     assert "wraps onto a continuation line" in entries[1].raw
     assert entries[2].doi is None
+
+
+# ---------------------------------------------------------------------------
+# --provided: the article, not its supplement
+# ---------------------------------------------------------------------------
+#
+# `_match_provided` returned the FIRST filename containing every slug token,
+# over an unsorted `Path.glob`. So a folder holding both the article and its
+# supplement produced an undefined choice — the same sources folder could yield
+# different audits on different machines — and a folder holding only a
+# supplement supplied it as the source. Nothing caught it: the title check runs
+# inside `_accept`, which only sees downloaded candidates, so a provided file
+# was accepted with no verification of any kind.
+
+
+def _entry(slug: str = "littlejohns-2020", raw: str = "Littlejohns TJ et al. (2020) UK Biobank"):
+    from papertrace.models import RefEntry
+
+    return RefEntry(num="3", raw=raw, slug=slug)
+
+
+def _folder(tmp_path: Path, *names: str) -> Path:
+    d = tmp_path / "mine"
+    d.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (d / n).write_bytes(PDF)
+    return d
+
+
+def test_the_article_beats_its_supplement_whichever_order_glob_returns(tmp_path):
+    """Both orderings must give the article. Seeding the two names in each order
+    is the only way to catch a first-hit-wins bug, because glob order follows
+    the filesystem and is not sorted."""
+    from papertrace.refs import _match_provided
+
+    for names in (
+        ("littlejohns-2020.pdf", "littlejohns-2020-supplement.pdf"),
+        ("littlejohns-2020-supplement.pdf", "littlejohns-2020.pdf"),
+    ):
+        d = _folder(tmp_path / str(hash(names)), *names)
+        assert _match_provided(_entry(), d).name == "littlejohns-2020.pdf", names
+
+
+def test_a_supplement_alone_is_not_the_article(tmp_path):
+    """No match, so the online chain can still find the real paper. A recorded
+    `not_retrieved` is honest; a supplement standing in as the source is not."""
+    from papertrace.refs import _match_provided
+
+    d = _folder(tmp_path, "littlejohns-2020-appendix.pdf")
+    assert _match_provided(_entry(), d) is None
+
+
+def test_an_exact_slug_filename_wins_outright(tmp_path):
+    from papertrace.refs import _match_provided
+
+    d = _folder(tmp_path, "littlejohns-2020-cohort-profile-imaging.pdf",
+                "littlejohns-2020.pdf")
+    assert _match_provided(_entry(), d).name == "littlejohns-2020.pdf"
+
+
+def test_several_plausible_matches_pick_deterministically_and_say_so(tmp_path):
+    """Two real candidates is a decision, and the manifest should show one was
+    made rather than implying a single file was found."""
+    from papertrace.refs import _match_provided, resolve_entry
+
+    d = _folder(tmp_path, "littlejohns-2020-imaging-study.pdf",
+                "littlejohns-2020-cohort-profile-long-name.pdf")
+    chosen = _match_provided(_entry(), d)
+    assert chosen.name == "littlejohns-2020-imaging-study.pdf"  # shortest stem
+
+    e = _entry()
+    resolve_entry(e, tmp_path, "t@example.org", _client({}), provided_dir=d)
+    assert e.status == "provided"
+    assert "2" in e.reason, e.reason  # the count of candidates is disclosed
+
+
+def test_the_supplement_markers_do_not_eat_a_real_author(tmp_path):
+    """`si-mohamed-2021` is a real slug from a real audit. A marker list short
+    enough to contain "si" would reject that author's paper outright, which is
+    why nothing under five characters goes in it."""
+    from papertrace.refs import _match_provided
+
+    d = _folder(tmp_path, "si-mohamed-2021.pdf")
+    got = _match_provided(_entry(slug="si-mohamed-2021", raw="Si-Mohamed S (2021)"), d)
+    assert got is not None and got.name == "si-mohamed-2021.pdf"
+
+
+def test_a_provided_file_whose_text_is_the_wrong_paper_says_so(tmp_path):
+    """A provided file is title-checked like a downloaded one — but a failure is
+    disclosed, not fatal. The user named this file and there is nothing to fall
+    back to, so it is still used and the manifest records the mismatch."""
+    import pymupdf
+
+    d = tmp_path / "mine"
+    d.mkdir(parents=True)
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((50, 60), "An entirely different article about volcanoes", fontsize=11)
+    doc.save(d / "littlejohns-2020.pdf")
+    doc.close()
+
+    e = _entry()
+    resolve_entry(e, tmp_path, "t@example.org", _client({}), provided_dir=d)
+    assert e.status == "provided", "the user's explicit choice is still honoured"
+    assert "unverified" in e.reason.lower(), e.reason
+
+
+def test_an_unreadable_provided_file_is_not_called_a_mismatch(tmp_path):
+    """`_title_check_text` documents that an empty or unreadable page passes —
+    unverifiable is not the same as wrong — and a scanned source is exactly the
+    kind people supply by hand. It must not be reported as the wrong paper."""
+    d = _folder(tmp_path, "littlejohns-2020.pdf")  # not a real PDF: no text
+    e = _entry()
+    resolve_entry(e, tmp_path, "t@example.org", _client({}), provided_dir=d)
+    assert e.status == "provided"
+    assert "unverified" not in e.reason.lower(), e.reason
