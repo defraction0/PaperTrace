@@ -24,7 +24,8 @@ COVERAGE_TOKEN = "reached by an extracted claim"
 # published contract — tests/test_coverage.py asserts this literal
 COVERAGE_CAVEAT_TOKEN = "coverage not audited"
 COVERAGE_ATTRIBUTION_TOKEN = "attribution is a text match that can be wrong"
-UNJUDGED_TOKEN = "not opened for this claim"
+UNJUDGED_TOKEN = "could not be obtained, so was never opened"
+MULTISOURCE_TOKEN = "cited sources checked"
 ANCHOR_LOCATED_TOKEN = "red box = matched text"
 ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase was found on this page"
 ANCHOR_UNKNOWN_TOKEN = "anchor match not recorded"
@@ -35,7 +36,7 @@ class Disclosure:
     """One thing the report owes its reader, in three lengths."""
 
     key: str  # truncation | converter | coverage | coverage_caveat
-    #          | coverage_attribution | unjudged_refs | anchor
+    #          | coverage_attribution | sources | unjudged_refs | anchor
     level: str  # info | warn
     token: str  # SHORT literal that must appear verbatim in ALL THREE formats
     text: str  # full sentence for markdown / editor
@@ -292,25 +293,85 @@ def run_disclosures(results) -> list[Disclosure]:
 
 
 def _unjudged(claim) -> Disclosure:
+    """Co-citations that could not be retrieved.
+
+    Every cited source that *was* obtainable is judged and appears in the
+    breakdown, so an entry here carries one meaning only: nobody read it. It is
+    not a negative finding about the source — it is the absence of a finding.
+    """
     labels = f"[{'], ['.join(claim.unjudged_refs)}]"
     one = len(claim.unjudged_refs) == 1
-    was = "was" if one else "were"
-    it = "it" if one else "them"
     return Disclosure(
         key="unjudged_refs",
         level="warn",
         token=UNJUDGED_TOKEN,
         text=(
-            f"Judged against `{claim.source_slug}` only. Co-cited {labels} {was} "
-            f"{UNJUDGED_TOKEN} — this verdict says nothing about {it}."
+            f"Co-cited {labels} {UNJUDGED_TOKEN} — nothing here speaks to "
+            f"{'it' if one else 'them'} either way; the retrieval manifest says why."
         ),
-        short=f"judged against {claim.source_slug} only — co-cited {labels} {UNJUDGED_TOKEN}",
+        short=f"co-cited {labels} {UNJUDGED_TOKEN}",
     )
+
+
+def _sources(claim) -> Disclosure:
+    """How the cited sources fell out — the count that sits under a claim.
+
+    Only for genuinely multi-source claims: a "1 cited source checked" banner
+    on every single-reference claim would be noise, and the plural in the token
+    would be a lie.
+    """
+    s = claim.judgement_summary()
+    # singular/plural per bucket: "1 contradict it" reads as a typo and makes
+    # the one line a reviewer scans hardest look careless
+    phrasing = (
+        ("supported", "fully supports it", "fully support it"),
+        ("partial", "partially supports it", "partially support it"),
+        ("contradicted", "contradicts it", "contradict it"),
+        ("not_addressed", "does not address it", "do not address it"),
+        ("unchecked", "could not be checked", "could not be checked"),
+    )
+    parts = [
+        f"{s[key]} {one if s[key] == 1 else many}"
+        for key, one, many in phrasing
+        if s[key]
+    ]
+    breakdown = "; ".join(parts)
+    # a lone dissenter is the whole reason this box exists, so name the split
+    # rather than leaving the reader to compare numbers
+    split = s["supported"] and (s["contradicted"] or s["partial"])
+    return Disclosure(
+        key="sources",
+        level="warn" if s["contradicted"] else "info",
+        token=MULTISOURCE_TOKEN,
+        text=(
+            f"{s['total']} {MULTISOURCE_TOKEN} for this claim: {breakdown}."
+            + (" The sources disagree — each verdict below rests only on that "
+               "source's own text." if split else "")
+        ),
+        short=f"{s['total']} {MULTISOURCE_TOKEN}: {breakdown}",
+        rows=tuple(
+            f"[{j.ref}] {j.source_slug} — {j.verdict}"
+            + (f" (p{j.source_page})" if j.source_page else "")
+            for j in claim.judgements
+        ),
+    )
+
+
+def judgement_disclosures(j) -> list[Disclosure]:
+    """What one source's judgement owes its reader: the caption for its crop.
+
+    Separate from `claim_disclosures` because a judgement is not a claim — it
+    has no co-citations and no breakdown of its own, only the anchor state of
+    the single page it points at.
+    """
+    return [ANCHOR[anchor_state(j)]] if j.evidence_image else []
 
 
 def claim_disclosures(claim) -> list[Disclosure]:
     """Every claim-level disclosure this ClaimResult owes its reader."""
     out: list[Disclosure] = []
+    if claim.is_multi_source():
+        out.append(_sources(claim))
     if claim.unjudged_refs:
         out.append(_unjudged(claim))
     if claim.evidence_image:

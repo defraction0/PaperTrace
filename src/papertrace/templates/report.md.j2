@@ -3,7 +3,7 @@
 Checker: `{{ r.checker }}` · PaperTrace · {{ r.date }}
 Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs_total }}` cited references available
 
-**Claims:** {{ r.claims|length }} | ✅ **Supported:** {{ counts.supported }} | ⚠️ **Partial:** {{ counts.partial }} | ❌ **Contradicted:** {{ counts.contradicted }} | ⊘ **Not retrieved:** {{ counts.not_retrieved }}{% if counts.unchecked %} | ⚠ **Unchecked (check failed):** {{ counts.unchecked }}{% endif +%}
+**Claims:** {{ r.claims|length }} | ✅ **Supported:** {{ counts.supported }} | ⚠️ **Partial:** {{ counts.partial }} | ❌ **Contradicted:** {{ counts.contradicted }}{% if counts.not_addressed %} | ◌ **Does not address:** {{ counts.not_addressed }}{% endif %} | ⊘ **Not retrieved:** {{ counts.not_retrieved }}{% if counts.unchecked %} | ⚠ **Unchecked (check failed):** {{ counts.unchecked }}{% endif +%}
 {% for d in disclosures if d.key in ("coverage", "coverage_caveat") %}
 **Citation coverage:** {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
 {% if d.rows %}
@@ -28,10 +28,35 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 
 **Status:** {{ c.label }}
 **Location:** {{ c.location }}{% if c.refs %} · cites [{{ c.refs|join(', ') }}]{% endif %}
+{% for d in claim_disclosures(c) if d.key == "sources" %}
+
+> **{{ d.text }}**
+{% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
 
 > ⚠️ {{ d.text }}
 {% endfor %}
+{% if c.judgements %}
+{% for j in c.judgements %}
+
+<br>
+
+### {{ j.label }} — `{{ j.source_slug }}` (cited as [{{ j.ref }}])
+{% if j.source_page %}
+
+- **Source:** Page {{ j.source_page }}{% if j.source_block %} `({{ j.source_block }})` {% endif %}
+{% endif %}
+{% if j.note %}
+
+> {{ j.note }}
+{% endif %}
+{% if j.evidence_image %}
+
+![evidence]({{ j.evidence_image }})
+{% for d in judgement_disclosures(j) %}{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}{% endfor %}
+{% endif %}
+{% endfor %}
+{% else %}
 {% if c.source_slug %}
 
 ### Evidence from: `{{ c.source_slug }}`
@@ -46,6 +71,7 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if c.note %}
 
 > {{ c.note }}
+{% endif %}
 {% endif %}
 {% endfor %}
 

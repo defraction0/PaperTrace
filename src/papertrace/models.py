@@ -166,22 +166,59 @@ class RefManifest:
 # ---------------------------------------------------------------------------
 
 # a model may answer these — they are judgements about a source it read
-JUDGMENT_VERDICTS = ("supported", "partial", "contradicted")
+JUDGMENT_VERDICTS = ("supported", "partial", "contradicted", "not_addressed")
 # only pipeline code assigns these — a model returning one is out of contract
 PIPELINE_STATES = ("not_retrieved", "unchecked")
-# concatenated in this order to reproduce the historical tuple exactly:
-# counts() key order, the schema enum and every rendered report stay identical
+# the pipeline states stay LAST: `not_addressed` was appended to the judgement
+# group, so every pre-existing value keeps its position and only the new one is
+# additive. counts() gains a key; it never reorders or drops one.
 VERDICTS = JUDGMENT_VERDICTS + PIPELINE_STATES
 
 VERDICT_LABEL = {
     "supported": "✅ SUPPORTED",
     "partial": "⚠️ PARTIALLY SUPPORTED",
     "contradicted": "❌ CONTRADICTED",
+    # the source was read and simply does not speak to the claim. NOT a
+    # contradiction (it says nothing otherwise) and NOT partial (there is no
+    # true kernel) — an inapt citation is its own finding
+    "not_addressed": "◌ DOES NOT ADDRESS THE CLAIM",
     "not_retrieved": "⊘ NOT RETRIEVED",
     # the source WAS available but the check itself failed — never disguised
     # as a retrieval gap
     "unchecked": "⚠️ NOT CHECKED (check failed — source available)",
 }
+
+
+@dataclass
+class SourceJudgement:
+    """One cited source's verdict on one claim.
+
+    A claim citing [3] and [5] gets one of these per *available* source: they
+    were both offered as support, so both are checked. Each carries its own
+    note, page anchor and evidence crop, because a reader comparing two sources
+    needs to see which passage each verdict rests on.
+    """
+
+    source_slug: str
+    ref: str  # the citation label this source answers for, e.g. "3"
+    verdict: str = "unchecked"  # one of VERDICTS
+    note: str = ""
+    source_page: int | None = None
+    source_block: str | None = None
+    anchor_phrases: list[str] = field(default_factory=list)
+    evidence_image: str | None = None  # relative path, filled by highlight
+    anchor_located: bool | None = None
+
+    @property
+    def label(self) -> str:
+        return VERDICT_LABEL.get(self.verdict, self.verdict.upper())
+
+
+# how adverse each judgement is, for picking a claim's headline. A single cited
+# source contradicting the claim is the finding a reviewer needs, so it wins
+# over any number of sources that support it — the per-source breakdown beside
+# it is what keeps that from overstating.
+_ADVERSITY = {"supported": 1, "partial": 2, "contradicted": 3}
 
 
 @dataclass
@@ -198,9 +235,11 @@ class ClaimResult:
     source_block: str | None = None  # block id in the source's source_map
     anchor_phrases: list[str] = field(default_factory=list)  # phrases to box in red
     evidence_image: str | None = None  # relative path, filled by highlight step
-    # batch judges a multi-ref claim against the first AVAILABLE source only;
-    # the co-cited sources listed here were never opened and must not be read
-    # as having backed the verdict
+    # one entry per AVAILABLE cited source, each judged in its own model call
+    judgements: list[SourceJudgement] = field(default_factory=list)
+    # co-cited refs that could NOT be obtained, so were never opened. They must
+    # not be read as having backed the verdict. Sources that WERE available are
+    # in `judgements`, not here.
     unjudged_refs: list[str] = field(default_factory=list)
     # False when no anchor phrase was found on the page: the crop is still
     # written for context, but it carries no red box and must not claim one
@@ -209,6 +248,61 @@ class ClaimResult:
     @property
     def label(self) -> str:
         return VERDICT_LABEL.get(self.verdict, self.verdict.upper())
+
+    def is_multi_source(self) -> bool:
+        return len(self.judgements) > 1
+
+    def headline_verdict(self) -> str:
+        """The most adverse verdict any cited source gave.
+
+        `not_addressed` and `unchecked` cannot become the headline while a
+        source actually spoke to the claim — but when none did, saying so *is*
+        the answer. Order matters: a claim no cited source addresses is a
+        citation problem, while one whose checks all failed is a run problem.
+        """
+        if not self.judgements:
+            return self.verdict
+        rated = [j for j in self.judgements if j.verdict in _ADVERSITY]
+        if rated:
+            return max(rated, key=lambda j: _ADVERSITY[j.verdict]).verdict
+        if any(j.verdict == "not_addressed" for j in self.judgements):
+            return "not_addressed"
+        return "unchecked"
+
+    def deciding_judgement(self) -> SourceJudgement | None:
+        """The judgement the headline came from — whose page the crop shows."""
+        want = self.headline_verdict()
+        return next((j for j in self.judgements if j.verdict == want), None)
+
+    def apply_headline(self) -> None:
+        """Copy the deciding judgement up to the claim-level fields.
+
+        The top-level verdict/slug/page predate multi-source checking and stay
+        the wire format every consumer already reads; they must agree with the
+        judgement they came from, or the crop shown beside the headline belongs
+        to a different paper.
+        """
+        if not self.judgements:
+            return
+        self.verdict = self.headline_verdict()
+        d = self.deciding_judgement()
+        if d is None:
+            return
+        self.note = d.note
+        self.source_slug = d.source_slug
+        self.source_page = d.source_page
+        self.source_block = d.source_block
+        self.anchor_phrases = list(d.anchor_phrases)
+        self.evidence_image = d.evidence_image
+        self.anchor_located = d.anchor_located
+
+    def judgement_summary(self) -> dict[str, int]:
+        """How the cited sources fell out — the count beside the claim."""
+        out = {v: 0 for v in VERDICTS}
+        for j in self.judgements:
+            out[j.verdict] = out.get(j.verdict, 0) + 1
+        out["total"] = len(self.judgements)
+        return out
 
 
 @dataclass
@@ -219,6 +313,17 @@ class UncitedClaim:
     id: int
     claim: str
     location: str = ""
+
+
+def _claim_from(d: dict) -> ClaimResult:
+    """Rebuild a claim, nested judgements included.
+
+    `.get` so a results.json written before multi-source checking still loads:
+    it has no `judgements`, and its claim-level verdict was already the answer.
+    """
+    d = dict(d)
+    d["judgements"] = [SourceJudgement(**j) for j in d.get("judgements", [])]
+    return ClaimResult(**d)
 
 
 @dataclass
@@ -276,7 +381,7 @@ class RunResults:
             refs_total=data.get("refs", {}).get("total", 0),
             refs_available=data.get("refs", {}).get("available", 0),
             converter=data.get("converter", "pymupdf"),
-            claims=[ClaimResult(**c) for c in data["claims"]],
+            claims=[_claim_from(c) for c in data["claims"]],
             uncited=[UncitedClaim(**u) for u in data.get("uncited", [])],
             coverage=data.get("coverage", {}),
             truncated=data.get("truncated", {}),

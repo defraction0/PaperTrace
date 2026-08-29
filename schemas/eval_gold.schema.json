@@ -100,8 +100,8 @@
         "claim_location": { "type": "string" },
         "citation_labels": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "gold_verdict": {
-          "enum": ["supported", "partial", "contradicted", "not_retrieved", null],
-          "description": "`unchecked` is deliberately NOT a legal gold verdict: it is a harness error state, never a correct answer. null means the labellers could not agree — the case is kept and excluded from every denominator."
+          "enum": ["supported", "partial", "contradicted", "not_addressed", "not_retrieved", null],
+          "description": "`unchecked` is deliberately NOT a legal gold verdict: it is a harness error state, never a correct answer. `not_addressed` IS legal — a labeller can read a cited source and find it silent on the claim, which is a judgement about the citation, not a harness failure. null means the labellers could not agree — the case is kept and excluded from every denominator."
         },
         "gold_source_slug": { "type": ["string", "null"] },
         "gold_source_page": {

@@ -78,6 +78,16 @@ went uncited?**
   occurrence is a text match the tool can get wrong; an attribution it cannot
   make is reported as *uncertain* and counted as **not** covered, never as
   covered.
+- Judge a co-cited claim against **every** cited source it could retrieve, one
+  model call each, and show the passage behind each verdict. Co-citation is an
+  offer of support, so each source is checked on its own text: a claim citing
+  four references gets four verdicts, four notes and four evidence crops, with a
+  count beside it (*"4 cited sources checked: 2 fully support it; 1 partially
+  supports it; 1 contradicts it"*). The claim's headline is the **most adverse**
+  verdict any of them gave, so one dissenting source is never averaged away.
+  A source that turns out to say nothing about the claim is `◌ does not address
+  the claim` — an inapt citation, distinct from a contradiction and from a
+  retrieval gap.
 - Disclose its ingest fidelity: every report — markdown, editor and terminal —
   names the converter that read the **audited paper**, and a flat-text fallback
   says so loudly. Cited sources are ingested separately (see *Tables and
@@ -99,13 +109,12 @@ went uncited?**
   labels only — `[12]`, `[7,8]`, `[9-11]`. Author-year, parenthetical and
   bare-superscript styles are not audited, and the report says
   *"coverage not audited"* rather than quietly reporting zero gaps.
-- Judge a multi-reference claim against all of its sources **in batch mode**.
-  `papertrace run` judges against the first cited source it could retrieve and
-  names the co-citations it did not open, per claim. The interactive `/review`
-  workflow does weigh all of them.
 - Read the source pages as images. In batch mode the model receives the cited
   source as extracted text with `page / block` provenance markers — the page
   picture is for you, in the evidence crop, not for the judge.
+- Tell you *why* a co-cited source was never opened, beyond its retrieval
+  status. Every cited source that could be obtained is judged; one listed as
+  unopened could not be retrieved, and the manifest carries the reason.
 - Prove that an uncited article *should* have been cited — scout hits are
   candidates for your judgement, never accusations.
 - Guarantee an exhaustive literature search — the scout is search-based, and
@@ -370,8 +379,6 @@ generated: `python scripts/make_logo.py`. Changes are tracked in
 - [ ] More citation styles in the coverage audit — author-year, parenthetical
       numerics and bare superscripts (as in Nature-family journals). The
       report currently says "not audited" instead of silently passing
-- [ ] Multi-reference claims judged against every retrieved source in batch
-      mode, not just the first (the interactive workflow already does)
 - [ ] `--exhaustive` mode — close the gap between what extraction is asked
       for and what it returns: labels the coverage audit reports as unreached
       get a focused second extraction pass, and a citation with no checkable

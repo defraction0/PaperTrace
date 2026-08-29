@@ -176,6 +176,28 @@ gap — which is the shape this release exists to remove.*
 
 ### Changed
 
+- **A co-cited claim is judged against every source it cites, not just the
+  first.** Batch mode used to pick `avail[0]`, judge against that, and file
+  every other co-citation as never opened. Co-citation is an offer of support,
+  so each retrievable source now gets its own model call, its own note and its
+  own evidence crop, with a count beside the claim — *"4 cited sources checked:
+  2 fully support it; 1 partially supports it; 1 contradicts it"*. The claim's
+  headline is the **most adverse** verdict any source gave, so one dissenting
+  reference is never averaged away by two agreeing ones, and the per-source
+  breakdown is always rendered so the headline cannot overstate the split.
+  `unjudged_refs` consequently narrows to one meaning: the source could not be
+  obtained. Cost note: a claim citing four retrievable sources now costs four
+  model calls instead of one.
+- **New verdict `not_addressed`** — the source was read and says nothing about
+  the claim. Fanning a claim out to its co-citations makes this unavoidable: a
+  source cited for another part of a compound claim is not `contradicted` (it
+  does not say otherwise) and not `partial` (there is no true kernel), and
+  forcing it into either would manufacture a finding. An inapt citation is a
+  real result and now has a name. It is appended to `JUDGMENT_VERDICTS`, so
+  every pre-existing verdict keeps its position; `counts()` gains a key and
+  never reorders one. It is also the one verdict with no `source_page`, since
+  there is no passage to point at — demanding one would force the model to cite
+  an absence.
 - **`examples/demo/output/` regenerated** against the current pipeline. The
   committed report predated the disclosure work and showed none of it: it
   named the checker only as `Claude`, reported `all 4 citation labels

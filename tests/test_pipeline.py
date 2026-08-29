@@ -100,7 +100,7 @@ def test_crop_and_reports(fixture_pdf, tmp_path):
     results.to_json(out / "results.json")
     again = RunResults.from_json(out / "results.json")
     assert again.counts() == {"supported": 0, "partial": 1, "contradicted": 0,
-                              "not_retrieved": 1, "unchecked": 0}
+                              "not_addressed": 0, "not_retrieved": 1, "unchecked": 0}
 
 
 def _case_with(tmp_path, manuscript: Path, *, hashed: bool):

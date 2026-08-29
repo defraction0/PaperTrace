@@ -97,7 +97,7 @@ def test_macro_f1_excludes_undefined_classes_and_names_them():
     pc = metrics.per_class(pairs, [g("a", "supported"), g("b", "contradicted")])
     m = metrics.macro_f1(pc)
     assert m["value"] == 1.0
-    assert m["classes_excluded"] == ["partial"]
+    assert m["classes_excluded"] == ["partial", "not_addressed"]
     assert m["classes_included"] == ["supported", "contradicted"]
 
 
@@ -213,7 +213,7 @@ def test_f1_is_zero_for_a_class_present_in_gold_and_always_wrong():
     pc = metrics.per_class(pairs, [g("a", "supported"), g("b", "partial")])
     assert pc["supported"]["f1"] == 0.0
     assert pc["partial"]["f1"] == 0.0
-    assert metrics.macro_f1(pc)["classes_excluded"] == ["contradicted"]
+    assert metrics.macro_f1(pc)["classes_excluded"] == ["contradicted", "not_addressed"]
 
 
 def test_f1_is_zero_for_a_class_in_gold_but_never_predicted():
@@ -253,7 +253,8 @@ def test_macro_f1_exclusion_kind_is_derived_not_constant():
     m = metrics.macro_f1(pc)
     assert "excluded_reason" not in m
     kinds = {e["class"]: e["kind"] for e in m["exclusions"]}
-    assert kinds == {"partial": "absent_from_set", "contradicted": "absent_from_set"}
+    assert kinds == {"partial": "absent_from_set", "contradicted": "absent_from_set",
+                     "not_addressed": "absent_from_set"}
 
 
 def test_macro_f1_names_attrition_when_gold_exists_but_none_reached_j():

@@ -155,8 +155,8 @@ def test_demo_gold_scores_the_committed_demo_run():
         "k": 4, "n": 4, "value": 1.0, "population": "J_answered_page"}
     # demo_v1 genuinely has no `partial` gold case and never predicts one, so
     # this exclusion is true here — unlike the mini fixture's, which was not
-    assert m["macro_f1"]["classes_excluded"] == ["partial"]
-    assert [e["kind"] for e in m["macro_f1"]["exclusions"]] == ["absent_from_set"]
+    assert m["macro_f1"]["classes_excluded"] == ["partial", "not_addressed"]
+    assert [e["kind"] for e in m["macro_f1"]["exclusions"]] == ["absent_from_set", "absent_from_set"]
     # the committed report records no anchor phrases, so this must be undefined
     assert m["anchors"]["anchor_in_gold_passage"]["value"] is None
     assert rec["alignment"]["unmatched_gold"] == []

@@ -17,8 +17,11 @@ Every subsystem encodes this, and most past bugs have been breaches of it:
   verdict.
 - Input truncated at `MANUSCRIPT_CHAR_LIMIT` / `SOURCE_CHAR_LIMIT` is recorded
   in `RunResults.truncated` and disclosed in the report.
-- A multi-reference claim judged in batch mode records the co-citations it did
-  **not** open in `ClaimResult.unjudged_refs`.
+- A co-cited claim is judged against **every** retrievable cited source, one
+  call each, and `ClaimResult.unjudged_refs` holds only those that could not be
+  obtained — so an entry there means nobody read it, not that it lost a
+  tie-break. `not_addressed` exists so a source that says nothing about the
+  claim is not laundered into `partial` or `contradicted`.
 - An evidence crop whose anchor phrase matched nothing sets
   `anchor_located = False` and is captioned as unboxed.
 - A flat-text ingest fallback stamps `converter: pymupdf` into the source map so
@@ -203,8 +206,9 @@ The README is a correctness surface, not marketing: **every technical statement
 must match the implementation.** Its "does / does not" list is the project's
 honest scope — when behaviour changes, that list changes with it. Specific
 current constraints documented there, worth not re-breaking: the coverage audit
-reads bracketed numeric labels only; batch mode judges a multi-reference claim
-against the first available source; the model reads extracted text with page
+reads bracketed numeric labels only; batch mode judges a co-cited claim against
+every retrievable source and reports the most adverse verdict as the claim's
+headline; the model reads extracted text with page
 markers, not page images.
 
 Update `CHANGELOG.md` for any user-visible change, and `README.md` when flags,

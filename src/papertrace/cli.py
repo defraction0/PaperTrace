@@ -359,7 +359,7 @@ def highlight(
     claim: int = typer.Option(None, "--claim", help="Only this claim id"),
 ) -> None:
     """Produce red-box evidence crops for every claim with a page anchor."""
-    from .highlight import crop_for_claim, source_page_count
+    from .highlight import crop_for_anchor, source_page_count
 
     results = RunResults.from_json(case / "out" / "results.json")
     out_dir = case / "out" / "evidence"
@@ -367,38 +367,48 @@ def highlight(
     for c in results.claims:
         if claim is not None and c.id != claim:
             continue
-        img = crop_for_claim(c, case / "sources_resolved", case / "ingest", out_dir)
-        if img is None and c.source_slug:
-            # sources provided by the user live elsewhere — try the manifest path
-            manifest = RefManifest.from_json(case / "refs_manifest.json")
-            entry = next((e for e in manifest.entries if e.slug == c.source_slug), None)
-            if entry and entry.pdf_path:
-                src = Path(entry.pdf_path)
-                tmp = case / "sources_resolved" / f"{c.source_slug}.pdf"
-                if src.exists() and not tmp.exists():
-                    tmp.parent.mkdir(parents=True, exist_ok=True)
-                    tmp.write_bytes(src.read_bytes())
-                    img = crop_for_claim(c, case / "sources_resolved", case / "ingest", out_dir)
-        if img:
-            c.evidence_image = str(Path(img).relative_to(case / "out"))
-            done += 1
-            if c.anchor_located:
-                console.print(f"  [green]✓[/green] claim {c.id}: {c.evidence_image}")
-            else:
-                console.print(
-                    f"  [yellow]○ claim {c.id}: {c.evidence_image} — no anchor phrase "
-                    f"found on the page; crop written unboxed[/yellow]"
-                )
-        elif c.source_slug and c.source_page:
-            # a page the source does not have is not the same as a page that
-            # held nothing — say which it was rather than just writing no crop
-            pdf = case / "sources_resolved" / f"{c.source_slug}.pdf"
-            if pdf.exists() and c.source_page > (n := source_page_count(pdf)):
-                console.print(
-                    f"  [yellow]○ claim {c.id}: the check named page {c.source_page}, "
-                    f"but {c.source_slug} has {n} — no page to read, so no crop "
-                    f"and no anchor claim[/yellow]"
-                )
+        # one crop per cited source, so a multi-source claim shows the passage
+        # behind each verdict. A results.json written before multi-source
+        # checking has no judgements; its own headline anchor is the one target.
+        for a in c.judgements or [c]:
+            img = crop_for_anchor(a, c.id, case / "sources_resolved", case / "ingest", out_dir)
+            if img is None and a.source_slug:
+                # sources provided by the user live elsewhere — try the manifest path
+                manifest = RefManifest.from_json(case / "refs_manifest.json")
+                entry = next((e for e in manifest.entries if e.slug == a.source_slug), None)
+                if entry and entry.pdf_path:
+                    src = Path(entry.pdf_path)
+                    tmp = case / "sources_resolved" / f"{a.source_slug}.pdf"
+                    if src.exists() and not tmp.exists():
+                        tmp.parent.mkdir(parents=True, exist_ok=True)
+                        tmp.write_bytes(src.read_bytes())
+                        img = crop_for_anchor(
+                            a, c.id, case / "sources_resolved", case / "ingest", out_dir
+                        )
+            tag = f"claim {c.id}" + (f" · {a.source_slug}" if c.is_multi_source() else "")
+            if img:
+                a.evidence_image = str(Path(img).relative_to(case / "out"))
+                done += 1
+                if a.anchor_located:
+                    console.print(f"  [green]✓[/green] {tag}: {a.evidence_image}")
+                else:
+                    console.print(
+                        f"  [yellow]○ {tag}: {a.evidence_image} — no anchor phrase "
+                        f"found on the page; crop written unboxed[/yellow]"
+                    )
+            elif a.source_slug and a.source_page:
+                # a page the source does not have is not the same as a page that
+                # held nothing — say which it was rather than just writing no crop
+                pdf = case / "sources_resolved" / f"{a.source_slug}.pdf"
+                if pdf.exists() and a.source_page > (n := source_page_count(pdf)):
+                    console.print(
+                        f"  [yellow]○ {tag}: the check named page {a.source_page}, "
+                        f"but {a.source_slug} has {n} — no page to read, so no crop "
+                        f"and no anchor claim[/yellow]"
+                    )
+        # the claim-level evidence_image must follow the deciding judgement, or
+        # the crop shown beside the headline belongs to a different source
+        c.apply_headline()
     results.to_json(case / "out" / "results.json")
     console.print(f"[bold]{done}[/bold] evidence crops written")
 

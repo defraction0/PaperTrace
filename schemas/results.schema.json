@@ -53,9 +53,11 @@
               "supported",
               "partial",
               "contradicted",
+              "not_addressed",
               "not_retrieved",
               "unchecked"
-            ]
+            ],
+            "description": "The claim's headline: the most adverse verdict any cited source gave. `not_addressed` means every available cited source was read and none spoke to the claim — distinct from `contradicted` (a source says otherwise) and from `not_retrieved` (no source could be obtained). Per-source detail is in `judgements`."
           },
           "note": {
             "type": "string"
@@ -90,12 +92,43 @@
               "null"
             ]
           },
+          "judgements": {
+            "type": "array",
+            "description": "One entry per AVAILABLE cited source, each judged in its own model call. Absent on results.json written before multi-source checking, where the claim-level fields were the whole answer.",
+            "items": {
+              "type": "object",
+              "required": ["source_slug", "ref", "verdict"],
+              "properties": {
+                "source_slug": { "type": "string" },
+                "ref": {
+                  "type": "string",
+                  "description": "The citation label this source answers for, e.g. \"3\"."
+                },
+                "verdict": {
+                  "enum": [
+                    "supported",
+                    "partial",
+                    "contradicted",
+                    "not_addressed",
+                    "not_retrieved",
+                    "unchecked"
+                  ]
+                },
+                "note": { "type": "string" },
+                "source_page": { "type": ["integer", "null"] },
+                "source_block": { "type": ["string", "null"] },
+                "anchor_phrases": { "type": "array", "items": { "type": "string" } },
+                "evidence_image": { "type": ["string", "null"] },
+                "anchor_located": { "type": ["boolean", "null"] }
+              }
+            }
+          },
           "unjudged_refs": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Co-cited labels that were NOT opened for this claim: batch judges a multi-reference claim against the first available cited source only. The verdict says nothing about these."
+            "description": "Co-cited labels that could NOT be obtained, so were never opened. The verdict says nothing about these. Sources that WERE available appear in `judgements` instead."
           },
           "anchor_located": {
             "type": [

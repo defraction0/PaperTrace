@@ -23,6 +23,7 @@ from .models import (
     PIPELINE_STATES,
     ClaimResult,
     RefManifest,
+    SourceJudgement,
     UncitedClaim,
 )
 
@@ -104,10 +105,15 @@ Judge each CLAIM below strictly against the SOURCE text (a cited paper,
 converted to markdown with `<!-- block_NNNN, page N -->` markers). The source
 text is the only evidence — never use outside knowledge of the paper.
 
+A claim may cite several sources. You are shown ONE of them. Judge only what
+THIS source does or does not say, and do not speculate about the others: each
+is judged in its own call and the results are combined afterwards.
+
 For each claim output:
 - verdict: "supported" (source states it), "partial" (kernel true but scope,
-  strength or object differs — say what differs), or "contradicted" (source
-  says otherwise — quote its actual figure).
+  strength or object differs — say what differs), "contradicted" (source says
+  otherwise — quote its actual figure), or "not_addressed" (this source simply
+  does not speak to the claim).
 - note: ≤2 sentences, the why.
 - source_page: page of the decisive passage (integer).
 - source_block: its block id, e.g. "block_0042".
@@ -115,9 +121,19 @@ For each claim output:
   text search will find (numbers and distinctive wording; unique within the
   block).
 
+Use "not_addressed" when the source is about something else, or covers the
+topic but never states the specific fact claimed. It is a normal, useful
+answer, not a failure — a citation that does not support what it is cited for
+is exactly what this review is looking for. Do NOT reach for "contradicted"
+(which asserts the source says otherwise) or "partial" (which asserts a true
+kernel) to describe silence. For "not_addressed", omit source_page,
+source_block and anchor_phrases: there is no passage to point at.
+
 Answer with ONLY a JSON array, no prose, no code fences:
 [{"id":3,"verdict":"partial","note":"...","source_page":5,
-  "source_block":"block_0042","anchor_phrases":["p < 0.001"]}, ...]
+  "source_block":"block_0042","anchor_phrases":["p < 0.001"]},
+ {"id":4,"verdict":"not_addressed","note":"Reports incidence only; says
+  nothing about mortality."}, ...]
 
 CLAIMS:
 <<CLAIMS>>
@@ -529,9 +545,24 @@ def _judgement_from(entry) -> tuple[dict | None, str]:
     if verdict not in JUDGMENT_VERDICTS:
         return None, f"model returned an unusable verdict ({verdict!r})"
 
-    # source_page is REQUIRED: without it the report prints a literal "Page
-    # None", crop_for_claim bails so no evidence exists, and the reader cannot
-    # falsify the verdict. bool is excluded first — isinstance(True, int) is True.
+    # `not_addressed` is the one verdict with no decisive passage to point at:
+    # the source was read and says nothing about the claim, so there is no page
+    # to show. Demanding one would force the model to invent a citation for an
+    # absence — the exact fabrication this validator exists to stop.
+    if verdict == "not_addressed":
+        note = entry.get("note")
+        return {
+            "verdict": verdict,
+            "note": note if isinstance(note, str) else "",
+            "source_page": None,
+            "source_block": None,
+            "anchor_phrases": [],
+        }, ""
+
+    # source_page is REQUIRED for every other verdict: without it the report
+    # prints a literal "Page None", crop_for_claim bails so no evidence exists,
+    # and the reader cannot falsify it. bool is excluded first —
+    # isinstance(True, int) is True.
     raw_page = entry.get("source_page")
     unusable_page = (
         f"model returned an unusable verdict for this claim: {verdict!r} with no "
@@ -601,20 +632,28 @@ def check_claims(
     """
     by_slug: dict[str, list[ClaimResult]] = {}
     for c in claims:
-        entries = [_slug_for_ref(manifest, r) for r in c.refs]
-        avail = [e for e in entries if e and e.status in ("retrieved", "provided") and e.slug]
+        pairs = [(r, _slug_for_ref(manifest, r)) for r in c.refs]
+        avail = [(r, e) for r, e in pairs if e and e.status in ("retrieved", "provided") and e.slug]
         if not avail:
             c.verdict = "not_retrieved"
-            reasons = {e.status for e in entries if e}
+            reasons = {e.status for _, e in pairs if e}
             c.note = f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
             continue
-        # judge against the first available cited source; multi-ref nuance is
-        # the interactive mode's job. The co-citations are recorded as unjudged
-        # so the verdict never implies they were read.
-        primary = avail[0]
-        c.source_slug = primary.slug
-        c.unjudged_refs = [r for r in c.refs if r != primary.num]
-        by_slug.setdefault(primary.slug, []).append(c)
+        # Co-citation is an offer of support: every source cited for this claim
+        # was put forward as backing it, so every one that could be obtained is
+        # judged. One call per source, so each verdict rests on that source's
+        # text alone and a long source cannot crowd out a short one.
+        seen_slugs: set[str] = set()
+        for r, e in avail:
+            if e.slug in seen_slugs:  # the same paper cited under two labels
+                continue
+            seen_slugs.add(e.slug)
+            c.judgements.append(SourceJudgement(source_slug=e.slug, ref=r))
+            by_slug.setdefault(e.slug, []).append(c)
+        # what is left here could NOT be obtained — the only remaining reason a
+        # cited source goes unopened
+        avail_refs = {r for r, _ in avail}
+        c.unjudged_refs = [r for r in c.refs if r not in avail_refs]
 
     for slug, group in by_slug.items():
         try:
@@ -644,11 +683,16 @@ def check_claims(
         except Exception as e:  # noqa: BLE001 — a failed check must never kill the run
             msg = f"{type(e).__name__}: {str(e)[:300]}"
             for c in group:
-                c.verdict = "unchecked"
-                c.note = (
-                    f"check failed ({msg}) — the source WAS retrieved; "
-                    f"re-run `papertrace check` to retry"
-                )
+                # only THIS source's judgement fails. Another co-cited source
+                # may already have produced a real verdict, and discarding it
+                # would report a gap that does not exist.
+                j = next((x for x in c.judgements if x.source_slug == slug), None)
+                if j is not None:
+                    j.verdict = "unchecked"
+                    j.note = (
+                        f"check failed ({msg}) — the source WAS retrieved; "
+                        f"re-run `papertrace check` to retry"
+                    )
             if on_error:
                 on_error(slug, msg)
             continue
@@ -656,19 +700,27 @@ def check_claims(
         # relabel our own bugs as the model's fault. The per-group except above
         # stays as scoped — ingest/prompt/_ask failures really are group-wide.
         for c in group:
+            j = next((x for x in c.judgements if x.source_slug == slug), None)
+            if j is None:  # pragma: no cover - group membership implies one
+                continue
             v = verdicts.get(c.id)
             if v is None:
-                c.verdict, c.note = "unchecked", "model returned no verdict for this claim"
+                j.verdict, j.note = "unchecked", "model returned no verdict for this claim"
                 continue
             fields, why = _judgement_from(v)
             if fields is None:
-                c.verdict, c.note = "unchecked", why
+                j.verdict, j.note = "unchecked", why
                 continue
-            c.verdict = fields["verdict"]
-            c.note = fields["note"]
-            c.source_page = fields["source_page"]
-            c.source_block = fields["source_block"]
-            c.anchor_phrases = fields["anchor_phrases"]
+            j.verdict = fields["verdict"]
+            j.note = fields["note"]
+            j.source_page = fields["source_page"]
+            j.source_block = fields["source_block"]
+            j.anchor_phrases = fields["anchor_phrases"]
         if progress:
             progress(slug, group)
+
+    # the claim-level fields are a summary of the judgements, never a separate
+    # opinion — derive them once, after every source has answered
+    for c in claims:
+        c.apply_headline()
     return claims

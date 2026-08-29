@@ -15,7 +15,12 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import __version__
-from .disclosures import anchor_state, claim_disclosures, run_disclosures
+from .disclosures import (
+    anchor_state,
+    claim_disclosures,
+    judgement_disclosures,
+    run_disclosures,
+)
 from .models import JUDGMENT_VERDICTS, RefManifest, RunResults, ScoutResults
 
 # package data, not a repo-relative path: an installed wheel has no repo
@@ -61,6 +66,7 @@ def write_reports(
         "disclosures": run_disclosures(results),
         "claim_disclosures": claim_disclosures,
         "anchor_state": anchor_state,
+        "judgement_disclosures": judgement_disclosures,
     }
 
     written: list[Path] = []

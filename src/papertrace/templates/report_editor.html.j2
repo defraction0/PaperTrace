@@ -96,6 +96,9 @@
       <b class="g">✅ Supported:</b> <span class="cnt g">{{ counts.supported }}</span><span class="sep">|</span>
       <b class="a">⚠️ Partial:</b> <span class="cnt a">{{ counts.partial }}</span><span class="sep">|</span>
       <b class="r">❌ Contradicted:</b> <span class="cnt r">{{ counts.contradicted }}</span><span class="sep">|</span>
+{% if counts.not_addressed %}
+      <b class="a">◌ Does not address:</b> <span class="cnt a">{{ counts.not_addressed }}</span><span class="sep">|</span>
+{% endif %}
       <b class="n">⊘ Not retrieved:</b> <span class="cnt n">{{ counts.not_retrieved }}</span>{% if counts.unchecked %}<span class="sep">|</span>
       <b class="r">⚠ Unchecked:</b> <span class="cnt r">{{ counts.unchecked }}</span>{% endif %}
     </p>
@@ -122,9 +125,29 @@
 {% for c in checked %}
     <h2><span class="hx">##</span> Claim {{ c.id }}: <span class="q">“{{ c.claim }}”</span></h2>
     <div class="status {{ c.verdict }}"><span class="lbl">Status:</span> <span class="val">{{ c.label }}</span></div>
+{% for d in claim_disclosures(c) if d.key == "sources" %}
+    <p class="src-summary"><b>{{ d.text }}</b></p>
+{% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
     <p class="cap"><span style="color:var(--amber)">⚠ {{ d.text }}</span></p>
 {% endfor %}
+{% if c.judgements %}
+{% for j in c.judgements %}
+    <h3><span class="hx">###</span> <span class="status {{ j.verdict }}">{{ j.label }}</span> — <span class="slug">{{ j.source_slug }}</span> <span class="cap">cited as [{{ j.ref }}]</span></h3>
+{% if j.source_page %}
+    <ul class="src"><li><b>Source:</b> Page {{ j.source_page }}{% if j.source_block %} <code>({{ j.source_block }})</code>{% endif %}</li></ul>
+{% endif %}
+{% if j.note %}
+    <p class="cap">{{ j.note }}</p>
+{% endif %}
+{% if j.evidence_image %}
+    <figure>
+      <img class="crop" src="{{ j.evidence_image }}">
+      <figcaption>![evidence] {{ j.source_slug }} · page {{ j.source_page }} · {% for d in judgement_disclosures(j) %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}</figcaption>
+    </figure>
+{% endif %}
+{% endfor %}
+{% else %}
 {% if c.source_slug %}
     <h3><span class="hx">###</span> Evidence from: <span class="slug">{{ c.source_slug }}</span></h3>
     <ul class="src"><li><b>Source:</b> Page {{ c.source_page }}, {{ c.location }}{% if c.source_block %} <code>({{ c.source_block }})</code>{% endif %}</li></ul>
@@ -137,6 +160,7 @@
 {% endif %}
 {% if c.note %}
     <p class="cap">{{ c.note }}</p>
+{% endif %}
 {% endif %}
 {% endfor %}
 

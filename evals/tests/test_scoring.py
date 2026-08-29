@@ -13,7 +13,7 @@ def test_the_absent_class_caveat_is_not_emitted_when_the_class_is_present(
     """
     rec = scoring.score(gold_mini, results_mini)
     assert not any("partial absent" in c for c in rec["caveats"])
-    assert rec["metrics"]["macro_f1"]["classes_excluded"] == []
+    assert rec["metrics"]["macro_f1"]["classes_excluded"] == ["not_addressed"]
 
 
 def test_macro_f1_on_the_mini_fixture_keeps_the_class_it_got_wrong(
@@ -35,7 +35,7 @@ def test_the_absence_caveat_still_fires_for_a_genuinely_absent_class(
     ]}
     rec = scoring.score(trimmed, results_mini)
     kinds = {e["class"]: e["kind"] for e in rec["metrics"]["macro_f1"]["exclusions"]}
-    assert kinds == {"partial": "absent_from_set"}
+    assert kinds == {"partial": "absent_from_set", "not_addressed": "absent_from_set"}
     assert any("partial" in c and "no gold" in c for c in rec["caveats"])
 
 

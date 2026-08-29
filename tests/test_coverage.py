@@ -194,10 +194,14 @@ def test_malformed_verdict_becomes_unchecked_never_partial(tmp_path, monkeypatch
     assert all(c.verdict != "partial" for c in claims)
 
 
-def test_multiref_claim_records_the_sources_it_never_opened(tmp_path, monkeypatch):
-    """Batch judges a multi-ref claim against the first available source only.
-    The co-citations must be recorded as unjudged, so the verdict never implies
-    they were read."""
+def test_multiref_claim_records_only_the_sources_it_could_not_obtain(tmp_path, monkeypatch):
+    """Behaviour changed deliberately: batch used to judge `avail[0]` only and
+    file every co-citation as unjudged. Every obtainable cited source is judged
+    now, so `unjudged_refs` means one thing — the source could not be had.
+
+    See tests/test_multisource.py for the fan-out itself; this pins the boundary
+    between the two registers, which is where a regression would hide.
+    """
     import papertrace.check as check_mod
     from papertrace.check import check_claims
     from papertrace.models import RefEntry
@@ -219,13 +223,21 @@ def test_multiref_claim_records_the_sources_it_never_opened(tmp_path, monkeypatc
 
     c = claims[0]
     assert c.verdict == "supported"
-    assert c.source_slug == "c-2020"          # avail[0] is what was judged
-    assert c.unjudged_refs == ["7", "9"]      # neither was opened for this claim
+    # [3] and [7] were both retrieved, so both were judged...
+    assert sorted(j.ref for j in c.judgements) == ["3", "7"]
+    assert {j.verdict for j in c.judgements} == {"supported"}
+    # ... and only the paywalled [9] remains unopened
+    assert c.unjudged_refs == ["9"]
 
 
 def test_unjudged_refs_are_disclosed_in_the_report(tmp_path):
-    """A supported multi-ref verdict must say on the page which co-cited
-    sources it did not open."""
+    """A verdict must say on the page which co-cited sources nobody could read.
+
+    The wording changed with multi-source checking: an obtainable co-citation is
+    judged now, so this register means *unobtainable* and says so, rather than
+    the older ambiguous "not opened" that covered both.
+    """
+    from papertrace.disclosures import UNJUDGED_TOKEN
     from papertrace.report import write_reports
 
     r = RunResults(
@@ -236,7 +248,8 @@ def test_unjudged_refs_are_disclosed_in_the_report(tmp_path):
     )
     write_reports(r, None, tmp_path, png=False)
     md = (tmp_path / "report.md").read_text()
-    assert "not opened for this claim" in md
+    assert UNJUDGED_TOKEN in md
+    assert "[7]" in md          # the label a reader has to look up
     assert "c-2020" in md
 
 

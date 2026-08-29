@@ -98,8 +98,9 @@ The point of a release is that someone reads the README and believes it.
 
 - [ ] Every technical statement still matches the implementation. In
       particular: coverage audits **bracketed numeric** labels only; batch
-      judges a multi-reference claim against the **first available** source;
-      the model reads extracted text with page markers, **not** page images.
+      judges a co-cited claim against **every retrievable** cited source and
+      takes the most adverse verdict as the headline; the model reads extracted
+      text with page markers, **not** page images.
 - [ ] No accuracy, benchmark or performance figure is claimed anywhere.
 - [ ] No hard-coded test count (it goes stale; the CI badge is the signal).
 - [ ] `examples/demo/output/report.md` still reflects what a re-run produces —
