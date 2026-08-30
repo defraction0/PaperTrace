@@ -105,6 +105,10 @@
           }
         }
       }
+    },
+    "references_resumed": {
+      "type": "boolean",
+      "description": "True when the reference list was picked up again after an intervening section, so the entry numbering spans a boundary the parser chose to cross. Gated on block type and run length, but still a judgement — the reader should be able to check it."
     }
   }
 }

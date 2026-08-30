@@ -224,3 +224,71 @@ def test_the_terminal_template_names_every_disclosure_key_that_exists():
         f"report_terminal.html.j2 renders no branch for {sorted(missing)} — "
         "its filter is an allow-list, so a new disclosure is dropped, not surfaced"
     )
+
+
+# --- a reference list read across a section break says so ------------------
+
+
+def test_a_resumed_reference_list_is_disclosed_in_all_three_formats(tmp_path):
+    """Crossing a section boundary to finish the bibliography is a guess, and
+    the numbering of the later entries depends on it. The previous behaviour —
+    stopping at the first heading — failed the other way and failed silently:
+    a real paper reported 9 references and never attempted the other 6."""
+    from papertrace.models import RefEntry, RefManifest
+
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num=str(i), raw=f"Author {i}. A paper. 2020.", status="paywalled")
+                 for i in range(1, 16)],
+        references_resumed=True,
+    )
+    results = RunResults(manuscript="m.pdf", converter="pymupdf", claims=[_claim()])
+
+    write_reports(results, manifest, tmp_path, png=False)
+    rendered = {name: (tmp_path / name).read_text() for name in FORMATS}
+
+    d = next((x for x in run_disclosures(results, manifest) if x.key == "references_resumed"), None)
+    assert d is not None, [x.key for x in run_disclosures(results, manifest)]
+    for name, body in rendered.items():
+        assert d.token in body, f"token {d.token!r} missing from {name}"
+
+
+def test_an_uninterrupted_reference_list_adds_no_warning(tmp_path):
+    """An ordinary paper must not grow a caveat it has not earned."""
+    from papertrace.models import RefEntry, RefManifest
+
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num="1", raw="Author. A paper. 2020.", status="retrieved")],
+    )
+    fired = run_disclosures(
+        RunResults(manuscript="m.pdf", converter="pymupdf", claims=[_claim()]), manifest
+    )
+    assert not any(d.key == "references_resumed" for d in fired)
+
+
+def test_references_resumed_round_trips_and_older_manifests_still_load(tmp_path):
+    """New field ⇒ schema update plus a round-trip test, and absent-safe: a
+    manifest written before this field has no such key."""
+    import json as _json
+
+    import jsonschema
+
+    from papertrace.models import RefEntry, RefManifest
+
+    path = tmp_path / "refs_manifest.json"
+    RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num="1", raw="Author. A paper. 2020.", status="retrieved")],
+        references_resumed=True,
+    ).to_json(path)
+
+    schema_path = Path(__file__).resolve().parent.parent / "schemas" / "refs_manifest.schema.json"
+    payload = _json.loads(path.read_text())
+    jsonschema.validate(payload, _json.loads(schema_path.read_text()))
+    assert RefManifest.from_json(path).references_resumed is True
+
+    del payload["references_resumed"]          # a pre-field manifest
+    path.write_text(_json.dumps(payload))
+    jsonschema.validate(_json.loads(path.read_text()), _json.loads(schema_path.read_text()))
+    assert RefManifest.from_json(path).references_resumed is False
