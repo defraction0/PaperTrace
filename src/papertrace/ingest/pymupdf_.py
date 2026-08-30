@@ -16,7 +16,7 @@ try:
 except ImportError:  # pragma: no cover - older PyMuPDF exposes only `fitz`
     import fitz
 
-from ..models import Block, SourceMap
+from ..models import Block, SourceMap, is_references_heading
 
 _HEADING_MAX_LEN = 120
 
@@ -74,17 +74,28 @@ def ingest_blocks_pymupdf(pdf_path: Path) -> tuple[int, list[Block]]:
 
 
 def references_section(smap: SourceMap) -> str:
-    """Return the text of the References/Bibliography section, if found."""
-    pat = re.compile(r"^(references|bibliography|literature)\b", re.I)
+    """Return the text of the References/Bibliography section, if found.
+
+    A block whose *entire* text is the heading word counts as the heading even
+    when ingest typed it as body text. Flat-text ingest guesses headings from
+    font size, and on a real Elsevier paper it guessed wrong — three author
+    lines became headings and `References` stayed body text, so the audit
+    stopped at "No numbered references found" on a paper with 34 of them.
+
+    Requiring the whole block to be the word, not merely to start with it, is
+    what keeps "References were checked by hand" from swallowing the paper.
+    """
     started = False
     out: list[str] = []
     for b in smap.blocks:
-        if b.type == "sectionheader":
+        # the SAME rule coverage_audit uses — see models.is_references_heading
+        if is_references_heading(b.type, b.text):
             if started:
                 break
-            if pat.match(b.text.strip()):
-                started = True
+            started = True
             continue
+        if b.type == "sectionheader" and started:
+            break  # the next real heading ends the list
         if started:
             out.append(b.text)
     return "\n".join(out)

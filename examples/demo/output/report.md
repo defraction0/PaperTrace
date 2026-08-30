@@ -1,10 +1,14 @@
 # Fact-Check Report
 
-Checker: `Claude` · PaperTrace · 2026-08-16
+Checker: `claude -p · claude-opus-5[1m]` · PaperTrace · 2026-08-30
 Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 **Claims:** 5 | ✅ **Supported:** 2 | ⚠️ **Partial:** 0 | ❌ **Contradicted:** 2 | ⊘ **Not retrieved:** 1
-**Citation coverage:** all 4 citation labels covered ✓
+**Citation coverage:** 5/5 citation occurrences reached by an extracted claim, across 4 labels — 0 unaddressed, 0 uncertain. Coverage counts places an extracted claim *reached*, not sources that were read.
+
+> Ingest `converter: docling 2.118.1` — layout-aware.
+
+> ⚠️ How to read that figure: attribution is a text match that can be wrong — deciding which citation a claim came from is a text comparison, so the counts can be right while a pointer is wrong. An attribution the tool cannot make counts as NOT covered, never as covered — and it refuses close calls, so two similar sentences citing one reference can both read as unaddressed where a reader would pair them at a glance. This figure understates coverage there. A sentence citing the same reference twice needs two extracted claims, so the ratio is not comparable between papers. And detection still reads bracketed numeric markers only — a citation style it cannot see contributes no occurrences at all, which makes this ratio look better than reality, not worse.
 
 ---
 
@@ -12,50 +16,54 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 **Status:** ❌ CONTRADICTED
 **Location:** Background ¶1 · cites [1]
-### Evidence from: `pyrros-2023`
+<br>
+
+### ❌ CONTRADICTED — `pyrros-2023` (cited as [1])
 
 - **Source:** Page 4 `(block_0094)` 
+> The source does detect T2D from frontal CXRs with deep learning, but its external validation at a separate institution gave a ROC AUC of 0.77, not 0.94 (internal prospective AUC was 0.84).
+
 ![evidence](evidence/claim_01_pyrros-2023_p4.png)
 *red box = matched text*
-
-> The source reports an external validation ROC AUC of 0.77 (Emory cohort), not 0.94; even the internal prospective test AUC was only 0.84.
-
 ## Claim 3: "The UK Biobank cohort profile describes recruitment of approximately 500,000 adults aged 40-69 years."
 
 **Status:** ✅ SUPPORTED
 **Location:** Population imaging ¶1 · cites [2]
-### Evidence from: `sudlow-2015`
+<br>
+
+### ✅ SUPPORTED — `sudlow-2015` (cited as [2])
 
 - **Source:** Page 1 `(block_0006)` 
+> The source states UK Biobank has over 500,000 participants aged 40–69 years recruited in 2006–2010, matching both the size and age range claimed.
+
 ![evidence](evidence/claim_03_sudlow-2015_p1.png)
 *red box = matched text*
-
-> The summary states UK Biobank recruited over 500,000 participants aged 40–69 years in 2006–2010, matching the claim's cohort size and age range.
-
 ## Claim 4: "The UK Biobank imaging enhancement targets 100,000 participants."
 
 **Status:** ✅ SUPPORTED
 **Location:** Population imaging ¶1 · cites [3]
-### Evidence from: `littlejohns-2020`
+<br>
 
-- **Source:** Page 1 `(block_0004)` 
-![evidence](evidence/claim_04_littlejohns-2020_p1.png)
+### ✅ SUPPORTED — `littlejohns-2020` (cited as [3])
+
+- **Source:** Page 2 `(block_0013)` 
+> The source states the imaging enhancement aims to scan 100,000 of the 500,000 existing UK Biobank participants.
+
+![evidence](evidence/claim_04_littlejohns-2020_p2.png)
 *red box = matched text*
-
-> The abstract states the imaging study aims to re-invite 100,000 participants for multi-modal imaging, and this target is repeated throughout the paper.
-
 ## Claim 5: "Nearly one in five confirmed participants had not attended an imaging assessment centre."
 
 **Status:** ❌ CONTRADICTED
 **Location:** Population imaging ¶1 · cites [3]
-### Evidence from: `littlejohns-2020`
+<br>
+
+### ❌ CONTRADICTED — `littlejohns-2020` (cited as [3])
 
 - **Source:** Page 3 `(block_0027)` 
+> Among confirmed participants the source reports 97% attended and only 3% have not yet attended, not nearly one in five; the 17% figure applies to invited participants who did not wish to attend, not to confirmed ones.
+
 ![evidence](evidence/claim_05_littlejohns-2020_p3.png)
 *red box = matched text*
-
-> The source says 97% of confirmed, eligible participants who booked an appointment attended an imaging assessment centre — only 3% had not yet attended, not nearly one in five. The ~29% figure in the flow chart refers to confirmed participants ineligible after pre-screen, not non-attendance.
-
 ---
 
 ## Not verified — source not retrieved, or check failed (1 of 5)

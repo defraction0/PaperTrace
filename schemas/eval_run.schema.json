@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "eval_run",
+  "description": "The machine-readable score of one run against one gold set. `caveats` is deliberately part of the data, not just the rendered page: a caveat you have to remember is a caveat that gets dropped. Rates are objects, never bare floats, so an undefined value (n = 0) can never be mistaken for zero, and every rate names the population its denominator was drawn from so two rates with the same n cannot be confused. `eligibility` records the cases that were NOT scored and why; they stay in the record, because deleting them would quietly make the set easier.",
+  "type": "object",
+  "required": ["schema", "gold", "eligibility", "populations", "alignment", "metrics", "per_case", "caveats"],
+  "properties": {
+    "schema": { "const": "eval_run/2" },
+    "gold": {
+      "type": "object",
+      "required": ["set_id", "kind", "n_cases", "n_scored"],
+      "properties": {
+        "set_id": { "type": ["string", "null"] },
+        "kind": { "enum": ["demonstration", "benchmark"] },
+        "title": { "type": "string" },
+        "n_cases": { "type": "integer" },
+        "n_scored": { "type": "integer" },
+        "n_unresolved": { "type": "integer", "description": "Cases with null gold verdict, excluded from every denominator." },
+        "n_excluded_drift": { "type": "integer", "description": "Cases excluded because a cited source's availability changed since the set was frozen." }
+      }
+    },
+    "provenance": { "type": "object" },
+    "eligibility": {
+      "type": "object",
+      "description": "Which cases were scored and why the rest were not. Excluded cases remain in `per_case` and are rendered in their own report section.",
+      "required": ["n_eligible", "excluded", "refs_verification"],
+      "properties": {
+        "n_eligible": { "type": "integer" },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["case_id", "reason", "detail"],
+            "properties": {
+              "case_id": { "type": "string" },
+              "reason": { "enum": ["gold_verdict_unresolved", "refs_status_drift"] },
+              "detail": { "type": "string", "description": "Computed from the data, never a constant sentence." }
+            }
+          }
+        },
+        "refs_verification": {
+          "type": "array",
+          "description": "Sources whose availability could not be checked. Reported, NOT excluded: unverifiable is not the same as wrong.",
+          "items": { "type": "object" }
+        },
+        "still_counted_in": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "populations": {
+      "type": "object",
+      "description": "Every denominator in the record, computed independently of the metrics. Each rate names one of these; a denominator that has drifted from the population it claims fails a test instead of printing a plausible number.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["n", "definition"],
+        "properties": {
+          "n": { "type": "integer" },
+          "definition": { "type": "string" }
+        }
+      }
+    },
+    "alignment": {
+      "type": "object",
+      "required": ["matched", "fuzzy_fraction"],
+      "properties": {
+        "matched": { "type": "integer" },
+        "exact": { "type": "integer" },
+        "similarity": { "type": "integer" },
+        "discriminator": { "type": "integer" },
+        "fuzzy_fraction": { "type": "number" },
+        "unmatched_gold": {
+          "type": "array",
+          "description": "Derived reasons: extraction_gap (the tool's own audit flagged the label), ambiguous (a contest the aligner refused to decide), attribution_undetermined (the tool's coverage audit could not be read, so blame cannot be assigned to either side), otherwise alignment_failure_or_paraphrase_drift."
+        },
+        "unmatched_predictions": { "type": "array" },
+        "ambiguous": { "type": "array" },
+        "detail": { "type": "array" }
+      }
+    },
+    "confusion": { "type": "object" },
+    "metrics": {
+      "type": "object",
+      "required": ["judgment_accuracy", "per_class", "macro_f1", "retrieval",
+                   "pages", "anchors", "coverage", "errors"],
+      "properties": {
+        "judgment_accuracy": { "$ref": "#/$defs/rate" },
+        "binary_contradiction_detection": { "$ref": "#/$defs/rate" },
+        "per_class": { "type": "object" },
+        "macro_f1": {
+          "type": "object",
+          "description": "F1 is undefined only when a class appears in NEITHER column of J (nothing predicted it and no gold instance reached J). A class that is present and always wrong scores 0.0 and stays in the mean; excluding it would delete the run's failures from its own grade.",
+          "required": ["value", "classes_included", "classes_excluded", "exclusions"],
+          "properties": {
+            "value": { "type": ["number", "null"] },
+            "classes_included": { "type": "array", "items": { "type": "string" } },
+            "classes_excluded": { "type": "array", "items": { "type": "string" } },
+            "n_classes": { "type": "integer" },
+            "exclusions": {
+              "type": "array",
+              "description": "Replaces the former `excluded_reason`, which was one constant sentence covering every exclusion and was therefore false whenever the class was present but eliminated.",
+              "items": {
+                "type": "object",
+                "required": ["class", "kind", "detail"],
+                "properties": {
+                  "class": { "type": "string" },
+                  "kind": {
+                    "enum": ["absent_from_set", "eliminated_by_attrition"],
+                    "description": "Derived from the counts in `counts`, never asserted."
+                  },
+                  "detail": { "type": "string" },
+                  "counts": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "pairs": { "type": "object" },
+        "retrieval": { "type": "object" },
+        "pages": { "type": "object" },
+        "anchors": { "type": "object" },
+        "coverage": { "type": "object" },
+        "errors": { "type": "object" }
+      }
+    },
+    "per_case": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["case_id", "gold", "predicted", "match_stage"],
+        "properties": {
+          "case_id": { "type": "string" },
+          "claim": { "type": "string" },
+          "gold": { "type": ["string", "null"] },
+          "predicted": { "type": ["string", "null"] },
+          "correct": { "type": "boolean" },
+          "match_stage": { "enum": ["exact", "similarity", "discriminator", "unmatched", "ambiguous"] },
+          "eligible": { "type": "boolean" },
+          "excluded_reason": { "type": ["string", "null"] },
+          "excluded_detail": { "type": ["string", "null"] },
+          "match_score": { "type": "number" },
+          "gold_page": { "type": ["integer", "null"] },
+          "pred_page": { "type": ["integer", "null"] },
+          "why": { "type": "string" },
+          "pred_note": { "type": "string" }
+        }
+      }
+    },
+    "caveats": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "rate": {
+      "type": "object",
+      "required": ["k", "n", "value", "population"],
+      "description": "A fraction that remembers its denominator and where the denominator came from. `value` is null when n = 0 — undefined, not zero. `population` keys into the record's `populations` block: two rates with n = 4, one over M and one over J_gold, are otherwise indistinguishable in JSON.",
+      "properties": {
+        "k": { "type": "integer" },
+        "n": { "type": "integer" },
+        "value": { "type": ["number", "null"] },
+        "population": { "type": "string" }
+      }
+    }
+  }
+}

@@ -94,7 +94,19 @@ def main() -> None:
 
     import glob
 
-    from playwright.sync_api import sync_playwright
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        # `[dev]` does not carry playwright, so a contributor who followed
+        # CONTRIBUTING and then tried the demo used to get a bare traceback.
+        # Say what to install, the way render.py does for the same import.
+        raise SystemExit(
+            "This script renders the demo paper with playwright, which is not "
+            "installed.\n"
+            "    pip install -e \".[png]\"      # or \".[full]\" for docling too\n"
+            "    playwright install chromium\n"
+            "then re-run this script."
+        ) from None
 
     exe = None
     hits = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))

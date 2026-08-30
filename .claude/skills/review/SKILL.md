@@ -1,6 +1,6 @@
 ---
 name: review
-description: Run an agentic audit of a scientific paper — collect the paper, sources and the user's questions, retrieve cited references, fact-check the high-value citation-backed claims against the actual source pages with visual evidence, deterministically report every citation label the checks did not cover, scout newer and uncited literature, and draft the findings. Use when the user wants to audit a paper's citations, fact-check a paper, review a manuscript, or prepare a reviewer report.
+description: Run an agentic audit of a scientific paper — collect the paper, sources and the user's questions, retrieve cited references, fact-check the citation-backed claims against the cited source pages with visual evidence, deterministically report the citation labels no checked claim reached, scout newer and uncited literature, and draft the findings. Use when the user wants to audit a paper's citations, fact-check a paper, review a manuscript, or prepare a reviewer report.
 ---
 
 # PaperTrace — interactive audit
@@ -106,13 +106,19 @@ Never bypass a paywall. Never pretend a source was read that wasn't.
 
 ## 4b · Tables and figures
 
-If the ingest ran with the docling backend (check `converter` in
-`source_map.json`), table blocks are real GFM tables and figure blocks carry
-captions with page bboxes. While working through Results/Discussion, **render
-and look at them**: crop any table or figure block via the highlight tooling
-and view the image — subgroup rows and forest plots hold findings the prose
-may omit. If the converter is `pymupdf`, say so to the user up front: tables
-were linearized, and table-borne claims deserve extra manual attention.
+**Name the ingest backend to the user up front, either way** — read `converter`
+from `source_map.json` and say it in your first message after ingest. Not only
+when it is bad news: a reader who is told nothing cannot judge the fidelity of
+what follows in either direction, and the CLI now states it at the start and the
+end of every run. Say also that cited sources are always read as flat text, so a
+"docling" line is not mistaken for a claim about them.
+
+If the backend is `docling`, table blocks are real GFM tables and figure blocks
+carry captions with page bboxes. While working through Results/Discussion,
+**render and look at them**: crop any table or figure block via the highlight
+tooling and view the image — subgroup rows and forest plots hold findings the
+prose may omit. If it is `pymupdf`, tables were linearized and figures are
+invisible, so table-borne claims deserve extra manual attention.
 
 ## 5 · Fact-check loop — the core
 

@@ -53,9 +53,11 @@
               "supported",
               "partial",
               "contradicted",
+              "not_addressed",
               "not_retrieved",
               "unchecked"
-            ]
+            ],
+            "description": "The claim's headline: the most adverse verdict any cited source gave. `not_addressed` means every available cited source was read and none spoke to the claim — distinct from `contradicted` (a source says otherwise) and from `not_retrieved` (no source could be obtained). Per-source detail is in `judgements`."
           },
           "note": {
             "type": "string"
@@ -89,6 +91,51 @@
               "string",
               "null"
             ]
+          },
+          "judgements": {
+            "type": "array",
+            "description": "One entry per AVAILABLE cited source, each judged in its own model call. Absent on results.json written before multi-source checking, where the claim-level fields were the whole answer.",
+            "items": {
+              "type": "object",
+              "required": ["source_slug", "ref", "verdict"],
+              "properties": {
+                "source_slug": { "type": "string" },
+                "ref": {
+                  "type": "string",
+                  "description": "The citation label this source answers for, e.g. \"3\"."
+                },
+                "verdict": {
+                  "enum": [
+                    "supported",
+                    "partial",
+                    "contradicted",
+                    "not_addressed",
+                    "not_retrieved",
+                    "unchecked"
+                  ]
+                },
+                "note": { "type": "string" },
+                "source_page": { "type": ["integer", "null"] },
+                "source_block": { "type": ["string", "null"] },
+                "anchor_phrases": { "type": "array", "items": { "type": "string" } },
+                "evidence_image": { "type": ["string", "null"] },
+                "anchor_located": { "type": ["boolean", "null"] }
+              }
+            }
+          },
+          "unjudged_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Co-cited labels that could NOT be obtained, so were never opened. The verdict says nothing about these. Sources that WERE available appear in `judgements` instead."
+          },
+          "anchor_located": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "False when no anchor phrase was found on the evidence page — the crop exists but carries no red box. null before the highlight step runs."
           }
         }
       }
@@ -119,6 +166,7 @@
     },
     "coverage": {
       "type": "object",
+      "description": "The deterministic citation audit. The three label-level keys are the original contract and keep their meaning exactly; the occurrence-level keys are additive and NOTHING new is required, so a results.json written before coverage/2 still validates.",
       "properties": {
         "labels_in_text": {
           "type": "array",
@@ -128,14 +176,109 @@
         },
         "covered": {
           "type": "array",
+          "description": "Labels cited by at least one extracted claim. NOT redefined as 'labels with at least one covered occurrence' — that would push an all-uncertain label into `missing` and silently change a published key.",
           "items": {
             "type": "string"
           }
         },
         "missing": {
           "type": "array",
+          "description": "Labels no extracted claim cites. A list of label strings; evals/align.py intersects it to decide whether an unmatched gold case is the tool's failure or the evaluator's.",
           "items": {
             "type": "string"
+          }
+        },
+        "schema": {
+          "type": "string",
+          "description": "'coverage/2' when occurrence-level keys are present. Absent means the label-level audit that shipped before them.",
+          "enum": ["coverage/2"]
+        },
+        "unit": {
+          "type": "string",
+          "enum": ["occurrence"]
+        },
+        "source": {
+          "type": "string",
+          "description": "Where occurrences were read from. source_map is authoritative (block, page, heading path); clean.md is the fallback for a case folder with no map and carries neither block nor page.",
+          "enum": ["source_map", "clean.md", "none"]
+        },
+        "labels_partially_covered": {
+          "type": "array",
+          "description": "Labels reached by a claim in one place and not in another. A gold case sitting on such an occurrence is an extraction gap, not an alignment failure.",
+          "items": { "type": "string" }
+        },
+        "labels_uncertain_only": {
+          "type": "array",
+          "description": "Labels whose every occurrence is `uncertain`: a claim cites the label and the tool cannot say which place it came from.",
+          "items": { "type": "string" }
+        },
+        "occurrences": {
+          "type": "object",
+          "properties": {
+            "total": { "type": "integer" },
+            "covered": { "type": "integer" },
+            "uncovered": { "type": "integer" },
+            "uncertain": {
+              "type": "integer",
+              "description": "Never counted as covered and never as uncovered. A third status, always printed beside the ratio."
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "label", "status"],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "block:offset:label, or clean:offset:label under the clean.md fallback. A group [7,8] yields two occurrences sharing block and offset, distinct by label."
+                  },
+                  "label": { "type": "string" },
+                  "block": { "type": ["string", "null"] },
+                  "page": { "type": ["integer", "null"] },
+                  "offset": { "type": "integer" },
+                  "group": { "type": "string", "description": "The bracketed group as printed, e.g. '7,8'." },
+                  "section": { "type": "string" },
+                  "sentence": { "type": "string", "description": "The sentence carrying the marker, clipped to ±120 chars around it." },
+                  "status": { "enum": ["covered", "uncovered", "uncertain"] },
+                  "claim_id": { "type": ["integer", "null"] }
+                }
+              }
+            }
+          }
+        },
+        "attribution": {
+          "type": "object",
+          "description": "How claims were matched to occurrences. Reading-order zipping is deliberately not used: the order is unverified and degrades silently on one skipped claim.",
+          "properties": {
+            "method": { "type": "string" },
+            "min_ratio": { "type": "number" },
+            "min_margin": { "type": "number" },
+            "claims_unattributed": {
+              "type": "array",
+              "description": "Claims citing a label that reached no specific occurrence — surplus claims, and claims the attributor refused to place.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "claim_id": { "type": "integer" },
+                  "label": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "truncated": {
+      "type": "object",
+      "description": "Inputs the character limits cut short. Keys are 'manuscript' or 'source:<slug>'; text past the cut was never sent to the model, so it was never checked.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "chars": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
           }
         }
       }

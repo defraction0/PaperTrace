@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "papertrace"
-version = "0.3.1"
-description = "Trace a published paper's claims back to what its cited sources actually say — then scout the literature that came after. High-value claims checked with page-level visual evidence; uncovered citation labels reported deterministically."
+dynamic = ["version"]
+description = "Trace a published paper's claims back to what its cited sources actually say — then scout the literature that came after. Citation-backed claims checked against the cited pages with page-level visual evidence; citation labels no claim reached are reported deterministically."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -33,7 +33,10 @@ dependencies = [
 png = ["playwright>=1.45"]
 docling = ["docling>=2.0"]
 full = ["playwright>=1.45", "docling>=2.0"]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+dev = ["pytest>=8.0", "ruff>=0.5", "jsonschema>=4.0",
+       # 3.10 has no tomllib, and without a parser the whole packaging
+       # suite skipped on the oldest version requires-python allows
+       'tomli>=2.0; python_version < "3.11"']
 
 [project.scripts]
 papertrace = "papertrace.cli:main"
@@ -44,11 +47,54 @@ Issues = "https://github.com/defraction0/PaperTrace/issues"
 Changelog = "https://github.com/defraction0/PaperTrace/blob/main/CHANGELOG.md"
 Releases = "https://github.com/defraction0/PaperTrace/releases"
 
+# single source of truth for the version — pyproject reads __init__.py,
+# so the two can no longer drift apart
+[tool.hatch.version]
+path = "src/papertrace/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/papertrace"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "templates", "prompts", "schemas", "README.md", "LICENSE"]
+# Hatchling include/exclude patterns are gitignore-style, so a bare "README.md"
+# matches at ANY depth. That is why v0.3.1's sdist carried evals/README.md and
+# examples/demo/README.md and nothing else from either tree — the packaged
+# evals README documented a runner the archive did not contain. Root-level
+# files are anchored with "/"; directories are named explicitly.
+#
+# evals/tests ships on purpose: testpaths below names it, and an archive whose
+# config points at a directory it does not carry makes bare pytest fail on
+# collection. A harness without the tests that prove its arithmetic is an
+# unverifiable harness.
+include = [
+    "/src",
+    "/prompts",
+    "/schemas",
+    "/evals",
+    "/tests",
+    "/examples",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/CONTRIBUTING.md",
+    "/CLAUDE.md",
+    "/CITATION.cff",
+]
+# The explicit guard — do not rely on hatchling honouring VCS ignores. The
+# entries below that sit outside every include root (case, demo_case, dist,
+# .serena, .claude) cannot ship regardless and are guards, not fixes; they
+# hold if an include is ever widened.
+exclude = [
+    "evals/runs/**",
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/.DS_Store",
+    "/.serena/**",
+    "/.claude/settings.local.json",
+    "/case/**",
+    "/demo_case/**",
+    "/dist/**",
+]
 
 [tool.ruff]
 line-length = 100
@@ -62,4 +108,4 @@ ignore = ["E501"]
 "src/papertrace/cli.py" = ["B008"]  # typer's option-in-default idiom
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "evals/tests"]

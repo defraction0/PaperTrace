@@ -10,6 +10,13 @@
     "manuscript": {
       "type": "string"
     },
+    "manuscript_sha256": {
+      "description": "sha256 of the audited manuscript's bytes — the case folder's content identity. Absent on manifests written before content hashing, which fall back to comparing the file name.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "summary": {
       "type": "object"
     },
@@ -78,6 +85,23 @@
               "string",
               "null"
             ]
+          },
+          "boundary_ambiguous": {
+            "type": "boolean",
+            "description": "True when the reference label occurred more than once before the next reference, so the entry's start is a guess. Such an entry is never resolved: nothing derived from its text may be trusted to name a paper."
+          },
+          "title_check": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "verified",
+              "unverifiable",
+              "mismatch",
+              null
+            ],
+            "description": "Whether anyone established that the retrieved or provided file is the paper the reference names. 'unverifiable' (e.g. a scanned first page) is not 'verified' and must never be reported as a match."
           }
         }
       }

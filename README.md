@@ -1,13 +1,17 @@
 <p align="center">
-  <img src="assets/logo.png" width="180" alt="PaperTrace — pixel-art logo: a paper page under a magnifying glass, one line boxed in red">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/assets/logo.png" width="180" alt="PaperTrace — pixel-art logo: a paper page under a magnifying glass, one line boxed in red">
 </p>
 
 <h1 align="center">PaperTrace</h1>
 
+<p align="center">
+  <a href="https://github.com/defraction0/PaperTrace/actions/workflows/ci.yml"><img src="https://github.com/defraction0/PaperTrace/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+</p>
+
 <p align="center"><b>Check what a scientific paper claims against what its cited sources actually say.</b></p>
 
-<p align="center">PaperTrace retrieves legally available cited PDFs, checks the paper's high-value<br>
-citation-backed claims against the actual source pages, and shows the evidence —<br>
+<p align="center">PaperTrace retrieves legally available cited PDFs, checks the paper's<br>
+citation-backed claims against the text of the cited pages, and shows the evidence —<br>
 the matched text boxed in red on the real page.</p>
 
 <p align="center"><b>An unread source never receives a verdict.<br>
@@ -18,13 +22,13 @@ A missed citation is reported, not silently skipped.</b></p>
   <a href="#quick-start">Quick start</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#ethics--scope">Ethics &amp; scope</a> ·
-  <a href="https://github.com/defraction0/PaperTrace/releases/latest">v0.3.0 (beta)</a>
+  <a href="https://github.com/defraction0/PaperTrace/releases/latest">Latest release (beta)</a>
 </p>
 
 <p align="center"><sub>Open source · Python 3.10+ · local CLI and case files · claim checking currently uses <a href="https://claude.com/claude-code">Claude Code</a> · built for published papers</sub></p>
 
 <p align="center">
-  <a href="examples/demo/output/report_terminal.png"><img src="docs/hero.png" width="80%" alt="One checked claim from the demo report: the paper claims an external validation AUC of 0.94, the verdict is CONTRADICTED, and the cited source's real page shows the matched text — an AUC of 0.77 — boxed in red. Click for the full report."></a>
+  <a href="https://github.com/defraction0/PaperTrace/blob/main/examples/demo/output/report_terminal.png"><img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/hero.png" width="80%" alt="One checked claim from the demo report: the paper claims an external validation AUC of 0.94, the verdict is CONTRADICTED, and the cited source's real page shows the matched text — an AUC of 0.77 — boxed in red. Click for the full report."></a>
 </p>
 
 ---
@@ -33,7 +37,9 @@ A missed citation is reported, not silently skipped.</b></p>
 > [`examples/demo/output/report.md`](examples/demo/output/report.md) audits a
 > fictional mini-review with planted citation errors and real, published
 > references: **2 supported · 2 contradicted · 1 not retrieved · 1 uncited
-> assertion** — the planted errors, and exactly them.
+> assertion** — the planted errors, and exactly them, *in that run*. Extraction
+> and judgement are model steps, so the committed report is an inspectable
+> artefact, not a guaranteed re-run.
 
 Pick a paper that matters to you — the landmark your project builds on, the
 method paper you are about to adopt, your own published work. PaperTrace
@@ -48,17 +54,44 @@ went uncited?**
 - Retrieve what the paper cites through legal open-access routes only
   (Crossref → Unpaywall → Europe PMC → arXiv) — and reject a downloaded PDF
   that doesn't look like the cited paper (title sanity check), rather than
-  judge claims against the wrong text.
-- Check the paper's high-value citation-backed claims against the actual
-  text of the cited pages, with page-level provenance for every verdict.
-- Show the evidence: real page crops with the matched text boxed in red —
-  placed by text search, never by hand. Tables and figures included.
+  judge claims against the wrong text. The check needs 35% of the reference's
+  distinctive words on the retrieved first page; a first page that is **empty
+  or unreadable** (scanned, image-only) **passes** — unverifiable is not the
+  same as wrong, so a scanned source is checked rather than silently discarded.
+- Attempt to extract **every** citation-backed claim, then judge each against
+  the text of its cited source, with page-level provenance for every verdict.
+  Extraction is a model step, so it is an attempt, not a guarantee — which is
+  why the coverage audit below exists.
+- Show the evidence: real page crops with the matched text boxed in red.
+  Claude proposes the page, the block and verbatim anchor phrases; Python then
+  finds those phrases in the PDF and draws the boxes — placed by text search,
+  never by hand, and never by the model. A crop whose anchor matched nothing
+  is shown unboxed and labelled as such.
 - Preserve unavailable sources as explicit gaps: a claim whose source
   couldn't be retrieved is `⊘ not retrieved` — recorded, never guessed.
-- Deterministically report every citation label the checks did not cover,
-  and register assertions carrying no citation at all.
-- Disclose its ingest fidelity: every report is stamped with the converter
-  that read the PDF, and a flat-text fallback says so loudly.
+- Report every citation **occurrence** — each bracketed marker at its own place
+  in the text — that no extracted claim reached, so a second sentence citing an
+  already-checked reference is not silently counted as covered. It also
+  registers assertions carrying no citation at all. **Detection** is mechanical
+  and prompt-independent (a regex over bracketed numeric labels): if extraction
+  skipped a citation, it shows up here. **Attribution** of a claim to a specific
+  occurrence is a text match the tool can get wrong; an attribution it cannot
+  make is reported as *uncertain* and counted as **not** covered, never as
+  covered.
+- Judge a co-cited claim against **every** cited source it could retrieve, one
+  model call each, and show the passage behind each verdict. Co-citation is an
+  offer of support, so each source is checked on its own text: a claim citing
+  four references gets four verdicts, four notes and four evidence crops, with a
+  count beside it (*"4 cited sources checked: 2 fully support it; 1 partially
+  supports it; 1 contradicts it"*). The claim's headline is the **most adverse**
+  verdict any of them gave, so one dissenting source is never averaged away.
+  A source that turns out to say nothing about the claim is `◌ does not address
+  the claim` — an inapt citation, distinct from a contradiction and from a
+  retrieval gap.
+- Disclose its ingest fidelity: every report — markdown, editor and terminal —
+  names the converter that read the **audited paper**, and a flat-text fallback
+  says so loudly. Cited sources are ingested separately (see *Tables and
+  figures are evidence too*).
 - Keep the human responsible for interpretation — it prepares evidence and
   drafts; the conclusions are yours.
 
@@ -67,9 +100,33 @@ went uncited?**
 - Bypass paywalls — what it can't get legally, it reports as not obtainable.
 - Treat model memory as evidence — verdicts come only from retrieved or
   user-provided pages.
-- Check literally every citation-bearing sentence — yet. It selects
-  high-value claims, then tells you exactly which citation labels were not
-  covered (an `--exhaustive` mode is on the roadmap).
+- **Guarantee** that every citation-bearing sentence was checked. The
+  extraction prompt asks for all of them, but a model's recall is not a
+  guarantee — so the coverage audit reports which labels no claim reached.
+  That is a disclosure mechanism, not proof of exhaustive sentence-level
+  coverage (an `--exhaustive` mode is on the roadmap).
+- Audit every citation style. The coverage audit reads **bracketed numeric**
+  labels only — `[12]`, `[7,8]`, `[9-11]`. Author-year, parenthetical and
+  bare-superscript styles are not audited, and the report says
+  *"coverage not audited"* rather than quietly reporting zero gaps.
+- Read the source pages as images. In batch mode the model receives the cited
+  source as extracted text with `page / block` provenance markers — the page
+  picture is for you, in the evidence crop, not for the judge.
+- Tell you *why* a co-cited source was never opened, beyond its retrieval
+  status. Every cited source that could be obtained is judged; one listed as
+  unopened could not be retrieved, and the manifest carries the reason.
+- **Read the audited paper's supplemental material.** Only the single PDF you
+  pass is ingested. A claim living in an eTable, appendix or supporting-
+  information file is not extracted, its citation labels are not counted in the
+  coverage audit, and it is **not** reported as unread — it is simply absent.
+  This is the one gap in the tool that is silent rather than disclosed, so it is
+  named here. Merge the supplement into the main PDF before running if you need
+  it audited.
+- **Fetch the supplements of cited sources.** The resolver chain returns the
+  article. A claim resting on a source's supplementary figure or table is judged
+  against its main text alone, which can come back `partial` or `does not
+  address the claim` for a reason that belongs to retrieval rather than to the
+  source.
 - Prove that an uncited article *should* have been cited — scout hits are
   candidates for your judgement, never accusations.
 - Guarantee an exhaustive literature search — the scout is search-based, and
@@ -78,7 +135,31 @@ went uncited?**
 
 ## Quick start
 
-### Interactive — the `/review` skill (recommended)
+### Guided — `papertrace`, and answer the questions
+
+```bash
+pip install -e ".[full]"     # standard install — layout-aware ingest
+papertrace                   # asks for the paper, the DOI and your email
+```
+
+Nothing to memorise. It checks your setup first — so a missing `claude` CLI is
+a sentence before you type anything, not a traceback twenty minutes in — then
+asks one question at a time: the paper (drag the file in; quotes and escaped
+spaces are fine), where to keep the audit, whether the paper is published, and
+a contact email it offers to remember. Before spending anything it tells you
+how many model calls the run will make and asks you to confirm, and when you
+say yes it prints the equivalent one-line command so you can repeat or script
+it next time.
+
+`papertrace start` does the same thing explicitly. Without an interactive
+terminal — a pipe, a CI job — bare `papertrace` prints help instead of waiting
+on stdin.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, a DOI found on the first page offered for confirmation, a contact email it offers to remember — and finally the cost stated as up to 25 model calls before asking permission to start.">
+</p>
+
+### Interactive — the `/review` skill (deepest mode)
 
 ```bash
 git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
@@ -96,7 +177,7 @@ journal's reviewer form, which it reads and answers question by question.
 Then it retrieves, checks, crops, and drafts, showing you evidence as it goes
 and batching its questions.
 
-### Batch — one command, markdown out
+### Batch — one command, scriptable
 
 ```bash
 pip install -e ".[full]"        # standard install (see matrix below)
@@ -111,19 +192,55 @@ Install options:
 | `pip install -e ".[full]"` | ⭐ **standard install** — layout-aware ingest (real tables, figures, lists) + PNG rendering. Pulls torch; first run downloads docling's layout models (~500 MB, once) |
 | `pip install -e ".[docling]"` | layout-aware ingest only |
 | `pip install -e ".[png]"` | PNG report rendering only |
+| `pip install -e ".[dev]"` | the test and lint tooling — `pytest`, `ruff`, `jsonschema`. This is what CI installs |
+| `pip install -e ".[dev,full]"` | everything: run audits **and** run the suite |
 | `pip install -e .` | minimal core — flat-text ingest. For CI and constrained machines; every report will carry a "tables linearized" warning |
+
+> **`[full]` does not include the test tooling.** The extras are independent:
+> `full` is user features, `dev` is `pytest` + `ruff`. Installing `[full]` and
+> then running `pytest` finds whatever `pytest` happens to be on your `PATH` —
+> usually a system one, with none of this project's dependencies — and fails
+> with `ModuleNotFoundError: No module named 'pymupdf'`. If you intend to run
+> the suite, install `".[dev,full]"` and invoke it as `python -m pytest`, which
+> fails loudly instead of silently using the wrong interpreter.
 
 `--backend auto` (default) uses docling when installed and falls back to flat
 text otherwise — and the report always says which one ran, because a
 linearized table is a degradation worth disclosing.
 
+**`--provided` matches by filename**, so the name decides which file stands for
+a reference. Files must contain the reference's author and year (`pyrros-2023`
+matches `pyrros-2023.pdf` and `pyrros-et-al-2023-chest-radiographs.pdf`), and
+where several match, an exact `<author>-<year>.pdf` wins, else the shortest
+name. A filename that reads as supplemental material — `supplement`, `appendix`,
+`supporting information`, `ESM`, `online only` — is **not** used as the source,
+and if it is the only match the reference is left to the online resolver
+instead: a supplement is not the paper it accompanies. Rename it to the plain
+`<author>-<year>.pdf` if you do mean it to stand in. Provided files are
+title-checked like downloaded ones, but a mismatch is recorded in the manifest
+rather than refused — you named the file, so it is used and the doubt is
+disclosed.
+
 Output in `case/out/`: `report.md` with inline evidence images, the same
 report as a dark **editor-window** page and as a **terminal-run** page
 (`report_editor.html`, `report_terminal.html`), plus machine-readable
-`results.json`, `scout.json` and the retrieval manifest. The scout step is on
-by default (`--no-scout` to skip); pass `--doi` if the title lookup picks the
-wrong paper. Want shareable PNG images of the report looks? Add `--png`
-(one-time setup: `playwright install chromium`).
+`results.json` and `scout.json`. The retrieval manifest is written one level
+up, at `case/refs_manifest.json`. Want shareable PNG images of the report
+looks? Add `--png` (one-time setup: `playwright install chromium`).
+
+**`--doi` is the DOI of the paper you are auditing** — not of anything it
+cites. It is optional, and it feeds only the literature scout, which has to
+identify your paper in Europe PMC before it can look for work published since
+or work in the field you did not cite. Nothing else in the audit uses it: the
+verdicts, evidence crops and coverage figures are identical with or without.
+
+- **Published paper** → pass it. Without it the scout falls back to matching by
+  title, and a *wrong* match is silent: the scan anchors to somebody else's
+  paper and the two registers describe that one instead. The report flags
+  `resolved_via: title`, but it does not error.
+- **Unpublished manuscript** → there is no DOI to pass, and the scout can never
+  identify it. Use `--no-scout` to skip the step rather than reading an empty
+  result as "nothing to find". The guided flow does this for you.
 
 **One case folder per paper.** `case` is only the default name — give each
 paper its own (`papertrace run zhang2025.pdf -c zhang2025`). Re-running the
@@ -131,16 +248,28 @@ same paper into its case is fine; pointing a *different* paper at a used
 case is refused, so two audits can never mix.
 
 Batch checking runs on headless Claude Code (`claude -p`) — it inherits your
-existing login, **no API key to configure**. Every other step (ingest,
-retrieval, scout, crops, reports) is deterministic Python.
+existing login, **no API key to configure**. It is the **only step that calls a
+model**; every other step is plain Python. Ingest, crops and reports are also
+**deterministic** — same input, same output. Retrieval and the scout are
+**not**: they query Crossref, Unpaywall, Europe PMC and arXiv live, so their
+results depend on those services, on their index state and on the date of the
+run. Re-running the same paper a month later can legitimately produce a
+different manifest.
 
 ## What a real run looks like
+
+> **One run, not a benchmark.** What follows is a single unscripted audit,
+> reported to show the *shape* of the output. It is not an accuracy
+> measurement, the numbers would move between runs, and the artefact is not
+> shareable — the source PDFs are publisher-controlled, so the case folder
+> cannot be committed. For what is measurable and inspectable, see
+> [Testing and evaluation](#testing-and-evaluation).
 
 A real, unscripted audit of a published paper (Zhang et al., *Nature Mental
 Health* 3, 1168–1180, 2025 —
 [doi:10.1038/s44220-025-00501-8](https://doi.org/10.1038/s44220-025-00501-8)):
 86 cited references, of which 22 had legal open-access copies — the other 64
-are recorded as not obtainable, never guessed. 15 high-value claims were read
+are recorded as not obtainable, never guessed. 15 extracted claims were read
 against their cited pages: **8 supported, 7 partial, 0 contradicted**. The
 partials are the interesting part — a Methods sentence calling tests
 "well-established" whose own cited source describes them as "brief and
@@ -150,7 +279,7 @@ the possible carrier of the other half. Candidates for your judgement, not
 accusations.
 
 <p align="center">
-  <a href="docs/real_audit_terminal.png"><img src="docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: three checked claims, each shown with the actual page of its cited source and the matched text boxed in red — a Methods claim its own cited source describes differently, a supported claim, and a two-reference claim split into its checked and unretrieved halves"></a>
+  <a href="https://github.com/defraction0/PaperTrace/blob/main/docs/real_audit_terminal.png"><img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: three checked claims, each shown with the actual page of its cited source and the matched text boxed in red — a Methods claim its own cited source describes differently, a supported claim, and a two-reference claim split into its checked and unretrieved halves"></a>
 </p>
 
 ## Tables and figures are evidence too
@@ -160,8 +289,19 @@ figure is found, checked, and shown like any other — cell and in-figure
 numbers boxed by text search on the real page:
 
 <p align="center">
-  <img src="docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
 </p>
+
+That layout fidelity is spent on the **audited paper**. In batch mode a cited
+source that has **not yet been ingested** is ingested with the fast flat-text
+backend, so its tables reach the judge linearised and its figures not at all.
+`check` reuses an existing `case/ingest/<slug>/annotated.md` if one is already
+there — so a source you ingested yourself with `papertrace ingest --backend
+docling` keeps its layout, and the report does **not** currently distinguish
+the two cases. The
+red box still lands correctly either way — PDF text search doesn't care about
+layout — but a claim resting on a figure inside a *cited source* is weaker
+evidence than one resting on its prose.
 
 ## Try the demo yourself
 
@@ -173,7 +313,8 @@ attendance figure that contradicts the cited flow chart, a headline resting
 on a paywalled source that is honestly reported as unverifiable, and one
 assertive sentence with no citation at all.
 
-The run takes about five minutes; the first time adds two one-time downloads
+One run of this demo took 95 seconds end to end with the layout models already
+downloaded — one run, not a benchmark. The first time adds two one-time downloads
 (chromium ~150 MB, docling's layout models ~500 MB). **Prerequisite:**
 [Claude Code](https://claude.com/claude-code) installed and logged in — the
 claim checker runs on `claude -p`.
@@ -187,11 +328,24 @@ papertrace run examples/demo/demo_manuscript.pdf -c demo_case   # 4 · audit it
 
 When it finishes, open `demo_case/out/report.md`. Expected result:
 **2 supported · 2 contradicted · 1 not retrieved**, one uncited assertion
-flagged, all 4 citation labels covered. (The scout step reports the fictional
-paper as *not identified* in Europe PMC — the tool would rather say so than
-invent neighbours. Verdict wording can vary slightly run to run; the planted
-errors are always caught.) Details per plant:
+flagged, and all 5 citation occurrences — spread across the 4 labels — reached
+by an extracted claim, 0 uncertain. (The scout step reports the fictional paper
+as *not identified* in Europe PMC — the tool would rather say so than invent
+neighbours. Verdict wording varies run to run, and
+extraction and judgement are live model behaviour that nothing in the code
+constrains — so treat these numbers as what the demo has produced, not as a
+promise. If a re-run misses a plant, that is a real result about the model, and
+`examples/demo/` documents each plant so you can see exactly what was missed.)
+Details per plant:
 [`examples/demo/`](examples/demo/).
+
+> **Note:** the committed `examples/demo/output/` is the output of a real run
+> (2026-08-30, docling 2.118.1) and matches what the current code produces. It
+> stays an inspectable artefact, not a byte-exact expected output: judgement
+> wording differs between runs, and so can the page an anchor is found on — the
+> crop for claim 4 moved from page 1 to page 2 across two runs that reached the
+> same verdict. No claim in the demo cites more than one reference, so the
+> per-source breakdown and its summary count do not appear in it.
 
 ## How it works
 
@@ -240,12 +394,54 @@ audit craft lives in [`prompts/review_core.md`](prompts/review_core.md).
   report. The scout is search-based and says so: absence from its lists
   proves nothing.
 
+## Testing and evaluation
+
+These are two different things, and the project keeps them apart on purpose.
+
+**Software tests — what CI runs.** `tests/` holds conventional unit and
+integration tests. They make **no network calls and no model calls**: the
+reference resolver runs against `httpx.MockTransport`, PDFs are generated
+in-test with pymupdf, and the single `claude -p` touchpoint sits behind a seam
+that tests replace. They run in CI on every pull request and on every push to
+`main`, across Python 3.10–3.14 (see the badge above). A push to a feature
+branch with no open PR triggers nothing — run `pytest -q` locally. They tell you the *plumbing* is correct — ingest, retrieval,
+coverage arithmetic, crop placement, report rendering, JSON round-trips.
+
+**They tell you nothing about whether the model's verdicts are right.**
+
+**Model evaluation — under development.** Judging claims is a model step, so
+its quality is an empirical question that unit tests cannot answer. The
+protocol for answering it — evaluation unit, paired cases, metric definitions,
+labelling policy — is specified in [`evals/DESIGN.md`](evals/DESIGN.md), with
+an offline scoring harness in [`evals/`](evals/). A formal evaluation dataset
+is **still being built**; what ships today is the design, the scaffold, and a
+demonstration fixture.
+
+**The demonstration is not a benchmark.** [`examples/demo/`](examples/demo/) is
+a small controlled example: one fictional manuscript with **deliberately
+planted citation errors**, citing four real published papers. It shows the
+pipeline catching defects that were put there on purpose. It is five cases,
+authored and labelled by this project's own maintainer, and it measures
+nothing about performance on real manuscripts.
+
+No accuracy figure is claimed anywhere in this README, because none has been
+measured.
+
 ## Development
 
 ```bash
 pip install -e ".[dev,png]"
 pytest          # fixtures only — no network, no LLM
-ruff check src tests scripts
+ruff check src tests scripts evals
+```
+
+Scoring a run against a gold set is offline and separate from the test suite:
+
+```bash
+python evals/runners/score_only.py \
+    --gold evals/gold/demo_v1.gold.json \
+    --results evals/gold/demo_v1.observed.json \
+    --out evals/runs
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to report paper-format
@@ -256,13 +452,14 @@ generated: `python scripts/make_logo.py`. Changes are tracked in
 ## Roadmap
 
 - [ ] Retraction & correction flags on cited references
-- [ ] Superscript citation styles in the coverage audit (bare trailing
-      numerals, as in Nature-family journals — the report currently says
-      "not audited" instead of silently passing)
-- [ ] `--exhaustive` mode — check every citation-bearing sentence, not just
-      the high-value claims: uncovered labels get a focused extraction pass,
-      and a citation with no checkable assertion ("see [12]") is classified
-      as a pointer rather than forced into a verdict
+- [ ] More citation styles in the coverage audit — author-year, parenthetical
+      numerics and bare superscripts (as in Nature-family journals). The
+      report currently says "not audited" instead of silently passing
+- [ ] `--exhaustive` mode — close the gap between what extraction is asked
+      for and what it returns: labels the coverage audit reports as unreached
+      get a focused second extraction pass, and a citation with no checkable
+      assertion ("see [12]") is classified as a pointer rather than forced
+      into a verdict
 - [ ] More scout backends (OpenAlex, Semantic Scholar)
 - [ ] Support for other LLM backends (local and API models alongside
       headless Claude Code)
@@ -278,5 +475,5 @@ generated: `python scripts/make_logo.py`. Changes are tracked in
 ## License
 
 MIT — code, prompts and skills alike (see [`LICENSE`](LICENSE)). The bundled
-fonts in `templates/assets/` are third-party, under the SIL Open Font
+fonts in `src/papertrace/templates/assets/` are third-party, under the SIL Open Font
 License 1.1 (see the `*-OFL.txt` files there).

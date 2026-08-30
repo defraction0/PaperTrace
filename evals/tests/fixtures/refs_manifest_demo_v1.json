@@ -1,0 +1,67 @@
+{
+  "manuscript": "demo_manuscript.pdf",
+  "manuscript_sha256": "02450a0a4ece549caf88a8b6b7a508603289945a765ecf6c2af4b16c10b994e2",
+  "summary": {
+    "total": 4,
+    "available": 3,
+    "by_status": {
+      "retrieved": 3,
+      "provided": 0,
+      "paywalled": 1,
+      "mismatch": 0,
+      "no_doi": 0,
+      "unpublished": 0,
+      "error": 0
+    }
+  },
+  "entries": [
+    {
+      "num": "1",
+      "raw": "Pyrros A, Borstelmann SM, Mantravadi R, et al (2023) Opportunistic detection of type 2 diabetes using deep learning from frontal chest radiographs. Nat Commun 14:4039. doi:10.1038/s41467-023-39631-x",
+      "doi": "10.1038/s41467-023-39631-x",
+      "title": null,
+      "year": "2023",
+      "status": "retrieved",
+      "reason": "open-access copy via Unpaywall",
+      "resolver": "unpaywall",
+      "pdf_path": "demo_case/sources_resolved/pyrros-2023.pdf",
+      "slug": "pyrros-2023"
+    },
+    {
+      "num": "2",
+      "raw": "Sudlow C, Gallacher J, Allen N, et al (2015) UK Biobank: An Open Access Resource for Identifying the Causes of a Wide Range of Complex Diseases of Middle and Old Age. PLoS Med 12:e1001779. doi:10.1371/journal.pmed.1001779",
+      "doi": "10.1371/journal.pmed.1001779",
+      "title": null,
+      "year": "2015",
+      "status": "retrieved",
+      "reason": "open-access copy via Unpaywall",
+      "resolver": "unpaywall",
+      "pdf_path": "demo_case/sources_resolved/sudlow-2015.pdf",
+      "slug": "sudlow-2015"
+    },
+    {
+      "num": "3",
+      "raw": "Littlejohns TJ, Holliday J, Gibson LM, et al (2020) The UK Biobank imaging enhancement of 100,000 participants: rationale, data collection, management and future directions. Nat Commun 11:2624. doi:10.1038/s41467-020-15948-9",
+      "doi": "10.1038/s41467-020-15948-9",
+      "title": null,
+      "year": "2020",
+      "status": "retrieved",
+      "reason": "open-access copy via Unpaywall",
+      "resolver": "unpaywall",
+      "pdf_path": "demo_case/sources_resolved/littlejohns-2020.pdf",
+      "slug": "littlejohns-2020"
+    },
+    {
+      "num": "4",
+      "raw": "Rajpurkar P, Lungren MP (2023) The Current and Future State of AI Interpretation of Medical Images. N Engl J Med 388:1981-1990. doi:10.1056/NEJMra2301725",
+      "doi": "10.1056/NEJMra2301725",
+      "title": null,
+      "year": "2023",
+      "status": "paywalled",
+      "reason": "DOI resolved but no legal open-access copy found",
+      "resolver": null,
+      "pdf_path": null,
+      "slug": "rajpurkar-2023"
+    }
+  ]
+}

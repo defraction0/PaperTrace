@@ -11,7 +11,7 @@ Output: docs/social_preview.png (upload manually: repo Settings → Social previ
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FONTS = ROOT / "templates" / "assets"
+FONTS = ROOT / "src" / "papertrace" / "templates" / "assets"
 LOGO = ROOT / "assets" / "logo.png"
 OUT_HTML = ROOT / "docs" / "social_preview.html"
 OUT_PNG = ROOT / "docs" / "social_preview.png"

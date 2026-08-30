@@ -14,12 +14,31 @@ from pathlib import Path
 
 import httpx
 
+from . import __version__
 from .models import RefEntry
 
-UA = "PaperTrace/0.3 (+https://github.com/defraction0/PaperTrace; mailto:{email})"
+# Two user agents on purpose. The contact address is sent ONLY to the services
+# that ask for one — Unpaywall requires it, Crossref's polite pool uses it. One
+# shared client carrying `mailto:` sent it to Europe PMC, arXiv and whatever
+# third party hosts the PDF, while the wizard disclosed two recipients.
+# derived, not written out: this said 0.3 while the package was 0.3.1, and an
+# identifier that misstates its version is worse than useless to the service
+# on the other end of a polite-pool request
+UA = f"PaperTrace/{__version__} (+https://github.com/defraction0/PaperTrace)"
+UA_CONTACT = (
+    f"PaperTrace/{__version__} (+https://github.com/defraction0/PaperTrace; mailto:{{email}})"
+)
+
+
+def _contact(email: str) -> dict[str, str]:
+    """Per-request header for the two services that want a contact address."""
+    return {"User-Agent": UA_CONTACT.format(email=email)}
 DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"'<>]+")
 ARXIV_RE = re.compile(r"arxiv[:\s]*(\d{4}\.\d{4,5})(v\d+)?", re.I)
-YEAR_RE = re.compile(r"\((\d{4})\)|\b(19|20)\d{2}\b")
+# a parenthesised four-digit group is not automatically a year: journal
+# citations carry issue numbers the same way — "Br. J. Radiol. 89 (1061)
+# (2016)" made 1061 the year and slugged the entry `a-1061`
+YEAR_RE = re.compile(r"\(((?:19|20)\d{2})\)|\b((?:19|20)\d{2})\b")
 
 ProgressCb = Callable[[RefEntry], None]
 
@@ -32,12 +51,30 @@ ProgressCb = Callable[[RefEntry], None]
 def parse_references(text: str) -> list[RefEntry]:
     """Split a References section into numbered entries.
 
-    Handles `1. Foo`, `[1] Foo` and `1 Foo` markers at line starts, and keeps
-    only a strictly ascending sequence so stray numbers inside an entry (DOIs,
-    page ranges) don't split it.
+    Handles `1. Foo`, `[1] Foo` and `1 Foo` markers at line starts, plus the
+    bracketed `[1] Foo` form **anywhere in a line**, and keeps only a strictly
+    ascending sequence so stray numbers inside an entry (DOIs, page ranges)
+    don't split it.
+
+    The mid-line case is not exotic: Elsevier PDFs extract with entries running
+    together, so `[2]` and `[3]` sit mid-line. Requiring a line start turned a
+    34-reference list into one entry that swallowed the rest — and took its DOI
+    from reference [2]. That is a mis-attribution, not a shortfall: the resolver
+    would fetch the wrong paper and judge a claim against it.
+
+    Only the *bracketed* form is allowed mid-line. A bare `12.` mid-sentence is
+    ordinary prose, and splitting on it would invent entries; the ascending-run
+    filter is the second guard behind that.
     """
-    marker = re.compile(r"(?:(?<=\n)|\A)\s*\[?(\d{1,3})[\].:]?\s+", re.M)
-    hits = [(m.start(), m.end(), int(m.group(1))) for m in marker.finditer(text)]
+    marker = re.compile(
+        r"(?:(?<=\n)|\A)\s*\[?(\d{1,3})[\].:]?\s+"  # line start: `1.` `[1]` `1 `
+        r"|\[(\d{1,3})\]\s+",  # bracketed, anywhere in the line
+        re.M,
+    )
+    hits = [
+        (m.start(), m.end(), int(m.group(1) or m.group(2)))
+        for m in marker.finditer(text)
+    ]
 
     seq: list[tuple[int, int, int]] = []
     expected = 1
@@ -47,11 +84,26 @@ def parse_references(text: str) -> list[RefEntry]:
             expected += 1
 
     entries: list[RefEntry] = []
-    for i, (_start, end, _num) in enumerate(seq):
+    for i, (start, end, _num) in enumerate(seq):
         stop = seq[i + 1][0] if i + 1 < len(seq) else len(text)
         raw = re.sub(r"\s+", " ", text[end:stop]).strip()
-        if raw:
-            entries.append(_entry(str(_num), raw))
+        if not raw:
+            continue
+        e = _entry(str(_num), raw)
+        # This label occurs again inside its own span, so one of the two is
+        # printed in a title and we cannot tell which. Guessing either way is a
+        # wrong-paper route: taking the first splices reference N-1's tail onto
+        # entry N (and its DOI with it), taking the last truncates a real entry
+        # whose text repeats its own label. Disclose instead.
+        if any(start < s < stop and n == _num for s, _e, n in hits):
+            e.boundary_ambiguous = True
+            e.doi = None
+            e.reason = (
+                f"reference boundary ambiguous — the label [{_num}] appears more than once "
+                "before the next reference, so where this entry begins is a guess; "
+                "not resolved rather than risk judging a claim against the wrong paper"
+            )
+        entries.append(e)
     if not entries:
         entries = _parse_bulleted(text)
     return entries
@@ -86,7 +138,7 @@ def _entry(num: str, raw: str) -> RefEntry:
             doi = doi[:-1].rstrip(".,;")
         e.doi = doi
     if m := YEAR_RE.search(raw):
-        e.year = m.group(1) or m.group(0)
+        e.year = m.group(1) or m.group(2)
     e.slug = _slug(raw, e.year)
     return e
 
@@ -102,18 +154,19 @@ def _slug(raw: str, year: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _client(email: str) -> httpx.Client:
+def _client() -> httpx.Client:
     return httpx.Client(
-        headers={"User-Agent": UA.format(email=email)},
+        headers={"User-Agent": UA},
         timeout=25.0,
         follow_redirects=True,
     )
 
 
-def _crossref_doi(client: httpx.Client, raw: str) -> str | None:
+def _crossref_doi(client: httpx.Client, raw: str, email: str) -> str | None:
     r = client.get(
         "https://api.crossref.org/works",
         params={"query.bibliographic": raw[:250], "rows": 1},
+        headers=_contact(email),
     )
     r.raise_for_status()
     items = r.json().get("message", {}).get("items", [])
@@ -121,7 +174,8 @@ def _crossref_doi(client: httpx.Client, raw: str) -> str | None:
 
 
 def _unpaywall_pdf(client: httpx.Client, doi: str, email: str) -> str | None:
-    r = client.get(f"https://api.unpaywall.org/v2/{doi}", params={"email": email})
+    r = client.get(f"https://api.unpaywall.org/v2/{doi}", params={"email": email},
+                   headers=_contact(email))
     if r.status_code != 200:
         return None
     data = r.json()
@@ -165,22 +219,34 @@ _TITLE_STOPWORDS = frozenset(
 )
 
 
-def _title_check_text(raw: str, page_text: str) -> str | None:
+# the three answers the check can give. "unverifiable" used to share `None`
+# with "verified", so a scanned PDF someone supplied by hand was reported as
+# `matched ...` — a successful identity check that never happened.
+TITLE_VERIFIED = "verified"
+TITLE_UNVERIFIABLE = "unverifiable"
+TITLE_MISMATCH = "mismatch"
+
+
+def _title_check_text(raw: str, page_text: str) -> tuple[str, str]:
     """Does the retrieved first page look like the cited reference?
 
-    Returns None on pass, else a human-readable reason. An empty/unreadable
-    page passes: unverifiable is not the same as wrong.
+    Returns (state, detail). Unverifiable is not the same as wrong and neither
+    is the same as right — collapsing the first two into the third is how a
+    scanned wrong paper passes as the source.
     """
     page = re.sub(r"\s+", " ", page_text).lower()
     if not page.strip():
-        return None
+        return TITLE_UNVERIFIABLE, "no readable text on its first page (scanned or image-only)"
     tokens = set(re.findall(r"[a-z]{5,}", raw.lower())) - _TITLE_STOPWORDS
     if not tokens:
-        return None
+        return TITLE_UNVERIFIABLE, "the reference string has no distinctive words to match on"
     found = sum(1 for t in tokens if t in page)
     if found / len(tokens) >= 0.35:
-        return None
-    return f"title check failed: {found}/{len(tokens)} reference tokens on the retrieved first page"
+        return TITLE_VERIFIED, f"{found}/{len(tokens)} reference tokens on its first page"
+    return (
+        TITLE_MISMATCH,
+        f"title check failed: {found}/{len(tokens)} reference tokens on the retrieved first page",
+    )
 
 
 def _first_page_text(pdf_path: Path) -> str:
@@ -196,7 +262,7 @@ def _first_page_text(pdf_path: Path) -> str:
         return ""  # corrupt/scanned/odd PDF — never crash resolution
 
 
-def _title_check(entry: RefEntry, pdf_path: Path) -> str | None:
+def _title_check(entry: RefEntry, pdf_path: Path) -> tuple[str, str]:
     return _title_check_text(entry.raw, _first_page_text(pdf_path))
 
 
@@ -207,7 +273,9 @@ def _accept(
     bytes are discarded, the reason is recorded, and the chain continues."""
     if not _download_pdf(client, url, dest):
         return False
-    if detail := _title_check(entry, dest):
+    state, detail = _title_check(entry, dest)
+    entry.title_check = state
+    if state == TITLE_MISMATCH:
         dest.unlink(missing_ok=True)
         entry.status = "mismatch"
         entry.reason = (
@@ -220,15 +288,50 @@ def _accept(
     return True
 
 
-def _match_provided(entry: RefEntry, provided_dir: Path | None) -> Path | None:
+# Filenames that name supplemental material rather than the paper. Nothing
+# shorter than five characters goes in here: `si` would reject the real slug
+# `si-mohamed-2021`, and an author's name must never read as a marker.
+_SUPPLEMENT_RE = re.compile(
+    r"suppl|appendix|supporting[-_ ]?info|\besm\b|online[-_ ]?only", re.I
+)
+
+
+def _provided_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Path]:
+    """Every file in the folder that could be this reference, best first.
+
+    Token containment stays loose on purpose — real filenames carry author lists
+    and titles, and `tests/test_refs.py` pins that. What is tightened is the
+    choice among the matches:
+
+    * an exact `<slug>.pdf` wins outright;
+    * otherwise the shortest stem, tie-broken by name. Shortest means fewest
+      extra tokens, and the sort makes the answer the same on every machine —
+      the old code took the first `glob` hit, which is filesystem order, so one
+      folder could produce different audits in different places.
+
+    Supplements are excluded rather than ranked last. Judging a claim against an
+    appendix while calling it the cited source is the laundering this codebase
+    exists to prevent, and returning nothing lets the online chain try for the
+    real article instead.
+    """
     if not provided_dir or not provided_dir.is_dir():
-        return None
-    tokens = [t for t in (entry.slug or "").split("-") if len(t) > 3]
-    for pdf in provided_dir.glob("*.pdf"):
-        name = pdf.name.lower()
-        if tokens and all(t in name for t in tokens):
-            return pdf
-    return None
+        return []
+    slug = (entry.slug or "").lower()
+    tokens = [t for t in slug.split("-") if len(t) > 3]
+    if not tokens:
+        return []
+    matches = [
+        pdf
+        for pdf in sorted(provided_dir.glob("*.pdf"))
+        if all(t in pdf.name.lower() for t in tokens)
+        and not _SUPPLEMENT_RE.search(pdf.stem)
+    ]
+    return sorted(matches, key=lambda p: (p.stem.lower() != slug, len(p.stem), p.name))
+
+
+def _match_provided(entry: RefEntry, provided_dir: Path | None) -> Path | None:
+    candidates = _provided_candidates(entry, provided_dir)
+    return candidates[0] if candidates else None
 
 
 def resolve_entry(
@@ -239,12 +342,33 @@ def resolve_entry(
     provided_dir: Path | None = None,
 ) -> RefEntry:
     """Resolve one reference in place. Never raises — failures land in status/reason."""
+    # before anything else: an ambiguous boundary makes `raw` two references
+    # spliced together, so the slug, the title and any Crossref lookup derived
+    # from it can all name the wrong paper. A recorded gap is the honest result.
+    if entry.boundary_ambiguous:
+        entry.status = "no_doi"
+        return entry
+
     dest = dest_dir / f"{entry.slug}.pdf"
 
-    if provided := _match_provided(entry, provided_dir):
+    if candidates := _provided_candidates(entry, provided_dir):
+        provided = candidates[0]
         entry.status, entry.resolver = "provided", "user"
         entry.pdf_path = str(provided)
-        entry.reason = f"matched {provided.name} in your sources folder"
+        others = f" ({len(candidates)} candidates matched; picked the closest name)" \
+            if len(candidates) > 1 else ""
+        # a provided file is title-checked like a downloaded one, but a failure
+        # is DISCLOSED, not fatal: the user named this file, there is nothing to
+        # fall back to, and a scanned PDF yields no text at all
+        state, detail = _title_check(entry, provided)
+        entry.title_check = state
+        if state == TITLE_VERIFIED:
+            note = f" — identity confirmed: {detail}"
+        else:
+            # "unverified" for both remaining states, because both mean the same
+            # thing to a reader: nobody established that this file is the paper
+            note = f" — identity unverified: {detail}"
+        entry.reason = f"matched {provided.name} in your sources folder{others}{note}"
         return entry
 
     try:
@@ -255,7 +379,7 @@ def resolve_entry(
 
         if not entry.doi:
             try:
-                entry.doi = _crossref_doi(client, entry.raw)
+                entry.doi = _crossref_doi(client, entry.raw, email)
                 if entry.doi:
                     entry.resolver = "crossref"
             except httpx.HTTPError:
@@ -289,7 +413,7 @@ def resolve_all(
     progress: ProgressCb | None = None,
 ) -> list[RefEntry]:
     dest_dir.mkdir(parents=True, exist_ok=True)
-    with _client(email) as client:
+    with _client() as client:
         for entry in entries:
             resolve_entry(entry, dest_dir, email, client, provided_dir)
             if progress:
