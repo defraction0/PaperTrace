@@ -1,6 +1,6 @@
 # Fact-Check Report
 
-Checker: `claude -p · claude-opus-5[1m]` · PaperTrace · 2026-08-27
+Checker: `claude -p · claude-opus-5[1m]` · PaperTrace · 2026-08-30
 Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 **Claims:** 5 | ✅ **Supported:** 2 | ⚠️ **Partial:** 0 | ❌ **Contradicted:** 2 | ⊘ **Not retrieved:** 1
@@ -12,50 +12,58 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 ---
 
-## Claim 1: "Deep learning applied to frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94."
+## Claim 1: "Deep learning on frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94."
 
 **Status:** ❌ CONTRADICTED
 **Location:** Background ¶1 · cites [1]
-### Evidence from: `pyrros-2023`
+<br>
+
+### ❌ CONTRADICTED — `pyrros-2023` (cited as [1])
 
 - **Source:** Page 4 `(block_0094)` 
+> The source does detect T2D from frontal CXRs with deep learning, but its external validation at a separate institution gave a ROC AUC of 0.77, not 0.94 (internal prospective AUC was 0.84).
+
 ![evidence](evidence/claim_01_pyrros-2023_p4.png)
 *red box = matched text*
-> The source reports an external validation ROC AUC of 0.77 at Emory, not 0.94; no figure near 0.94 appears anywhere for external validation (internal prospective AUC was 0.84).
-
 ## Claim 3: "The UK Biobank cohort profile describes recruitment of approximately 500,000 adults aged 40-69 years."
 
 **Status:** ✅ SUPPORTED
 **Location:** Population imaging ¶1 · cites [2]
-### Evidence from: `sudlow-2015`
+<br>
+
+### ✅ SUPPORTED — `sudlow-2015` (cited as [2])
 
 - **Source:** Page 1 `(block_0006)` 
+> The source states UK Biobank has over 500,000 participants aged 40–69 years recruited in 2006–2010, matching both the size and age range claimed.
+
 ![evidence](evidence/claim_03_sudlow-2015_p1.png)
 *red box = matched text*
-> Block_0006 states UK Biobank has over 500,000 participants aged 40–69 years when recruited in 2006–2010, matching both the size and age range asserted.
-
 ## Claim 4: "The UK Biobank imaging enhancement targets 100,000 participants."
 
 **Status:** ✅ SUPPORTED
 **Location:** Population imaging ¶1 · cites [3]
-### Evidence from: `littlejohns-2020`
+<br>
 
-- **Source:** Page 1 `(block_0004)` 
-![evidence](evidence/claim_04_littlejohns-2020_p1.png)
+### ✅ SUPPORTED — `littlejohns-2020` (cited as [3])
+
+- **Source:** Page 2 `(block_0013)` 
+> The source states the imaging enhancement aims to scan 100,000 of the 500,000 existing UK Biobank participants.
+
+![evidence](evidence/claim_04_littlejohns-2020_p2.png)
 *red box = matched text*
-> The source states the imaging study aims to re-invite 100,000 of the existing 500,000 participants, and the target is repeated in the title, abstract and conclusion.
-
-## Claim 5: "Nearly one in five confirmed UK Biobank participants had not attended an imaging assessment centre."
+## Claim 5: "Nearly one in five confirmed participants had not attended an imaging assessment centre."
 
 **Status:** ❌ CONTRADICTED
 **Location:** Population imaging ¶1 · cites [3]
-### Evidence from: `littlejohns-2020`
+<br>
+
+### ❌ CONTRADICTED — `littlejohns-2020` (cited as [3])
 
 - **Source:** Page 3 `(block_0027)` 
+> Among confirmed participants the source reports 97% attended and only 3% have not yet attended, not nearly one in five; the 17% figure applies to invited participants who did not wish to attend, not to confirmed ones.
+
 ![evidence](evidence/claim_05_littlejohns-2020_p3.png)
 *red box = matched text*
-> The source reports that of confirmed (eligible, booked) participants, 97% have attended an imaging assessment centre — i.e. 3% have not yet attended, not nearly one in five. The 17% figure in Fig. 1 is 'do not wish to attend' at the invitation stage, a different denominator.
-
 ---
 
 ## Not verified — source not retrieved, or check failed (1 of 5)

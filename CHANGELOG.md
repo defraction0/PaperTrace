@@ -105,13 +105,18 @@ All notable changes to PaperTrace are documented here. The format follows
   never reorders one. It is also the one verdict with no `source_page`, since
   there is no passage to point at — demanding one would force the model to cite
   an absence.
-- **`examples/demo/output/` regenerated** against the current pipeline. The
-  committed report predated the disclosure work and showed none of it: it
-  named the checker only as `Claude`, reported `all 4 citation labels
-  covered`, and carried neither the converter stamp nor the attribution
-  caveat. It now reads `5/5 citation occurrences ... across 4 labels` and
-  identifies the judging model. Same verdicts as documented: 2 supported,
-  2 contradicted, 1 not retrieved, 1 uncited assertion.
+- **`examples/demo/output/` regenerated** against the current pipeline
+  (2026-08-30, docling 2.118.1). The committed report predated the disclosure
+  work and showed none of it: it named the checker only as `Claude`, reported
+  `all 4 citation labels covered`, and carried neither the converter stamp nor
+  the attribution caveat. It now reads `5/5 citation occurrences ... across 4
+  labels`, identifies the judging model, and renders through the per-source
+  judgement path. Same verdicts as documented: 2 supported, 2 contradicted,
+  1 not retrieved, 1 uncited assertion — the evidence crop for claim 4 moved
+  from page 1 to page 2, which is anchor-location variation between runs, not a
+  different verdict. No demo claim is co-cited, so the per-source summary count
+  still has no committed example; the README says so rather than leaving it to
+  be assumed.
 
 - **Citation coverage is now per occurrence, not per label.** The audit tracked
   a *set of labels*: if two sentences cited `[3]` and only one became an
@@ -155,6 +160,15 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ### Fixed
 
+- **The live progress marks reported every source as unretrieved while judging
+  it.** `tick` read `ClaimResult.verdict`, but multi-source checking only assigns
+  that field in `apply_headline()`, which runs after *every* source group — so
+  each group printed the field's default, `not_retrieved`, whose glyph `○` is
+  exactly what the final tally uses for a source that was never obtained. The
+  demo run judged 2 supported and 2 contradicted while the console showed
+  `○ ○ ○ ○`. Marks now come from that source's own `SourceJudgement`, and
+  `partial`, `not_addressed` and `unchecked` each get their own glyph instead of
+  sharing the fallback.
 - **`--provided` could hand a supplement to the judge instead of the paper.**
   `_match_provided` returned the first filename containing every slug token over
   an *unsorted* `Path.glob`, so a sources folder holding both an article and its

@@ -5,7 +5,7 @@
 > [`output/report_terminal.png`](output/report_terminal.png) without running
 > anything. The steps below reproduce it.
 
-The paper is invented and clearly watermarked as such — a two-page fictional
+The paper is invented and clearly watermarked as such — a one-page fictional
 mini-review whose references are **real, published papers**. The errors are
 planted on purpose:
 
