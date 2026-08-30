@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -19,6 +20,30 @@ from pathlib import Path
 
 
 BLOCK_TYPES = ("sectionheader", "text", "table", "picture", "list")
+
+
+# Where the bibliography begins — ONE rule, because two readers need it and
+# each having its own is a defect this codebase already shipped. `refs` parses
+# the reference list and `coverage_audit` must stop counting citations at the
+# same block; when they disagreed, every `[N]` in the reference list was counted
+# as a body citation and the audit reported invented gaps.
+#
+# A `sectionheader` may merely START with the word (docling labels it properly).
+# A body-typed block must be the word and nothing else: flat ingest guesses
+# headings from font size and gets it wrong, but "References were checked by
+# hand" must not be allowed to swallow the rest of the paper.
+_REFS_HEADING_PREFIX = re.compile(r"^\s*#*\s*(references|bibliography|literature)\b", re.I)
+_REFS_HEADING_EXACT = re.compile(
+    r"^\s*#*\s*(?:\d+\.?\s*)?(references|bibliography|literature)\s*:?\s*$", re.I
+)
+
+
+def is_references_heading(block_type: str, text: str) -> bool:
+    """True when this block is the heading that opens the reference list."""
+    text = (text or "").strip()
+    if block_type == "sectionheader":
+        return bool(_REFS_HEADING_PREFIX.match(text))
+    return bool(_REFS_HEADING_EXACT.match(text))
 
 
 @dataclass
@@ -117,6 +142,15 @@ class RefEntry:
     resolver: str | None = None  # crossref | unpaywall | europepmc | arxiv | user
     pdf_path: str | None = None  # local path when retrieved/provided
     slug: str | None = None  # short id used in reports, e.g. "smith-2019"
+    # the label appeared twice before the next reference, so where this entry
+    # begins is a guess — nothing derived from `raw` may be trusted to identify
+    # a paper, and `resolve_entry` refuses rather than fetch a possible wrong one
+    boundary_ambiguous: bool = False
+    # did anyone establish that this file is the paper the reference names?
+    # "verified" | "unverifiable" | "mismatch" | None (no copy to check).
+    # A single nullable "did the check fail" flag conflated the first two, so a
+    # scanned PDF read as a successful match.
+    title_check: str | None = None
 
 
 @dataclass
@@ -257,14 +291,23 @@ class ClaimResult:
 
         `not_addressed` and `unchecked` cannot become the headline while a
         source actually spoke to the claim — but when none did, saying so *is*
-        the answer. Order matters: a claim no cited source addresses is a
-        citation problem, while one whose checks all failed is a run problem.
+        the answer.
+
+        `unchecked` outranks `not_addressed`, and the reverse order was a bug.
+        `not_addressed` asserts that every available source *was read* and none
+        spoke to the claim — an inapt citation, a real finding about the paper.
+        A source whose check failed was not read, so that assertion is
+        unavailable: the tool does not know whether it addressed the claim.
+        Ranking `not_addressed` first turned a run failure into a finding, in
+        the one field a reader looks at before anything else.
         """
         if not self.judgements:
             return self.verdict
         rated = [j for j in self.judgements if j.verdict in _ADVERSITY]
         if rated:
             return max(rated, key=lambda j: _ADVERSITY[j.verdict]).verdict
+        if any(j.verdict == "unchecked" for j in self.judgements):
+            return "unchecked"
         if any(j.verdict == "not_addressed" for j in self.judgements):
             return "not_addressed"
         return "unchecked"

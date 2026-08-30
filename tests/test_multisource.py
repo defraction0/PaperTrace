@@ -60,11 +60,25 @@ def test_not_addressed_is_a_judgement_verdict_not_a_pipeline_state():
         # headline while another source does speak to it
         (["supported", "not_addressed"], "supported"),
         (["contradicted", "not_addressed"], "contradicted"),
+        (["partial", "not_addressed"], "partial"),
         # ... but if NO cited source addressed the claim, that IS the headline
         (["not_addressed", "not_addressed"], "not_addressed"),
         # an unchecked source never becomes the answer while a real one exists
         (["supported", "unchecked"], "supported"),
         (["unchecked", "unchecked"], "unchecked"),
+        # `not_addressed` asserts every available source was READ and was
+        # silent. One source whose check failed makes that assertion false: the
+        # tool does not know whether that source addressed the claim, and must
+        # not turn a run failure into a finding about the paper.
+        (["not_addressed", "unchecked"], "unchecked"),
+        (["unchecked", "not_addressed"], "unchecked"),
+        (["not_addressed", "not_addressed", "unchecked"], "unchecked"),
+        # one source, each verdict in turn
+        (["supported"], "supported"),
+        (["partial"], "partial"),
+        (["contradicted"], "contradicted"),
+        (["not_addressed"], "not_addressed"),
+        (["unchecked"], "unchecked"),
     ],
 )
 def test_the_headline_is_the_most_adverse_verdict_any_cited_source_gave(verdicts, expected):
@@ -91,6 +105,82 @@ def test_the_headline_carries_the_deciding_sources_anchor():
     claim.apply_headline()
     assert (claim.verdict, claim.source_slug, claim.source_page) == (
         "contradicted", "disputes-2021", 9,
+    )
+
+
+def test_a_failed_check_is_never_laundered_into_not_addressed():
+    """One source read and silent, one source whose check failed. `not_addressed`
+    would assert that every available source was read — a conclusion the run
+    cannot support, in the field a reader looks at first."""
+    claim = ClaimResult(
+        id=1, claim="x", location="Methods", refs=["1", "2"],
+        judgements=[
+            _j("silent-2020", "1", "not_addressed", note="About mice."),
+            _j("failed-2021", "2", "unchecked", note="check failed (RuntimeError) — retry"),
+        ],
+    )
+    assert claim.headline_verdict() == "unchecked"
+    d = claim.deciding_judgement()
+    assert d is not None and d.source_slug == "failed-2021"
+    claim.apply_headline()
+    assert claim.verdict == "unchecked"
+    # the silent source is still its own visible row, with its own note
+    s = claim.judgement_summary()
+    assert (s["not_addressed"], s["unchecked"], s["total"]) == (1, 1, 2)
+
+
+def test_a_read_source_stays_the_headline_and_the_failed_one_stays_visible():
+    """`supported` + `unchecked`: a source WAS read and did support the claim,
+    so the headline stands on evidence. What must not vanish is the failed
+    source — its own row says the run is incomplete."""
+    claim = ClaimResult(
+        id=1, claim="x", location="Methods", refs=["1", "2"],
+        judgements=[
+            _j("agrees-2020", "1", "supported", source_page=3, note="ICC 0.94."),
+            _j("failed-2021", "2", "unchecked", note="check failed — retry"),
+        ],
+    )
+    claim.apply_headline()
+    assert (claim.verdict, claim.source_slug) == ("supported", "agrees-2020")
+    assert [(j.source_slug, j.verdict) for j in claim.judgements] == [
+        ("agrees-2020", "supported"), ("failed-2021", "unchecked"),
+    ]
+    assert claim.judgement_summary()["unchecked"] == 1
+
+
+@pytest.mark.parametrize(
+    "verdicts",
+    [
+        ["supported"], ["partial"], ["contradicted"], ["not_addressed"], ["unchecked"],
+        ["supported", "contradicted"], ["supported", "not_addressed"],
+        ["supported", "unchecked"], ["not_addressed", "not_addressed"],
+        ["not_addressed", "unchecked"], ["unchecked", "unchecked"],
+        ["partial", "not_addressed", "unchecked"],
+    ],
+)
+def test_the_deciding_judgement_is_the_row_the_headline_came_from(verdicts):
+    """A headline pointing at a row that says something else is how a crop from
+    the wrong paper ends up beside a verdict."""
+    claim = ClaimResult(
+        id=1, claim="x", location="Methods", refs=[str(i) for i in range(len(verdicts))],
+        judgements=[_j(f"s{i}", str(i), v) for i, v in enumerate(verdicts)],
+    )
+    d = claim.deciding_judgement()
+    assert d is not None, "a real verdict with no row behind it"
+    assert d.verdict == claim.headline_verdict()
+
+
+def test_a_claim_with_refs_but_no_judgements_keeps_its_claim_level_verdict():
+    """The legacy path: refs that could not be obtained never produce a
+    judgement, and the claim-level verdict set by check.py is the whole
+    answer."""
+    claim = ClaimResult(id=1, claim="x", location="Intro", refs=["1", "2"],
+                        verdict="not_retrieved", note="cited source not available (paywalled)")
+    assert claim.headline_verdict() == "not_retrieved"
+    assert claim.deciding_judgement() is None
+    claim.apply_headline()  # no judgements: must not overwrite anything
+    assert (claim.verdict, claim.note) == (
+        "not_retrieved", "cited source not available (paywalled)",
     )
 
 
@@ -150,6 +240,65 @@ def test_judgements_round_trip_and_a_legacy_file_still_loads(tmp_path):
     old = RunResults.from_json(p).claims[0]
     assert old.judgements == []
     assert old.verdict == "supported"  # the headline field was always there
+
+
+def test_an_unchecked_headline_round_trips_and_validates_against_the_schema(tmp_path):
+    """The published contract has to admit the value the headline can now take
+    for this shape of claim, and say what it means."""
+    import jsonschema
+
+    claim = ClaimResult(
+        id=1, claim="x", location="Methods", refs=["3", "5"],
+        judgements=[
+            _j("silent-2020", "3", "not_addressed", note="About mice."),
+            _j("failed-2021", "5", "unchecked", note="check failed — retry"),
+        ],
+    )
+    claim.apply_headline()
+    path = tmp_path / "results.json"
+    RunResults(manuscript="m.pdf", claims=[claim]).to_json(path)
+
+    back = RunResults.from_json(path).claims[0]
+    assert back.verdict == "unchecked"
+    assert [j.verdict for j in back.judgements] == ["not_addressed", "unchecked"]
+
+    schema = json.loads(
+        (Path(__file__).resolve().parent.parent / "schemas" / "results.schema.json").read_text()
+    )
+    jsonschema.Draft202012Validator(schema).validate(json.loads(path.read_text()))
+
+
+def test_a_hand_built_legacy_results_json_loads_and_still_renders(tmp_path):
+    """No `judgements` key anywhere — a results.json from before multi-source
+    checking. It must load, keep its claim-level verdict, and render."""
+    from papertrace.report import write_reports
+
+    path = tmp_path / "results.json"
+    path.write_text(json.dumps({
+        "manuscript": "old.pdf",
+        "checker": "Claude",
+        "claims": [{
+            "id": 1, "claim": "Uptake was 42%.", "location": "Results",
+            "refs": ["7"], "verdict": "partial", "note": "The source says 38%.",
+            "source_slug": "smith-2019", "source_page": 4,
+            "source_block": "block_0004", "anchor_phrases": ["38%"],
+            "evidence_image": None, "anchor_located": True,
+        }],
+    }))
+
+    results = RunResults.from_json(path)
+    claim = results.claims[0]
+    assert claim.judgements == []
+    assert claim.verdict == "partial"
+    assert claim.headline_verdict() == "partial"
+
+    out = tmp_path / "out"
+    out.mkdir()
+    write_reports(results, None, out, png=False)
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        text = (out / name).read_text()
+        assert "Uptake was 42%." in text, f"{name} drops the legacy claim"
+        assert "The source says 38%." in text, f"{name} drops the legacy note"
 
 
 # --- the fan-out ----------------------------------------------------------
