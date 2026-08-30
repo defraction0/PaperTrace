@@ -9,6 +9,13 @@ where docling itself isn't installed.
 Coordinate note: docling reports bounding boxes with a BOTTOMLEFT origin;
 PyMuPDF (and our highlight step) use TOPLEFT. `_to_top_left` converts using
 the page height — getting this wrong mirrors every red box vertically.
+
+Fidelity note: docling deletes the hyphen when it joins a word split across two
+lines, which is right for a syllabic break ("approxi-" / "mately") and wrong for
+a lexical one — a page reading "Non-" / "Hispanic" arrives as "NonHispanic".
+`hyphen_joins` separates the two by evidence from the document itself, never by
+guessing at the joined text; `restore_hyphen_joins` repairs only what it proved.
+Locating a quote on the page is a separate job, and stays in `highlight.py`.
 """
 
 from __future__ import annotations
@@ -17,13 +24,25 @@ import logging
 import os
 import re
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
+
+try:
+    import pymupdf as fitz  # PyMuPDF >= 1.24 module name (the bare `fitz` import is deprecated)
+except ImportError:  # pragma: no cover — older PyMuPDF exposes only `fitz`
+    import fitz
 
 from ..models import Block
 
 _HEADING_LABELS = {"section_header", "title"}
 _LIST_LABELS = {"list_item"}
 _SKIP_LABELS = {"page_header", "page_footer", "footnote"}
+
+# the characters docling treats as a line-break hyphen and deletes: ASCII
+# hyphen-minus (its `\x02` soft-hyphen marker is rewritten to this before the
+# join), Unicode hyphen, non-breaking hyphen, soft hyphen
+_JOIN_DASHES = "-\u2010\u2011\u00ad"
+_LINE_BREAK_HYPHEN = re.compile(rf"(\w+)[{_JOIN_DASHES}]\n(\w+)")
 
 
 def _to_top_left(bbox, page_height: float) -> tuple[float, float, float, float]:
@@ -119,6 +138,65 @@ def blocks_from_docling(doc, page_heights: dict[int, float]) -> list[Block]:
     return blocks
 
 
+def hyphen_joins(pdf_path: Path) -> dict[int, dict[str, str]]:
+    """docling's dehyphenated word → the compound the document itself proves,
+    per 1-based page number.
+
+    docling deletes the hyphen whenever it joins a word split across two lines.
+    That is *right* far more often than it is wrong — "approxi-" / "mately" is
+    the single word "approximately", and on the paper this was measured against
+    87 of 94 breaks were of that kind — and wrong when the hyphen belongs to the
+    word: "Non-" / "Hispanic" is "Non-Hispanic", never "NonHispanic".
+
+    Nothing in the joined text tells the two apart. A lower→upper junction is
+    not evidence (`HbA1c`, `PaperTrace`, `Timedependent` all have one, and only
+    the last is broken), and "missioncritical" has no junction at all. So the
+    document is asked instead: an entry appears only where the hyphenated form
+    occurs somewhere in the PDF **unbroken**, which is the author writing the
+    compound out. No evidence, no entry — the text then stays exactly as docling
+    produced it rather than being repaired by guesswork.
+    """
+    doc = fitz.open(pdf_path)
+    try:
+        pages = [doc[index].get_text() for index in range(doc.page_count)]
+    finally:
+        doc.close()
+    whole = "\n".join(pages)  # the compound may be written out on any page
+
+    joins: dict[int, dict[str, str]] = {}
+    for number, raw in enumerate(pages, start=1):
+        found: dict[str, str] = {}
+        for tail, head in _LINE_BREAK_HYPHEN.findall(raw):
+            joined, compound = tail + head, f"{tail}-{head}"
+            if compound not in whole:
+                continue  # nowhere written out: no evidence the hyphen is lexical
+            if re.search(rf"(?<!\w){re.escape(joined)}(?!\w)", raw):
+                # this page carries the joined form as a word of its own too;
+                # which of the two a rewrite would hit is unknowable
+                continue
+            found[joined] = compound
+        if found:
+            joins[number] = found
+    return joins
+
+
+def restore_hyphen_joins(blocks: list[Block], joins: dict[int, dict[str, str]]) -> list[Block]:
+    """Put back a hyphen docling deleted, for the joins `hyphen_joins` proved.
+
+    Word-bounded so a short join can never land inside an unrelated word, and
+    scoped to the block's page so one page's break cannot rewrite another's.
+    A block docling got right is returned untouched.
+    """
+    out: list[Block] = []
+    for block in blocks:
+        text = block.text
+        for joined, on_page in joins.get(block.page, {}).items():
+            if joined in text:
+                text = re.sub(rf"(?<!\w){re.escape(joined)}(?!\w)", on_page, text)
+        out.append(block if text == block.text else replace(block, text=text))
+    return out
+
+
 def _quiet_third_party_loggers() -> None:
     """docling's model stack (RapidOCR, torch dynamo, transformers) floods the
     terminal with INFO/WARNING logs, tqdm weight-loading bars and torch
@@ -207,4 +285,8 @@ def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:
     pages = len(page_heights) or 1
 
     version = getattr(docling, "__version__", "?")
-    return pages, blocks_from_docling(doc, page_heights), version
+    blocks = blocks_from_docling(doc, page_heights)
+    # only where the paper writes the compound out somewhere: docling's join is
+    # the author's word for a syllabic break, and wrong for a lexical hyphen
+    blocks = restore_hyphen_joins(blocks, hyphen_joins(pdf_path))
+    return pages, blocks, version

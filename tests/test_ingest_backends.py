@@ -12,9 +12,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from papertrace.highlight import crop_evidence  # noqa: E402
 from papertrace.ingest import ingest_pdf, write_outputs  # noqa: E402
-from papertrace.ingest.docling_ import _to_top_left, blocks_from_docling  # noqa: E402
+from papertrace.ingest.docling_ import (  # noqa: E402
+    _to_top_left,
+    blocks_from_docling,
+    hyphen_joins,
+    restore_hyphen_joins,
+)
 from papertrace.models import Block, SourceMap  # noqa: E402
+
+try:
+    import pymupdf as fitz  # noqa: E402
+except ImportError:  # pragma: no cover — older PyMuPDF exposes only `fitz`
+    import fitz  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # stub docling objects
@@ -127,6 +138,144 @@ def test_blocks_from_docling_full_taxonomy():
     assert blocks[1].heading_path == ["Results"]
     # ids sequential
     assert [b.id for b in blocks] == [f"block_{i:04d}" for i in range(1, 6)]
+
+
+def test_a_picture_reaches_the_model_as_its_caption_only():
+    """Characterization, not a fix: a `picture` item's own text is not read.
+
+    docling carries in-figure text — when its layout model finds a text region
+    inside the figure — as separate nested text items, never on the picture
+    item, so the adapter has nothing to lose here. Pinned because the README
+    now states what a figure region delivers to the judge.
+    """
+    pic = StubPicture(prov=_prov(t=590, b=400))
+    pic.text = "97% completed follow-up"  # docling's PictureItem has no such field
+    blocks = blocks_from_docling(StubDoc([pic]), {1: 842.0})
+    assert [b.text for b in blocks] == ["[FIGURE: Figure 3. Forest plot.]"]
+
+
+def test_in_figure_text_survives_when_docling_emits_it_as_a_text_item():
+    """The flat adapter keeps a text item that sits inside a figure's region.
+
+    Whether docling emits one is docling's decision, not ours — on the paper
+    this was measured against it emitted none for any of nine figures.
+    """
+    doc = StubDoc(
+        [
+            StubPicture(prov=_prov(t=590, b=400)),
+            StubText("DocItemLabel.TEXT", "97% completed follow-up", _prov(t=520, b=500)),
+        ]
+    )
+    blocks = blocks_from_docling(doc, {1: 842.0})
+    assert [b.type for b in blocks] == ["picture", "text"]
+    assert blocks[1].text == "97% completed follow-up"
+
+
+# ---------------------------------------------------------------------------
+# hyphenated line breaks — docling deletes the hyphen, the page still has one
+# ---------------------------------------------------------------------------
+
+
+def _hyphen_pdf(tmp_path):
+    """A page that breaks words at a hyphen across lines, as typeset pages do.
+
+    Line 1 writes "Non-Hispanic" out unbroken; lines 2-3 break it. That pairing
+    is the whole evidence rule.
+    """
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "Regarding race, white Non-Hispanic patients were", fontsize=11)
+    page.insert_text((72, 114), "prevalent in each subgroup, followed by Asian, Non-", fontsize=11)
+    page.insert_text((72, 128), "Hispanic; and HbA1c was measured in PaperTrace.", fontsize=11)
+    page.insert_text((72, 170), "The cohort was assessed approxi-", fontsize=11)
+    page.insert_text((72, 184), "mately once a year at https://x.org/Data-Science-and-", fontsize=11)
+    page.insert_text((72, 198), "Informatics/report as agreed.", fontsize=11)
+    # page 2: the joined form is also a real word here, so the break is ambiguous
+    page2 = doc.new_page()
+    page2.insert_text((72, 100), "The column NonHispanic holds the Non-Hispanic flag, and", fontsize=11)
+    page2.insert_text((72, 114), "white Non-", fontsize=11)
+    page2.insert_text((72, 128), "Hispanic is its label.", fontsize=11)
+    pdf = tmp_path / "hyphen.pdf"
+    doc.save(pdf)
+    doc.close()
+    return pdf
+
+
+def test_hyphen_joins_takes_the_compound_from_the_document(tmp_path):
+    joins = hyphen_joins(_hyphen_pdf(tmp_path))
+    # the paper writes "Non-Hispanic" out on line 1, so the break on line 2 is
+    # a hyphen docling should not have eaten
+    assert joins[1]["NonHispanic"] == "Non-Hispanic"
+    # a syllabic break: docling's "approximately" IS the author's word, and
+    # "approxi-mately" appears nowhere — no entry, nothing rewritten
+    assert "approximately" not in joins[1]
+    # the URL wrap breaks at a hyphen that belongs to the URL, but the document
+    # never writes it out unbroken — unproven, so not claimed
+    assert "andInformatics" not in joins[1]
+    # mid-line hyphens and camel-cased words are not breaks at all
+    assert "HbA1c" not in joins[1] and "PaperTrace" not in joins[1]
+    # page 2 carries "NonHispanic" as a word of its own: which of the two a
+    # rewrite would hit is unknowable, so nothing is claimed there
+    assert "NonHispanic" not in joins.get(2, {})
+
+
+def test_restore_hyphen_joins_rewrites_only_the_proven_join(tmp_path):
+    joins = {1: {"NonHispanic": "Non-Hispanic"}}
+    blocks = [
+        Block("block_0001", "text", 1, (0, 0, 1, 1), [],
+              "Asian, NonHispanic; white Non-Hispanic; HbA1c in PaperTrace"),
+        Block("block_0002", "text", 2, (0, 0, 1, 1), [], "Asian, NonHispanic follow"),
+    ]
+    out = restore_hyphen_joins(blocks, joins)
+    assert out[0].text == "Asian, Non-Hispanic; white Non-Hispanic; HbA1c in PaperTrace"
+    # page 2 has no proven join — a page's joins never leak onto another page
+    assert out[1].text == "Asian, NonHispanic follow"
+
+
+def test_the_repaired_block_reads_as_the_author_wrote_it(tmp_path):
+    pdf = _hyphen_pdf(tmp_path)
+    blocks = restore_hyphen_joins(
+        [Block("block_0001", "text", 1, (0, 0, 1, 1), [], "followed by Asian, NonHispanic; and")],
+        hyphen_joins(pdf),
+    )
+    assert "Asian, Non-Hispanic" in blocks[0].text
+
+
+# ---------------------------------------------------------------------------
+# the anchor half of the same defect: what `search_for` can actually find
+#
+# These belong beside a highlight test, but the pairing is the point — the join
+# decides what the model can quote, and the page decides what can be boxed.
+# `search_for` reads a line break as a space, so neither the compound
+# ("Non-Hispanic") nor docling's join ("NonHispanic") is on the page: only
+# "Non- Hispanic" is.
+# ---------------------------------------------------------------------------
+
+
+def test_a_compound_quote_boxes_the_broken_line_on_the_page(tmp_path):
+    pdf = _hyphen_pdf(tmp_path)
+    page = fitz.open(pdf)[0]
+    assert page.search_for("Asian, Non-Hispanic") == []  # not on the page verbatim
+    boxes = crop_evidence(pdf, 1, (60, 90, 560, 210), ["Asian, Non-Hispanic"],
+                          tmp_path / "crop.png")
+    assert boxes >= 1
+
+
+def test_a_dehyphenated_quote_boxes_the_broken_line_on_the_page(tmp_path):
+    """The syllabic case, which no phrase-only rule can repair: the page is asked."""
+    pdf = _hyphen_pdf(tmp_path)
+    page = fitz.open(pdf)[0]
+    assert page.search_for("assessed approximately once") == []
+    boxes = crop_evidence(pdf, 1, (60, 90, 560, 210), ["assessed approximately once"],
+                          tmp_path / "crop2.png")
+    assert boxes >= 1
+
+
+def test_the_retry_never_invents_a_box(tmp_path):
+    pdf = _hyphen_pdf(tmp_path)
+    boxes = crop_evidence(pdf, 1, (60, 90, 560, 210), ["Pacific-Islander patients were"],
+                          tmp_path / "crop3.png")
+    assert boxes == 0
 
 
 # ---------------------------------------------------------------------------
