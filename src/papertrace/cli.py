@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import sys
 from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.prompt import Prompt
 
 from .models import ClaimResult, RefManifest, RunResults, manuscript_fingerprint
 
@@ -38,6 +40,82 @@ STATUS_MARK = {
     "unpublished": "[yellow]⚠[/yellow]",
     "error": "[red]✗[/red]",
 }
+
+
+CASE_NAME_MAX = 60  # a folder name, not a title — some journals' stems run long
+
+
+def default_case(manuscript: Path) -> Path:
+    """Where this paper's audit lives when `-c` was not given: beside the paper,
+    named after it.
+
+    Not the working directory, for two reasons a real first run hit at once. A
+    folder literally named `case` is the *same* folder for every paper, so a
+    second audit lands on the first unless the user remembers `-c`. And it
+    appears wherever the user happened to be standing — for that user, the root
+    of a git clone, which `.gitignore` covers only under the name `case/`. The
+    paper's own folder is the one location that is stable across invocations, so
+    a re-run finds its case again without a flag.
+    """
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", manuscript.stem).strip("-.")[:CASE_NAME_MAX]
+    parent = manuscript.parent
+    if not os.access(parent, os.W_OK):
+        # a read-only volume (a mounted share, an email attachment folder): say
+        # where the audit went instead, never fail for want of a default
+        console.print(
+            f"[yellow]⚠ {parent}/ is not writable, so the audit cannot sit beside the "
+            f"paper — keeping it in {Path.cwd()}/ instead.[/yellow]"
+        )
+        parent = Path.cwd()
+    return parent / (name or "case")
+
+
+def _sibling_case(case: Path) -> Path:
+    """`<name>-2`, `-3`, … — the first that does not exist yet."""
+    n = 2
+    while (candidate := case.with_name(f"{case.name}-{n}")).exists():
+        n += 1
+    return candidate
+
+
+def _open_case(case: Path) -> Path:
+    """Create the case folder, ignoring itself.
+
+    `.gitignore` blocks `case/`, `cases/` and `demo_case/` by name; a folder
+    named after a manuscript matches none of them, so the guardrail travels
+    inside the folder rather than depending on where it was created.
+    """
+    case.mkdir(parents=True, exist_ok=True)
+    marker = case / ".gitignore"
+    if not marker.exists():
+        marker.write_text("*\n")
+    return case
+
+
+def _stage_case(case: Path | None) -> Path:
+    """Which case folder a stage that has no manuscript works on.
+
+    `check`, `highlight`, `report` and `scout` take no paper, so they have no
+    name to derive and there is nothing honest to default to: picking one of
+    several audits in the current directory is exactly the mixing `_guard_case`
+    exists to prevent. `case/` is still accepted when it is there, because it
+    was the default through 0.4.0 — anything else is refused with the folders
+    that do look like audits, rather than guessed.
+    """
+    if case is not None:
+        return case
+    if (legacy := Path("case")).is_dir():
+        return legacy
+    found = sorted(
+        p.name for p in Path().iterdir() if p.is_dir() and (p / "refs_manifest.json").exists()
+    )
+    hint = (
+        "  audits in this folder: " + ", ".join(f"[cyan]-c {n}[/cyan]" for n in found[:8])
+        if found
+        else "  no case folder found here — `papertrace run <paper.pdf>` makes one."
+    )
+    console.print(f"[red]which audit? this step needs [bold]-c <case folder>[/bold].[/red]\n{hint}")
+    raise typer.Exit(2)
 
 
 def _case_conflict(case: Path, manuscript: Path) -> tuple[str | None, str]:
@@ -87,6 +165,45 @@ def _guard_case(case: Path, manuscript: Path) -> str:
             "scratch so the manifest and its hash describe the same file.[/yellow]"
         )
     return basis
+
+
+def _resolve_case(case: Path | None, manuscript: Path) -> Path:
+    """The case folder this invocation works in, asking only when it chose the name.
+
+    An explicit `-c` is returned untouched — including when it already holds
+    this paper, which is a legitimate re-run and what the guard's own message
+    tells people to do. The question is put only for a *derived* folder, where
+    the tool picked the name and the user has no reason to expect a collision.
+    """
+    if case is not None:
+        return case
+    case = default_case(manuscript)
+    if not (case / "refs_manifest.json").exists():
+        # an absent or half-ingested folder holds no audit, so there is nothing
+        # to amend and nothing to lose — only the name is worth stating
+        console.print(f"[dim]case folder: {case}/ — named after the paper; -c chooses another[/dim]")
+        return case
+    previous, _ = _case_conflict(case, manuscript)
+    if previous:
+        return case  # a different paper: `_guard_case` refuses it, and says why
+    console.print(f"[yellow]{case}/ already holds an audit of this paper.[/yellow]")
+    fresh = _sibling_case(case)
+    if not sys.stdin.isatty():
+        # A pipe, a cron job or CI has nobody to answer, and must never sit on
+        # stdin. Amend is the documented choice: it is what re-running the same
+        # paper did through 0.4.0, it deletes nothing, and it keeps the report's
+        # path predictable — `fresh` would move the output somewhere the caller
+        # never named.
+        console.print(f"  [dim]no terminal to ask, so amending {case}/ — pass -c to choose[/dim]")
+        return case
+    console.print(
+        f"  [bold]amend[/bold]  reuse it — references are resolved again, so source PDFs "
+        f"you have added since are picked up\n"
+        f"  [bold]fresh[/bold]  audit this paper from scratch in {fresh}/, leaving "
+        f"{case}/ untouched"
+    )
+    answer = Prompt.ask("  amend or fresh?", choices=["amend", "fresh"], default="amend")
+    return case if answer == "amend" else fresh
 
 
 def _verdict_line(c: dict[str, int]) -> str:
@@ -215,13 +332,16 @@ def start() -> None:
 @app.command(rich_help_panel="Utilities")
 def init(case: Path = typer.Argument(Path("case"), help="Case folder to create")) -> None:
     """Create a case folder skeleton (gitignored by design — keep manuscripts local)."""
+    _open_case(case)
     for sub in ("sources", "form", "ingest", "out/evidence"):
         (case / sub).mkdir(parents=True, exist_ok=True)
-    (case / ".gitignore").write_text("*\n")
     console.print(BANNER)
     console.print(f"case folder ready: [cyan]{case}/[/cyan]")
     console.print("  put reference PDFs you already have into [cyan]sources/[/cyan]")
     console.print("  put your questions or form-field screenshots into [cyan]form/[/cyan]")
+    # `run` and `refs` name their own folder after the paper, so a hand-made one
+    # is only used if it is passed - saying so here beats orphaned sources/
+    console.print(f"  [dim]hand this folder to every step: [cyan]-c {case}[/cyan][/dim]")
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
@@ -240,7 +360,7 @@ def ingest(
     # -c means the same thing here as in every other subcommand; `papertrace
     # ingest -c foo` used to fail with "No such option: -c" while its
     # neighbours all took it. --out stays authoritative and unchanged.
-    out = out or (case or Path("case")) / "ingest" / pdf.stem
+    out = out or (case or default_case(pdf)) / "ingest" / pdf.stem
     smap = ingest_pdf(pdf, out, backend=backend)
     by_type = {t: sum(1 for b in smap.blocks if b.type == t) for t in
                ("sectionheader", "text", "table", "picture", "list")}
@@ -271,7 +391,10 @@ def ingest(
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def refs(
     manuscript: Path = typer.Argument(..., exists=True),
-    case: Path = typer.Option(Path("case"), "--case", "-c"),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder (default: a folder named after the paper, beside the paper)",
+    ),
     provided: Path = typer.Option(
         None, "--provided",
         help="Folder of reference PDFs you already have; files match by name "
@@ -282,14 +405,16 @@ def refs(
     backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest."""
-    from .ingest import ingest_pdf, references_section
+    from .ingest import ingest_pdf, references_span
     from .models import SourceMap
     from .refs import parse_references, resolve_all
 
+    case = _resolve_case(case, manuscript)  # named after the paper unless -c said otherwise
     # identity first — the cached source map below is a manuscript-derived
     # artifact, and reading it before the guard is how references from one paper
     # ended up in a manifest stamped with another paper's hash
     basis = _guard_case(case, manuscript)
+    _open_case(case)  # before ingest writes into it, so the folder is never briefly untracked
 
     ingest_dir = case / "ingest" / "manuscript"
     cached = ingest_dir / "source_map.json"
@@ -300,11 +425,20 @@ def refs(
     else:
         smap = ingest_pdf(manuscript, ingest_dir, backend=backend)
 
-    entries = parse_references(references_section(smap))
+    refs_text, references_resumed = references_span(smap)
+    entries = parse_references(refs_text)
     if not entries:
         console.print("[red]No numbered references found — is there a References section?[/red]")
         raise typer.Exit(1)
     console.print(f"parsed [bold]{len(entries)}[/bold] numbered references")
+    if references_resumed:
+        # a list interrupted by another section used to end at the interruption:
+        # 9 of 15 references parsed, and the last 6 never retrieved or checked
+        console.print(
+            "[yellow]⚠ the reference list continues past an intervening section and was "
+            "picked up again — a boundary was crossed, so check the tail of the list "
+            "above against the paper.[/yellow]"
+        )
     if parse_only:
         for e in entries:
             console.print(f"  [{e.num:>3}] {e.raw[:90]}")
@@ -335,8 +469,8 @@ def refs(
         manuscript=manuscript.name,
         entries=entries,
         manuscript_sha256=manuscript_fingerprint(manuscript),  # identity, not the name
+        references_resumed=references_resumed,
     )
-    case.mkdir(parents=True, exist_ok=True)
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)
     misses = len(entries) - ok
@@ -350,13 +484,17 @@ def refs(
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def scout(
-    case: Path = typer.Option(Path("case"), "--case", "-c"),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder holding the audit (required unless ./case exists)",
+    ),
     doi: str = typer.Option(None, "--doi", help="DOI of the paper itself (skips the title lookup)"),
     email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
 ) -> None:
     """Scan Europe PMC for literature the reference list doesn't know."""
     from .scout import scout_case
 
+    case = _stage_case(case)
     if not (case / "refs_manifest.json").exists():
         console.print("[red]refs_manifest.json not found[/red] — run `papertrace refs` first")
         raise typer.Exit(1)
@@ -394,12 +532,16 @@ def scout(
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def check(
-    case: Path = typer.Option(Path("case"), "--case", "-c"),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder holding the audit (required unless ./case exists)",
+    ),
     model: str = typer.Option(None, "--model", help="Model override for claude -p"),
 ) -> None:
     """Extract citation-backed claims and judge each against its cited source (claude -p)."""
     from .check import Truncations, check_claims, claude_available, extract_claims
 
+    case = _stage_case(case)
     if not claude_available():
         console.print(
             "[red]The `claude` CLI is required for batch checking[/red] — "
@@ -482,12 +624,16 @@ def check(
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def highlight(
-    case: Path = typer.Option(Path("case"), "--case", "-c"),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder holding the audit (required unless ./case exists)",
+    ),
     claim: int = typer.Option(None, "--claim", help="Only this claim id"),
 ) -> None:
     """Produce red-box evidence crops for every claim with a page anchor."""
     from .highlight import crop_for_anchor, source_page_count
 
+    case = _stage_case(case)
     results = RunResults.from_json(case / "out" / "results.json")
     out_dir = case / "out" / "evidence"
     done = 0
@@ -542,7 +688,10 @@ def highlight(
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def report(
-    case: Path = typer.Option(Path("case"), "--case", "-c"),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder holding the audit (required unless ./case exists)",
+    ),
     png: bool = typer.Option(
         False, "--png/--no-png",
         help="Also export PNG images of the report looks (one-time: playwright install chromium)",
@@ -552,6 +701,7 @@ def report(
     from .models import ScoutResults
     from .report import write_reports
 
+    case = _stage_case(case)
     results = RunResults.from_json(case / "out" / "results.json")
     manifest_path = case / "refs_manifest.json"
     manifest = RefManifest.from_json(manifest_path) if manifest_path.exists() else None
@@ -569,7 +719,10 @@ def report(
 @app.command(rich_help_panel="Start here")
 def run(
     manuscript: Path = typer.Argument(..., exists=True),
-    case: Path = typer.Option(Path("case"), "--case", "-c"),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder (default: a folder named after the paper, beside the paper)",
+    ),
     provided: Path = typer.Option(
         None, "--provided",
         help="Folder of reference PDFs you already have; files match by name "
@@ -591,7 +744,11 @@ def run(
     """Full pipeline: ingest → refs → scout → check → highlight → report."""
     console.print(BANNER)
     email = _email(email)  # fail fast — before the ingest models load, not after
+    # resolved once, here, and passed down by keyword: a stage that re-derived
+    # its own folder could put the same question six times, or disagree
+    case = _resolve_case(case, manuscript)
     _guard_case(case, manuscript)  # one case folder per paper — never mix two audits
+    _open_case(case)
     # KEYWORDS ONLY, deliberately. These stages are Typer commands called as
     # plain functions, and Typer's declared defaults are OptionInfo objects
     # rather than the values they display. A positional call therefore breaks

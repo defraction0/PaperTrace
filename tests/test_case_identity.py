@@ -1,4 +1,4 @@
-"""One case folder, one paper — including when the folder predates hashing.
+"""One case folder, one paper — which folder that is, and that it holds one paper.
 
 A case folder is the unit of work and `_guard_case` is what keeps two audits
 from mixing. The gap this file pins is an ordering one: `refs` used to parse
@@ -6,10 +6,18 @@ references out of the *cached* source map before the identity guard ran, then
 stamp the supplied manuscript's hash onto the resulting manifest. A legacy case
 plus a same-named different PDF therefore produced a manifest that looked
 content-verified while describing the previous paper.
+
+The second half of the file covers *which* folder an audit lands in: every
+command used to default to a folder literally named `case`, so consecutive
+audits of different papers piled into one folder unless the user remembered
+`-c`, and the folder appeared in whatever directory they happened to be in.
+The last test checks the commands the `/review` skill tells an agent to run —
+documentation is the only interface those lines have to the CLI.
 """
 
 import json
 import sys
+import types
 from pathlib import Path
 
 import pymupdf
@@ -112,3 +120,164 @@ def test_a_different_paper_in_a_hashed_case_is_still_refused(tmp_path, offline):
         cli.refs(manuscript=two, case=case, provided=None, email="test@example.org",
                  parse_only=False, backend="pymupdf")
     assert e.value.exit_code == 2
+
+
+@pytest.fixture()
+def terminal(monkeypatch):
+    """A tty whose answers are scripted; an unscripted question is an error.
+
+    Returned list is the answer queue — leaving it empty asserts that nothing
+    was asked, because `Prompt.ask` then raises IndexError.
+    """
+    monkeypatch.setattr(cli.sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    answers: list[str] = []
+
+    class _Prompt:
+        @staticmethod
+        def ask(*_a, **_kw):
+            return answers.pop(0)
+
+    monkeypatch.setattr(cli, "Prompt", _Prompt)
+    return answers
+
+
+@pytest.fixture()
+def piped(monkeypatch):
+    """No tty: a pipe, a cron job, CI. Nothing may block on stdin."""
+    monkeypatch.setattr(cli.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
+
+
+def test_the_case_folder_defaults_to_the_papers_own_name(tmp_path, offline, monkeypatch):
+    """The reported defect: a batch run wrote into `case/` in whatever directory
+    the user stood in — a git clone's root, in the report — so a second paper
+    landed on the first. The folder is named after the paper and sits beside it.
+    """
+    (elsewhere := tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(elsewhere)  # the audit must not follow the user's cwd
+    pdf = _paper(tmp_path / "papers" / "PIIS0720048X2600522X.pdf", "ONE", "10.1000/one")
+
+    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+
+    derived = tmp_path / "papers" / "PIIS0720048X2600522X"
+    assert (derived / "refs_manifest.json").exists(), "audit did not land in the derived folder"
+    assert not (Path.cwd() / "case").exists(), "still scattering a `case/` into the cwd"
+    # the folder is named after a manuscript, so .gitignore's `case/` no longer
+    # covers it — a case folder created for the user ignores itself
+    assert (derived / ".gitignore").read_text() == "*\n"
+
+
+def test_an_explicit_case_flag_still_wins(tmp_path, offline, monkeypatch, terminal):
+    """`-c` is an instruction, not a suggestion — and never asks a question."""
+    monkeypatch.chdir(tmp_path)
+    pdf = _paper(tmp_path / "papers" / "alpha.pdf", "ALPHA", "10.1000/alpha")
+    chosen = tmp_path / "mycase"
+
+    for _ in range(2):  # twice: an explicit re-run is not interrogated either
+        cli.refs(manuscript=pdf, case=chosen, provided=None, email="test@example.org",
+                 parse_only=False, backend="pymupdf")
+
+    assert (chosen / "refs_manifest.json").exists()
+    assert not (tmp_path / "papers" / "alpha").exists()
+
+
+def test_a_rerun_of_the_same_paper_can_amend_its_case(tmp_path, offline, monkeypatch, terminal):
+    """The "I added more source PDFs" case: reuse the folder, pick the new ones up."""
+    monkeypatch.chdir(tmp_path)
+    pdf = _paper(tmp_path / "papers" / "beta.pdf", "BETA", "10.1000/beta")
+    derived = tmp_path / "papers" / "beta"
+
+    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    terminal.append("amend")
+    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+
+    assert terminal == [], "the collision was not put to the user"
+    assert (derived / "refs_manifest.json").exists()
+    assert not (tmp_path / "papers" / "beta-2").exists(), "amend must not open a second folder"
+
+
+def test_a_rerun_can_start_a_fresh_numbered_case(tmp_path, offline, monkeypatch, terminal):
+    """The other branch: leave the first audit intact, start the paper over."""
+    monkeypatch.chdir(tmp_path)
+    pdf = _paper(tmp_path / "papers" / "gamma.pdf", "GAMMA", "10.1000/gamma")
+
+    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    first = (tmp_path / "papers" / "gamma" / "refs_manifest.json").read_bytes()
+    terminal.append("fresh")
+    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+
+    assert (tmp_path / "papers" / "gamma-2" / "refs_manifest.json").exists()
+    assert (tmp_path / "papers" / "gamma" / "refs_manifest.json").read_bytes() == first
+
+
+def test_a_rerun_without_a_terminal_amends_and_says_so(tmp_path, offline, monkeypatch, piped,
+                                                       capsys):
+    """A pipe, a cron job or CI has nobody to answer. The documented choice is
+    amend: it is what the previous default did for a re-run of the same paper,
+    it destroys nothing, and it keeps the output path predictable — `fresh`
+    would silently move the report somewhere a caller cannot name.
+    """
+    monkeypatch.chdir(tmp_path)
+    pdf = _paper(tmp_path / "papers" / "delta.pdf", "DELTA", "10.1000/delta")
+
+    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    capsys.readouterr()
+    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    out = capsys.readouterr().out
+
+    assert (tmp_path / "papers" / "delta" / "refs_manifest.json").exists()
+    assert not (tmp_path / "papers" / "delta-2").exists()
+    assert "amend" in out, out
+
+
+def test_a_replaced_paper_of_the_same_name_is_still_refused(tmp_path, offline, monkeypatch,
+                                                            terminal):
+    """The derived name collides only when the file itself was replaced — v2
+    saved over v1. That is a different paper in an existing case, so the hard
+    guard owns it: exit 2, and no amend/fresh question (`terminal` is empty).
+    """
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "papers" / "epsilon.pdf"
+    _paper(path, "FIRST", "10.1000/first")
+    cli.refs(manuscript=path, case=None, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+
+    _paper(path, "SECOND", "10.1000/second")  # same name, different paper
+    with pytest.raises(typer.Exit) as e:
+        cli.refs(manuscript=path, case=None, provided=None, email="test@example.org",
+                 parse_only=False, backend="pymupdf")
+    assert e.value.exit_code == 2
+
+
+def test_run_derives_one_case_folder_and_hands_it_to_every_stage(tmp_path, offline, monkeypatch):
+    """`run` resolves once and passes the result down by keyword, so no stage
+    re-derives a folder of its own and the collision is put once, not six times.
+    """
+    monkeypatch.chdir(tmp_path)
+    pdf = _paper(tmp_path / "papers" / "zeta.pdf", "ZETA", "10.1000/zeta")
+    seen: dict[str, dict] = {}
+    for name in ("ingest", "refs", "scout", "check", "highlight", "report"):
+        monkeypatch.setattr(cli, name, (lambda n: lambda **kw: seen.__setitem__(n, kw))(name))
+
+    cli.run(manuscript=pdf, case=None, provided=None, email="test@example.org", model=None,
+            png=False, backend="pymupdf", with_scout=True, doi=None)
+
+    derived = tmp_path / "papers" / "zeta"
+    assert set(seen) == {"ingest", "refs", "scout", "check", "highlight", "report"}
+    assert {n: kw["case"] for n, kw in seen.items()} == dict.fromkeys(seen, derived)
+
+
+def test_the_wizard_suggests_the_folder_batch_mode_would_use(tmp_path):
+    """One answer to "where does this audit live", not two."""
+    from papertrace import wizard
+
+    pdf = tmp_path / "papers" / "eta.pdf"
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF-1.4\n")
+    assert wizard._suggest_case(pdf) == str(cli.default_case(pdf))
