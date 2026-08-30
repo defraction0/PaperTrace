@@ -58,7 +58,13 @@ def _case_conflict(case: Path, manuscript: Path) -> tuple[str | None, str]:
     return (None if same else previous.manuscript), "name"
 
 
-def _guard_case(case: Path, manuscript: Path) -> None:
+def _guard_case(case: Path, manuscript: Path) -> str:
+    """Refuse a case that holds another paper; return what that rested on.
+
+    The basis matters to the caller: on "name" the folder's cached artifacts may
+    have come from a different file, so anything derived from them has to be
+    regenerated rather than trusted.
+    """
     previous, basis = _case_conflict(case, manuscript)
     if previous:
         # without this clause the message is baffling: it names the same file
@@ -74,12 +80,13 @@ def _guard_case(case: Path, manuscript: Path) -> None:
         raise typer.Exit(2)
     if basis == "name":
         # warn, never hard-fail: refusing a legacy case would be equally
-        # uninformed and less usable, and it self-heals on the next `refs`
+        # uninformed and less usable, and `refs` re-ingests to make it true
         console.print(
             "[yellow]⚠ this case folder predates content hashing, so its identity is "
-            "unverified — only the file name was compared. A different file with the "
-            "same name would not be caught. Re-running `papertrace refs` fixes it.[/yellow]"
+            "unverified — only the file name was compared. Re-reading the paper from "
+            "scratch so the manifest and its hash describe the same file.[/yellow]"
         )
+    return basis
 
 
 def _verdict_line(c: dict[str, int]) -> str:
@@ -279,9 +286,17 @@ def refs(
     from .models import SourceMap
     from .refs import parse_references, resolve_all
 
+    # identity first — the cached source map below is a manuscript-derived
+    # artifact, and reading it before the guard is how references from one paper
+    # ended up in a manifest stamped with another paper's hash
+    basis = _guard_case(case, manuscript)
+
     ingest_dir = case / "ingest" / "manuscript"
-    if (ingest_dir / "source_map.json").exists():
-        smap = SourceMap.from_json(ingest_dir / "source_map.json")
+    cached = ingest_dir / "source_map.json"
+    # on "name" the cached map may have come from a different file that happened
+    # to share this one's name, so re-read the paper we were actually given
+    if cached.exists() and basis != "name":
+        smap = SourceMap.from_json(cached)
     else:
         smap = ingest_pdf(manuscript, ingest_dir, backend=backend)
 
@@ -295,7 +310,6 @@ def refs(
             console.print(f"  [{e.num:>3}] {e.raw[:90]}")
         return
 
-    _guard_case(case, manuscript)  # one case folder per paper
     if provided is not None and provided.is_file():
         console.print(
             f"[red]--provided expects a folder of PDFs, got a file:[/red] {provided}\n"
