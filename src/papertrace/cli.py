@@ -16,7 +16,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from .models import RefManifest, RunResults, manuscript_fingerprint
+from .models import ClaimResult, RefManifest, RunResults, manuscript_fingerprint
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich", invoke_without_command=True)
 console = Console()
@@ -104,6 +104,32 @@ def _verdict_line(c: dict[str, int]) -> str:
     if c.get("unchecked"):
         parts.append(f"[red]⚠ {c['unchecked']} unchecked (check failed)[/red]")
     return "\n[bold]verdicts[/bold]  " + "   ".join(parts)
+
+
+# glyphs match _verdict_line, so the running display and the tally read alike
+_JUDGEMENT_MARK = {
+    "supported": "[green]●[/green]",
+    "partial": "[yellow]●[/yellow]",
+    "contradicted": "[red]●[/red]",
+    "not_addressed": "[yellow]◌[/yellow]",
+    "unchecked": "[red]✗[/red]",
+}
+
+
+def _tick_marks(slug: str, group: list[ClaimResult]) -> str:
+    """One glyph per claim in a source's group, from *that source's* judgement.
+
+    Never `c.verdict`: progress fires per group, while `apply_headline()` runs
+    only after every group, so mid-run the field still holds its default
+    `not_retrieved` — whose glyph is the one the final tally uses for a source
+    that was never obtained. The demo judged 2 supported and 2 contradicted
+    while this line printed `○ ○ ○ ○`.
+    """
+    marks = []
+    for c in group:
+        j = next((j for j in c.judgements if j.source_slug == slug), None)
+        marks.append(_JUDGEMENT_MARK.get(j.verdict, "[dim]·[/dim]") if j else "[dim]·[/dim]")
+    return " ".join(marks)
 
 
 def _provenance_line(converter: str) -> str:
@@ -378,12 +404,7 @@ def check(
     )
 
     def tick(slug, group):
-        marks = " ".join(
-            {"supported": "[green]●[/green]", "partial": "[yellow]●[/yellow]",
-             "contradicted": "[red]●[/red]"}.get(c.verdict, "○")
-            for c in group
-        )
-        console.print(f"  checked against [cyan]{slug}[/cyan]: {marks}")
+        console.print(f"  checked against [cyan]{slug}[/cyan]: {_tick_marks(slug, group)}")
 
     def fail(slug, msg):
         console.print(

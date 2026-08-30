@@ -151,3 +151,52 @@ def test_set_logs_is_not_called_when_we_set_the_env_var(monkeypatch):
     monkeypatch.setattr(mod, "_set_torch_logs", lambda: called.append("x"))
     mod._quiet_third_party_loggers()
     assert called == [], "set_logs must not be called when TORCH_LOGS is set"
+
+
+# --- the live progress marks must show the verdict just returned -----------
+
+
+def _mid_run_claim(slug: str, verdict: str):
+    """A claim as it exists *during* `check`: the judgement for this source is
+    in, but `apply_headline()` has not run yet, so `.verdict` is still default.
+    """
+    from papertrace.models import ClaimResult, SourceJudgement
+
+    return ClaimResult(
+        id=1, claim="c", location="p1/block_0001", refs=["1"],
+        judgements=[SourceJudgement(source_slug=slug, ref="1", verdict=verdict)],
+    )
+
+
+def test_progress_marks_read_the_judgement_not_the_headline():
+    """`tick` read `c.verdict`, but multi-source checking only assigns it in
+    `apply_headline()` — which runs after *every* group. So each group printed
+    the field's default, `not_retrieved`, whose glyph is `○`: the demo judged
+    2 supported and 2 contradicted while the console showed `○ ○ ○ ○`.
+    """
+    from papertrace.cli import _tick_marks
+
+    group = [_mid_run_claim("pyrros-2023", "supported"),
+             _mid_run_claim("pyrros-2023", "contradicted")]
+    marks = _tick_marks("pyrros-2023", group)
+    assert "green" in marks and "red" in marks, marks
+
+
+def test_progress_marks_distinguish_every_judgement_verdict():
+    """A single fallback glyph for supported/partial/contradicted/not_addressed
+    makes the running display worthless — and `○` already means not retrieved on
+    the final tally, so the fallback actively misreports."""
+    from papertrace.cli import _tick_marks
+
+    seen = {v: _tick_marks("s", [_mid_run_claim("s", v)])
+            for v in ("supported", "partial", "contradicted", "not_addressed")}
+    assert len(set(seen.values())) == 4, seen
+
+
+def test_a_source_with_no_judgement_yet_is_not_claimed_as_judged():
+    """A claim in the group whose judgement for *this* slug is missing must not
+    borrow another source's verdict."""
+    from papertrace.cli import _tick_marks
+
+    marks = _tick_marks("other-2020", [_mid_run_claim("pyrros-2023", "supported")])
+    assert "green" not in marks, marks
