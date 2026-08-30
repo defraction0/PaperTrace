@@ -77,13 +77,20 @@ maintainer's machine; `python3` on PATH may be a different install).
 
 ### A note on what the sdist deliberately leaves out
 
-`docs/` is 3.8 MB and is **not** shipped. `README.md` references
-`docs/hero.png`, `docs/real_audit_terminal.png` and
-`docs/table_figure_evidence.png` with repo-relative paths, so those three
-images resolve neither from an extracted sdist nor — since `[project].readme`
-makes `README.md` the long description — on a PyPI project page. The fix is
-absolute `raw.githubusercontent.com` URLs, not shipping the directory. Do that
-before the first PyPI upload.
+`docs/` is 3.8 MB and is **not** shipped, and neither is `assets/`. Every
+image `README.md` references now uses an absolute
+`raw.githubusercontent.com` URL, which is the fix — not shipping either
+directory. That matters because `[project].readme` makes `README.md` the long
+description, so a repo-relative path resolves neither from an extracted sdist
+nor on a PyPI project page.
+
+**Check this again whenever an image is added.** The four `docs/*.png`
+references were converted and `assets/logo.png` was missed, so the one broken
+image was the first thing on the page. Grep before a release:
+
+```bash
+grep -oE 'src="[^"]*\.png"' README.md | grep -v raw.githubusercontent   # must be empty
+```
 
 Hatchling honours `.gitignore` by default, which is why
 `examples/demo/demo_manuscript.pdf` (matched by the `/examples` include, caught

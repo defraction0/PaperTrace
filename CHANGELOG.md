@@ -4,7 +4,7 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] — 2026-08-30 (beta)
 
 ### Added
 
@@ -100,9 +100,13 @@ All notable changes to PaperTrace are documented here. The format follows
   source cited for another part of a compound claim is not `contradicted` (it
   does not say otherwise) and not `partial` (there is no true kernel), and
   forcing it into either would manufacture a finding. An inapt citation is a
-  real result and now has a name. It is appended to `JUDGMENT_VERDICTS`, so
-  every pre-existing verdict keeps its position; `counts()` gains a key and
-  never reorders one. It is also the one verdict with no `source_page`, since
+  real result and now has a name. It is appended to `JUDGMENT_VERDICTS`, which keeps
+  the judgement group's own order stable but **does shift the concatenated
+  `VERDICTS` tuple**: `not_retrieved` moves from index 3 to 4 and `unchecked`
+  from 4 to 5. Nothing in this repository indexes `VERDICTS` positionally, and
+  `counts()` gains a key without reordering one — but an external consumer that
+  does index it will read the wrong name, so this is a breaking change for
+  anyone who does. It is also the one verdict with no `source_page`, since
   there is no passage to point at — demanding one would force the model to cite
   an absence.
 - **`examples/demo/output/` regenerated** against the current pipeline
@@ -147,8 +151,7 @@ All notable changes to PaperTrace are documented here. The format follows
   no value-based selection exists in the code, which asks for *every*
   citation-backed claim and relies on the coverage audit to disclose what
   extraction missed. New "Testing and evaluation" section separates software
-  tests from model evaluation. Newly documented: batch judges multi-reference
-  claims against the first available source; Claude proposes page/block/anchor
+  tests from model evaluation. Newly documented: Claude proposes page/block/anchor
   phrases while Python locates them and draws the boxes; the model reads
   extracted text with page markers, not page images; the coverage audit reads
   bracketed numeric citations only. The single real-run example is framed as one
@@ -160,6 +163,109 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ### Fixed
 
+- **A bracketed label inside a reference could steal the next entry, and its
+  DOI.** The mid-line marker rule exists because Elsevier PDFs run entries
+  together — requiring a line start once collapsed 34 references into one. But
+  the ascending-run filter accepted the *first* occurrence of the expected
+  number and never reconsidered, so `[2]` printed inside reference 1's title
+  became the start of reference 2, which then carried reference 1's DOI. A claim
+  citing `[2]` would have been judged against paper 1: the same wrong-paper
+  hazard the mid-line rule was added to fix, arriving from the other direction.
+  Neither "first" nor "last" occurrence is safe — the mirror case, a real entry
+  whose own text repeats its label, breaks the opposite guess — so a duplicated
+  label is now **disclosed, never guessed**. Such an entry carries no DOI and
+  `resolve_entry` refuses it before the provided-file match, the Crossref title
+  lookup and every download, because all three derive from a `raw` string that
+  is two references spliced together. New optional field
+  `RefEntry.boundary_ambiguous`, in `schemas/refs_manifest.schema.json`.
+- **Re-running `refs` on a legacy case could stamp a new paper's hash onto the
+  old paper's references.** `refs` parsed the *cached* `source_map.json` before
+  `_guard_case` ran, and the pre-hash branch of that guard only warns — so a
+  different PDF with the same file name produced a manifest describing the
+  previous paper while carrying the new one's `manuscript_sha256`. Every later
+  run then trusted a case that mixed two papers, and the warning's own promise
+  that "re-running `papertrace refs` fixes it" was exactly backwards: it
+  laundered the identity instead. The guard now runs before any cached artifact
+  is read, and a name-only case re-ingests the manuscript it was given so the
+  manifest and its hash describe the same file. `_guard_case` returns the basis
+  its answer rested on, which is what lets the caller act on it.
+- **The offline test suite made a network call whenever docling was
+  installed.** `tests/test_pipeline.py` called `ingest_pdf` without a backend,
+  so `auto` chose docling and its first use fetched layout models from Hugging
+  Face. CI installs `[dev]` only, so CI never saw it, and local runs passed on a
+  warm cache — the suite's offline property was never tested, only its
+  offline-with-warm-cache property. Every deterministic pipeline test now names
+  `backend="pymupdf"`; the docling adapter is covered against stubs in
+  `tests/test_ingest_backends.py`. Verified with empty caches and
+  `HF_HUB_OFFLINE=1`.
+- **The paid evaluation runner crashed before reaching a model.**
+  `evals/runners/run_eval.py` called `cli.ingest(manuscript, out, backend)`
+  positionally, but `ingest`'s third parameter is `case` — so `backend` bound to
+  `case` and the real `backend` stayed Typer's `OptionInfo`, which the dispatcher
+  rejects. The keyword-only fix had been applied in `cli.py` and missed here, in
+  the one module no CI job executes. All stage calls are keyword-only now, with a
+  forwarding test that fails if any argument shifts again.
+- **The coverage audit counted the bibliography as body citations.**
+  `references_section` was taught to accept a body-typed `References` block —
+  necessary, because flat ingest guesses headings from font size and on a real
+  Elsevier paper typed author lines as headings and left `References` as body
+  text. `citation_occurrences` was not taught the same rule and still stopped
+  only at a `sectionheader`, so on exactly that paper every `[N]` in the
+  reference list counted as a manuscript citation and the audit reported gaps
+  that do not exist. Both now call one `models.is_references_heading`, and the
+  second, competing regex in `check.py` is gone rather than left to be reused.
+- **A source nobody could identify was reported as a match.**
+  `_title_check_text` returned the same `None` for "the title matches" and "there
+  is no readable text to compare", so a scanned PDF — common for exactly the
+  papers people supply by hand — got status `provided` and the reason `matched
+  smith-2020.pdf in your sources folder`. The check is tri-state now
+  (`verified` / `unverifiable` / `mismatch`, recorded in `RefEntry.title_check`
+  and in the schema); the file is still used, because the user named it and
+  there is nothing to fall back to, but the reason says which of the three
+  happened. A test asserting the old silence — written on the true premise that
+  unverifiable is not the same as wrong — had locked the defect in; not-wrong
+  does not license saying nothing. The fact also reached only markdown readers,
+  since the retrieval manifest is rendered in `report.md.j2` alone, so it is now
+  a run-level disclosure carried into all three formats.
+- **`not_addressed` + `unchecked` produced the headline "does not address the
+  claim".** `not_addressed` asserts that every available source *was read* and
+  none spoke to the claim — an inapt citation, a real finding about the paper. A
+  source whose check failed was not read, so that assertion is unavailable.
+  Ranking `not_addressed` above `unchecked` turned a run failure into a finding
+  about the manuscript, in the one field a reader looks at first. `unchecked`
+  now outranks it.
+- **The contact email went to every host the resolver touched.** One
+  `httpx.Client` carried a `mailto:` User-Agent, so Europe PMC, arXiv and
+  whichever third party serves a PDF all received the address, while the wizard
+  disclosed Unpaywall and Crossref. Unpaywall requires a contact and Crossref's
+  polite pool uses one; nothing else does. The address is now a per-request
+  header on those two calls only, so the code matches what the wizard already
+  promised rather than the promise being widened.
+- **`_judgement_from` was not total after all.** A 5,000-digit ASCII
+  `source_page` passed both `isascii()` and `isdigit()`, then hit CPython's
+  4300-digit integer conversion limit — so a `ValueError` escaped a function
+  documented as unable to raise, and could abort a whole claim group instead of
+  yielding `unchecked` with a note. Page strings are length-bounded before
+  conversion, with a narrow `ValueError` catch around `int()` only; there is
+  still deliberately no blanket `except Exception`, which would relabel our own
+  bugs as the model's.
+- **The wizard offered a cited paper's DOI as the manuscript's own.**
+  `detect_doi`'s comment says only the front matter is read, "because a
+  reference list is full of other papers' DOIs and picking one up would anchor
+  the literature scout to somebody else's work without any error to notice" —
+  but the code read the whole first page, which on a short paper reaches the
+  reference list. The scan now stops at the references heading, using the same
+  rule as ingest, and the confirmation no longer defaults to yes: pressing
+  return used to accept whatever was found.
+- **The wizard's "equivalent command" did not run and did not match.** Paths
+  were interpolated unquoted, so `/tmp/My Paper.pdf` split into two arguments
+  and Typer rejected `/tmp/My`; and the email was absent entirely, so the
+  printed replay either failed or silently used a different saved address. It is
+  built as argv and rendered with `shlex.join`, and carries `--email`.
+- **"Up to N model calls" was a ceiling the retry could exceed.** `_ask` retries
+  once, so a single-source run advertised as 2 calls could issue 3. The estimate
+  now shows a base and a worst case derived from `check.ASK_ATTEMPTS`, so the
+  quoted cost cannot drift from the policy that governs it.
 - **A `--help` assertion passed locally and failed on all five Python versions
   in CI.** rich styles single words inside a sentence, so with colour enabled the
   help screen renders `Run \x1b[1;2mpapertrace\x1b[0m\x1b[2m with no arguments`
@@ -312,9 +418,11 @@ gap — which is the shape this release exists to remove.*
 - **Four places where the tool broke its own rules.** A model response missing
   its `verdict` key was defaulted to `partial` — an invented judgement from an
   unparseable answer; it is now `unchecked`, as is any value outside `VERDICTS`.
-  A multi-reference claim is judged against the first available source only, and
-  the co-cited sources it never opened are now recorded per claim
-  (`unjudged_refs`) and named in every report. The manuscript was silently cut
+  A multi-reference claim was judged against the first available source only;
+  the sources it never opened are recorded per claim (`unjudged_refs`) and named
+  in every report — and later in this same release the claim came to be judged
+  against *every* retrievable cited source, so `unjudged_refs` now holds only
+  those that could not be obtained. The manuscript was silently cut
   at 180k characters and each source at 150k; the cut is now recorded
   (`RunResults.truncated`) and disclosed. An evidence crop whose anchor phrase
   matched nothing was still captioned "red box = matched text"; the box count is
@@ -445,5 +553,6 @@ Versions 0.1–0.2 were developed under the working name *ManuscriptAgent*
 (manuscript-review focus). 0.3.0 reframes the tool to post-publication paper
 auditing: published papers by design, retrieval gaps as first-class results.
 
+[0.4.0]: https://github.com/defraction0/PaperTrace/releases/tag/v0.4.0
 [0.3.1]: https://github.com/defraction0/PaperTrace/releases/tag/v0.3.1
 [0.3.0]: https://github.com/defraction0/PaperTrace/releases/tag/v0.3.0

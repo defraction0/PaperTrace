@@ -20,12 +20,17 @@ from pathlib import Path
 
 import pytest
 
-# tomllib is stdlib from 3.11, but requires-python is >=3.10 and CI runs a 3.10
-# cell. A module-level `import tomllib` makes *collection* the failure mode
-# there, and a collection error interrupts the whole session - every test is
-# lost, not just this file. Skip instead: these tests assert a static TOML
-# table, so the three 3.11+ cells already prove it, and the skip is printed.
-tomllib = pytest.importorskip("tomllib")
+# tomllib is stdlib from 3.11; `[dev]` supplies tomli below that. Skipping was
+# the earlier answer and it cost more than it looked: 3.10 is the OLDEST version
+# requires-python allows, so the cell that skipped was the one whose packaging
+# behaviour mattered most - all 26 tests were silently absent there while CI
+# reported green. A module-level bare `import` is still wrong (a collection
+# error interrupts the whole session, losing every test, not just this file),
+# hence importorskip on the fallback rather than an import.
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    tomllib = pytest.importorskip("tomli", reason="pip install -e '.[dev]' supplies tomli on 3.10")
 
 
 def _repo_root() -> Path:

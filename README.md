@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" width="180" alt="PaperTrace — pixel-art logo: a paper page under a magnifying glass, one line boxed in red">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/assets/logo.png" width="180" alt="PaperTrace — pixel-art logo: a paper page under a magnifying glass, one line boxed in red">
 </p>
 
 <h1 align="center">PaperTrace</h1>
@@ -313,7 +313,8 @@ attendance figure that contradicts the cited flow chart, a headline resting
 on a paywalled source that is honestly reported as unverifiable, and one
 assertive sentence with no citation at all.
 
-The run takes about five minutes; the first time adds two one-time downloads
+One run of this demo took 95 seconds end to end with the layout models already
+downloaded — one run, not a benchmark. The first time adds two one-time downloads
 (chromium ~150 MB, docling's layout models ~500 MB). **Prerequisite:**
 [Claude Code](https://claude.com/claude-code) installed and logged in — the
 claim checker runs on `claude -p`.

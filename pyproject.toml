@@ -33,7 +33,10 @@ dependencies = [
 png = ["playwright>=1.45"]
 docling = ["docling>=2.0"]
 full = ["playwright>=1.45", "docling>=2.0"]
-dev = ["pytest>=8.0", "ruff>=0.5", "jsonschema>=4.0"]
+dev = ["pytest>=8.0", "ruff>=0.5", "jsonschema>=4.0",
+       # 3.10 has no tomllib, and without a parser the whole packaging
+       # suite skipped on the oldest version requires-python allows
+       'tomli>=2.0; python_version < "3.11"']
 
 [project.scripts]
 papertrace = "papertrace.cli:main"
