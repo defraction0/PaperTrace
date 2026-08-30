@@ -84,13 +84,32 @@ directory. That matters because `[project].readme` makes `README.md` the long
 description, so a repo-relative path resolves neither from an extracted sdist
 nor on a PyPI project page.
 
-**Check this again whenever an image is added.** The four `docs/*.png`
-references were converted and `assets/logo.png` was missed, so the one broken
-image was the first thing on the page. Grep before a release:
+**Check this again whenever an image is added**, and check it two ways — the
+two failures are different and each has already happened once.
+
+*Wrong kind of path.* The four `docs/*.png` references were converted to
+absolute URLs and `assets/logo.png` was missed, so the one broken image was the
+first thing on the page:
 
 ```bash
 grep -oE 'src="[^"]*\.png"' README.md | grep -v raw.githubusercontent   # must be empty
 ```
+
+*Right kind of path, nothing behind it.* Every URL is pinned to `/main/`, so an
+image added on a feature branch is a 404 until that branch merges — correct URL,
+correct file, no bytes. `docs/wizard.png` was in exactly this state while
+`pre-announcement-hardening` was open. The grep above cannot see it; only a
+fetch can:
+
+```bash
+grep -oE 'https://raw\.githubusercontent\.com/[^"]*\.png' README.md | sort -u |
+  while read -r u; do printf '%s %s\n' "$(curl -s -o /dev/null -w '%{http_code}' "$u")" "$u"; done
+# every line must start with 200
+```
+
+Run the fetch **after** merging to `main` and before uploading, because that is
+the only point at which both the URL and the ref are final. A pre-merge 404 here
+is expected and self-heals; a post-merge one is a broken release.
 
 Hatchling honours `.gitignore` by default, which is why
 `examples/demo/demo_manuscript.pdf` (matched by the `/examples` include, caught
