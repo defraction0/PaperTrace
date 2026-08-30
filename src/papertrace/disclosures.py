@@ -29,6 +29,7 @@ MULTISOURCE_TOKEN = "cited sources checked"
 ANCHOR_LOCATED_TOKEN = "red box = matched text"
 ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase was found on this page"
 ANCHOR_UNKNOWN_TOKEN = "anchor match not recorded"
+SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
 
 
 @dataclass(frozen=True)
@@ -267,7 +268,37 @@ def _coverage_caveat() -> Disclosure:
     )
 
 
-def run_disclosures(results) -> list[Disclosure]:
+def _source_identity(unverified: list, mismatched: list) -> Disclosure:
+    """Sources in use that nobody confirmed are the paper the reference names.
+
+    The retrieval manifest carries the per-source detail, but it is rendered in
+    the markdown report only — so this fact reached one of three readers. A
+    provided file is still used (the user named it, and a scanned PDF is common
+    for exactly the papers people supply by hand), which is precisely why the
+    reader has to be told the check did not happen.
+    """
+    n = len(unverified) + len(mismatched)
+    slugs = ", ".join(sorted(e.slug or e.num for e in unverified + mismatched))
+    kinds = []
+    if unverified:
+        kinds.append(f"{len(unverified)} unreadable or unmatchable first page")
+    if mismatched:
+        kinds.append(f"{len(mismatched)} whose title did not match the reference")
+    return Disclosure(
+        key="source_identity",
+        level="warn",
+        token=SOURCE_IDENTITY_TOKEN,
+        text=(
+            f"{n} cited source{'s' if n != 1 else ''} in use whose {SOURCE_IDENTITY_TOKEN}"
+            f" — {'; '.join(kinds)} ({slugs}). Verdicts resting on "
+            f"{'them' if n != 1 else 'it'} could be about a different paper; the retrieval "
+            f"manifest carries the reason per source."
+        ),
+        short=f"{n} source{'s' if n != 1 else ''} whose {SOURCE_IDENTITY_TOKEN}",
+    )
+
+
+def run_disclosures(results, manifest=None) -> list[Disclosure]:
     """Every run-level disclosure this RunResults owes its reader.
 
     Reads `results.truncated` — the dataclass field, the only place truncation
@@ -289,6 +320,14 @@ def run_disclosures(results) -> list[Disclosure]:
                 out.append(_coverage_attribution())
         else:
             out.append(_coverage_caveat())
+    # a source whose identity nobody established is a run-level fact: it is not
+    # attached to one claim, and every verdict resting on that file inherits it
+    if manifest is not None:
+        in_use = [e for e in manifest.entries if e.status in ("retrieved", "provided")]
+        unverified = [e for e in in_use if e.title_check == "unverifiable"]
+        mismatched = [e for e in in_use if e.title_check == "mismatch"]
+        if unverified or mismatched:
+            out.append(_source_identity(unverified, mismatched))
     return out
 
 

@@ -78,6 +78,9 @@
 {% for d in disclosures if d.key == "truncation" %}
     <div class="log"><span class="step">▸ limits</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
+{% for d in disclosures if d.key == "source_identity" %}
+    <div class="log"><span class="step">▸ resolve</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
     <div class="log"><span class="step">▸ check</span><span class="k">{{ r.claims|length }} citation-backed claims · reading each against its cited page{% if r.uncited %} · </span><span class="amber">{{ r.uncited|length }} uncited assertions flagged</span><span class="k">{% endif %}</span></div>
 {% if scout and not scout.error %}
     <div class="log"><span class="step">▸ scout</span><span class="k">europe pmc · citing articles + keyword neighbourhood · </span><span class="cyan">{{ scout.newer|length }} newer</span><span class="k"> · </span><span class="cyan">{{ scout.overlooked|length }} possibly overlooked</span></div>

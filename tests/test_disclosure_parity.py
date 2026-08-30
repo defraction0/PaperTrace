@@ -145,3 +145,82 @@ def test_converter_is_named_in_every_format_for_both_backends(tmp_path, converte
     assert disclosure.token == f"converter: {converter}"
     for name, body in rendered.items():
         assert disclosure.token in body, f"converter name missing from {name}"
+
+
+# --- an unverified source identity must reach every reader ------------------
+
+
+def _manifest_with(*title_checks: str):
+    """A manifest whose provided sources had the given identity-check outcomes."""
+    from papertrace.models import RefEntry, RefManifest
+
+    return RefManifest(
+        manuscript="m.pdf",
+        entries=[
+            RefEntry(num=str(i + 1), raw=f"Author {i}. A paper. 2020.", status="provided",
+                     slug=f"author{i}-2020", title_check=tc,
+                     reason=f"matched author{i}-2020.pdf in your sources folder")
+            for i, tc in enumerate(title_checks)
+        ],
+    )
+
+
+@pytest.mark.parametrize("checks", [
+    ("unverifiable",),
+    ("mismatch",),
+    ("verified", "unverifiable"),
+])
+def test_an_unverified_source_identity_is_disclosed_in_all_three_formats(tmp_path, checks):
+    """The retrieval manifest is rendered only in `report.md.j2`, so a source
+    whose identity nobody confirmed was invisible to editor and terminal
+    readers. The token has to travel like every other disclosure.
+    """
+    manifest = _manifest_with(*checks)
+    results = RunResults(manuscript="m.pdf", converter="pymupdf", claims=[_claim()])
+
+    write_reports(results, manifest, tmp_path, png=False)
+    rendered = {name: (tmp_path / name).read_text() for name in FORMATS}
+
+    fired = run_disclosures(results, manifest)
+    identity = next((d for d in fired if d.key == "source_identity"), None)
+    assert identity is not None, [d.key for d in fired]
+    for name, body in rendered.items():
+        assert identity.token in body, f"token {identity.token!r} missing from {name}"
+
+
+def test_all_identities_verified_adds_no_disclosure(tmp_path):
+    """An ordinary run must not grow a warning it has not earned."""
+    fired = run_disclosures(
+        RunResults(manuscript="m.pdf", converter="pymupdf", claims=[_claim()]),
+        _manifest_with("verified", "verified"),
+    )
+    assert not any(d.key == "source_identity" for d in fired)
+
+
+def test_the_terminal_template_names_every_disclosure_key_that_exists():
+    """Mechanical, so it cannot rot. `report.md.j2` and `report_editor.html.j2`
+    render run-level disclosures through a catch-all (`d.key not in (...)`), but
+    `report_terminal.html.j2` filters by explicit key — so a newly added
+    disclosure appears in two formats and silently vanishes from the third.
+    That is what happened to `source_identity`, and the parity loop only caught
+    it because a test happened to construct the input that fires it. A
+    disclosure with no parity case would still slip through; this check does not
+    depend on anyone remembering to add one.
+    """
+    import re
+
+    from papertrace import disclosures as mod
+
+    src = Path(mod.__file__).read_text()
+    keys = set(re.findall(r'key="([a-z_]+)"', src))
+    assert keys, "no Disclosure keys found — did the constructor change shape?"
+
+    templates = Path(mod.__file__).parent / "templates"
+    terminal = (templates / "report_terminal.html.j2").read_text()
+    claim_level = {"anchor", "sources", "unjudged_refs", "judgement_anchor"}
+
+    missing = {k for k in keys - claim_level if f'"{k}"' not in terminal}
+    assert not missing, (
+        f"report_terminal.html.j2 renders no branch for {sorted(missing)} — "
+        "its filter is an allow-list, so a new disclosure is dropped, not surfaced"
+    )

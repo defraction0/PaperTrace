@@ -63,7 +63,7 @@ def write_reports(
         "version": __version__,
         # disclosures are decided here, once, and only styled by the templates —
         # a format cannot silently drop one without failing the parity test
-        "disclosures": run_disclosures(results),
+        "disclosures": run_disclosures(results, manifest),
         "claim_disclosures": claim_disclosures,
         "anchor_state": anchor_state,
         "judgement_disclosures": judgement_disclosures,
