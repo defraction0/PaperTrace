@@ -8,6 +8,15 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from papertrace.models import RefEntry  # noqa: E402
+
+
+def _repo_root() -> Path:
+    """Walk up to the directory holding pyproject.toml."""
+    for d in [Path(__file__).resolve(), *Path(__file__).resolve().parents]:
+        if (d / "pyproject.toml").exists():
+            return d
+    raise RuntimeError("no pyproject.toml above this test file")
 from papertrace.refs import parse_references, resolve_entry  # noqa: E402
 
 PDF = b"%PDF-1.4 fake"
@@ -175,15 +184,17 @@ def _real_pdf_bytes(text: str) -> bytes:
 
 
 def test_title_check_text_scorer():
+    """Three answers, not two. `verified` and `unverifiable` shared a `None`
+    return, which is how a scanned PDF came back as a confirmed match."""
     from papertrace.refs import _title_check_text
 
     entries = parse_references(LITTLEJOHNS_REFS)
     raw = entries[0].raw
-    assert _title_check_text(raw, RIGHT_PAGE) is None  # matching paper passes
-    reason = _title_check_text(raw, WRONG_PAGE)
-    assert reason is not None and "title check failed" in reason
-    # unverifiable is not the same as wrong — empty page text passes
-    assert _title_check_text(raw, "") is None
+    assert _title_check_text(raw, RIGHT_PAGE)[0] == "verified"
+    state, detail = _title_check_text(raw, WRONG_PAGE)
+    assert state == "mismatch" and "title check failed" in detail
+    # unverifiable is not the same as wrong — but it is not the same as right
+    assert _title_check_text(raw, "")[0] == "unverifiable"
 
 
 def test_wrong_pdf_rejected_by_title_check(tmp_path):
@@ -397,12 +408,225 @@ def test_a_provided_file_whose_text_is_the_wrong_paper_says_so(tmp_path):
     assert "unverified" in e.reason.lower(), e.reason
 
 
-def test_an_unreadable_provided_file_is_not_called_a_mismatch(tmp_path):
-    """`_title_check_text` documents that an empty or unreadable page passes —
-    unverifiable is not the same as wrong — and a scanned source is exactly the
-    kind people supply by hand. It must not be reported as the wrong paper."""
+def test_an_unreadable_provided_file_is_used_but_says_it_is_unverified(tmp_path):
+    """A scanned source is exactly the kind people supply by hand, so it is still
+    used — the user named it and there is nothing to fall back to. What changed:
+    this test used to assert the reason said *nothing*, on the grounds that
+    unverifiable is not wrong. That locked in the defect. Not-wrong does not
+    license silence: the reader has to be told nobody confirmed the identity."""
     d = _folder(tmp_path, "littlejohns-2020.pdf")  # not a real PDF: no text
     e = _entry()
     resolve_entry(e, tmp_path, "t@example.org", _client({}), provided_dir=d)
-    assert e.status == "provided"
-    assert "unverified" not in e.reason.lower(), e.reason
+    assert e.status == "provided", "the user's explicit choice is still honoured"
+    assert e.status != "mismatch", "unverifiable must not be reported as the wrong paper"
+    assert e.title_check == "unverifiable"
+    assert "identity unverified" in e.reason.lower(), e.reason
+
+
+# --- a duplicated label means we do not know where the entry begins ---------
+
+
+def test_a_label_printed_inside_a_reference_cannot_steal_the_next_entry():
+    """The mid-line marker rule made `[2]` inside reference 1's title look like
+    the start of reference 2, so entry 2 began mid-sentence and took reference
+    1's DOI — `10.1000/ref-one`. A claim citing [2] would then be judged
+    against paper 1: the wrong-paper hazard the mid-line rule existed to fix,
+    arriving from the other direction.
+
+    Neither "first occurrence" nor "last occurrence" is safe — the mirror case
+    (a real entry whose own text repeats its label) breaks the opposite guess —
+    so an ambiguous boundary is disclosed, never guessed.
+    """
+    text = ("[1] Smith A. Trial arms: [2] enhanced-dose versus control. "
+            "doi:10.1000/ref-one [2] Jones B. The actual second paper. "
+            "doi:10.1000/ref-two [3] Lee C. Third. doi:10.1000/ref-three")
+    by_num = {e.num: e for e in parse_references(text)}
+
+    assert by_num["2"].doi != "10.1000/ref-one", "entry 2 took reference 1's DOI"
+    assert by_num["2"].doi is None, "an ambiguous entry must carry no DOI to resolve"
+    assert by_num["2"].boundary_ambiguous is True
+    assert "ambiguous" in by_num["2"].reason.lower()
+    # the unambiguous neighbours are untouched
+    assert by_num["3"].doi == "10.1000/ref-three"
+    assert by_num["3"].boundary_ambiguous is False
+
+
+def test_an_ambiguous_entry_is_never_resolved_against_anything():
+    """Clearing the DOI is not enough. `resolve_entry` would still try Crossref
+    by title on the raw text — which for an ambiguous entry is two references
+    spliced together — and `_provided_candidates` would match on a slug derived
+    from that same text. Both are wrong-paper routes, so the refusal is at the
+    top."""
+    entry = RefEntry(num="2", raw="enhanced-dose versus control. [2] Jones B. Second.",
+                     boundary_ambiguous=True, reason="reference boundary ambiguous — ...")
+    calls: list[str] = []
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda r: calls.append(str(r.url)) or httpx.Response(500)
+    ))
+    out = resolve_entry(entry=entry, dest_dir=Path("/tmp"), email="a@b.org",
+                        client=client, provided_dir=None)
+
+    assert calls == [], f"an ambiguous entry reached the network: {calls}"
+    assert out.status == "no_doi"
+    assert "ambiguous" in out.reason.lower(), out.reason
+    assert out.pdf_path is None
+
+
+def test_the_legitimate_mid_line_case_still_parses():
+    """The regression this must not undo: Elsevier PDFs extract with entries
+    running together, so `[2]` and `[3]` sit mid-line. Requiring a line start
+    once turned a 34-reference list into one entry."""
+    text = ("[1] Smith A. First paper. 2020. doi:10.1000/one [2] Jones B. Second paper. "
+            "2021. doi:10.1000/two [3] Lee C. Third paper. 2022. doi:10.1000/three")
+    entries = parse_references(text)
+    assert [e.num for e in entries] == ["1", "2", "3"]
+    assert [e.doi for e in entries] == ["10.1000/one", "10.1000/two", "10.1000/three"]
+    assert not any(e.boundary_ambiguous for e in entries)
+
+
+def test_boundary_ambiguous_round_trips_and_older_manifests_still_load(tmp_path):
+    """New field ⇒ schema update plus a round-trip test. It must also be absent-
+    safe: a manifest written before this field existed has no such key."""
+    import jsonschema
+
+    from papertrace.models import RefManifest
+
+    m = RefManifest(
+        manuscript="paper.pdf",
+        entries=[
+            RefEntry(num="1", raw="Smith A. First.", status="no_doi",
+                     boundary_ambiguous=True, reason="reference boundary ambiguous — ..."),
+            RefEntry(num="2", raw="Jones B. Second.", status="retrieved", doi="10.1/x"),
+        ],
+    )
+    path = tmp_path / "refs_manifest.json"
+    m.to_json(path)
+
+    payload = json.loads(path.read_text())
+    schema = json.loads((_repo_root() / "schemas" / "refs_manifest.schema.json").read_text())
+    jsonschema.validate(payload, schema)
+
+    back = RefManifest.from_json(path)
+    assert [e.boundary_ambiguous for e in back.entries] == [True, False]
+
+    # a pre-field manifest: the key is simply not there
+    del payload["entries"][0]["boundary_ambiguous"]
+    del payload["entries"][1]["boundary_ambiguous"]
+    path.write_text(json.dumps(payload))
+    jsonschema.validate(json.loads(path.read_text()), schema)
+    legacy = RefManifest.from_json(path)
+    assert [e.boundary_ambiguous for e in legacy.entries] == [False, False]
+
+
+# --- unverifiable is not the same as verified ------------------------------
+
+
+def test_a_scanned_provided_pdf_is_not_reported_as_matched(tmp_path):
+    """`_title_check_text` returned the same None for "the title matches" and
+    "there is no readable text to compare", so a scanned PDF — common for a
+    paper someone supplies by hand — got status `provided` and the reason
+    `matched smith-2020.pdf in your sources folder`. Nothing had been verified.
+    """
+    from papertrace.refs import _title_check_text
+
+    state, _ = _title_check_text("Smith A. Deep learning for chest radiographs. 2020.", "   ")
+    assert state == "unverifiable"
+
+    state, _ = _title_check_text(
+        "Smith A. Deep learning for chest radiographs. 2020.",
+        "Deep learning for chest radiographs, Smith, 2020",
+    )
+    assert state == "verified"
+
+    state, detail = _title_check_text(
+        "Smith A. Deep learning for chest radiographs. 2020.",
+        "Entirely unrelated paper about volcanic geology in Iceland",
+    )
+    assert state == "mismatch"
+    assert "title check failed" in detail
+
+
+def test_the_provided_reason_says_which_of_the_three_happened(tmp_path):
+    """The manifest reason is what a reader sees. It must distinguish verified
+    from unverified-because-unreadable from an outright mismatch."""
+    import pymupdf
+
+    from papertrace.refs import resolve_entry
+
+    srcs = tmp_path / "sources"
+    srcs.mkdir()
+
+    def _pdf(name: str, text: str) -> None:
+        doc = pymupdf.open()
+        page = doc.new_page()
+        if text:
+            page.insert_text((72, 100), text, fontsize=11)
+        doc.save(srcs / name)
+        doc.close()
+
+    _pdf("smith-2020.pdf", "")  # image-only: no extractable text at all
+    e = RefEntry(num="1", raw="Smith A. Deep learning for chest radiographs. 2020.",
+                 slug="smith-2020")
+    out = resolve_entry(
+        entry=e, dest_dir=tmp_path / "d", email="a@b.org",
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500))),
+        provided_dir=srcs,
+    )
+    assert out.status == "provided"
+    assert "unverified" in out.reason.lower() or "could not" in out.reason.lower(), out.reason
+    assert out.reason != "matched smith-2020.pdf in your sources folder"
+
+
+# --- the contact address goes only where it is required --------------------
+
+
+def test_the_contact_email_reaches_only_the_services_that_need_it(tmp_path):
+    """One `httpx.Client` carried a `mailto:` User-Agent, so the address went to
+    every host the resolver touched — Europe PMC, arXiv and whatever third party
+    serves the PDF — while the wizard disclosed only Unpaywall and Crossref.
+
+    Unpaywall requires a contact address and Crossref's polite pool uses one.
+    Nothing else does, and a PDF host is an arbitrary third party.
+    """
+    from papertrace.refs import _client, _crossref_doi, _download_pdf, _epmc_pdf, _unpaywall_pdf
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen[request.url.host] = request.headers.get("user-agent", "")
+        if "crossref" in request.url.host:
+            return httpx.Response(200, json={"message": {"items": [{"DOI": "10.1/x"}]}})
+        if "unpaywall" in request.url.host:
+            return httpx.Response(200, json={"best_oa_location": {"url_for_pdf": None}})
+        if "ebi.ac.uk" in request.url.host:
+            return httpx.Response(200, json={"resultList": {"result": []}})
+        return httpx.Response(200, content=b"%PDF-1.4 body")
+
+    email = "private@example.org"
+    with _client() as client:
+        client._transport = httpx.MockTransport(handler)
+        _crossref_doi(client, "Smith A. A paper. 2020.", email)
+        _unpaywall_pdf(client, "10.1/x", email)
+        _epmc_pdf(client, "10.1/x")
+        _download_pdf(client, "https://arxiv.org/pdf/2101.00001", tmp_path / "a.pdf")
+        _download_pdf(client, "https://cdn.example-publisher.com/x.pdf", tmp_path / "b.pdf")
+
+    needs_it = {"api.crossref.org", "api.unpaywall.org"}
+    for host, ua in seen.items():
+        if host in needs_it:
+            assert f"mailto:{email}" in ua, f"{host} should carry the contact address: {ua}"
+        else:
+            assert "mailto:" not in ua, f"{host} received the contact address: {ua}"
+    assert needs_it <= set(seen), f"test did not exercise both: {sorted(seen)}"
+    assert {"arxiv.org", "cdn.example-publisher.com", "www.ebi.ac.uk"} <= set(seen)
+
+
+def test_the_user_agent_reports_the_real_version():
+    """It read `PaperTrace/0.3` — hardcoded, and already a release behind when
+    the package was 0.3.1. A polite-pool identifier that misstates its version
+    is worse than useless to the service reading it."""
+    from papertrace import __version__
+    from papertrace.refs import UA, UA_CONTACT
+
+    assert f"PaperTrace/{__version__}" in UA
+    assert f"PaperTrace/{__version__}" in UA_CONTACT.format(email="a@b.org")

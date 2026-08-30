@@ -14,9 +14,25 @@ from pathlib import Path
 
 import httpx
 
+from . import __version__
 from .models import RefEntry
 
-UA = "PaperTrace/0.3 (+https://github.com/defraction0/PaperTrace; mailto:{email})"
+# Two user agents on purpose. The contact address is sent ONLY to the services
+# that ask for one — Unpaywall requires it, Crossref's polite pool uses it. One
+# shared client carrying `mailto:` sent it to Europe PMC, arXiv and whatever
+# third party hosts the PDF, while the wizard disclosed two recipients.
+# derived, not written out: this said 0.3 while the package was 0.3.1, and an
+# identifier that misstates its version is worse than useless to the service
+# on the other end of a polite-pool request
+UA = f"PaperTrace/{__version__} (+https://github.com/defraction0/PaperTrace)"
+UA_CONTACT = (
+    f"PaperTrace/{__version__} (+https://github.com/defraction0/PaperTrace; mailto:{{email}})"
+)
+
+
+def _contact(email: str) -> dict[str, str]:
+    """Per-request header for the two services that want a contact address."""
+    return {"User-Agent": UA_CONTACT.format(email=email)}
 DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"'<>]+")
 ARXIV_RE = re.compile(r"arxiv[:\s]*(\d{4}\.\d{4,5})(v\d+)?", re.I)
 # a parenthesised four-digit group is not automatically a year: journal
@@ -68,11 +84,26 @@ def parse_references(text: str) -> list[RefEntry]:
             expected += 1
 
     entries: list[RefEntry] = []
-    for i, (_start, end, _num) in enumerate(seq):
+    for i, (start, end, _num) in enumerate(seq):
         stop = seq[i + 1][0] if i + 1 < len(seq) else len(text)
         raw = re.sub(r"\s+", " ", text[end:stop]).strip()
-        if raw:
-            entries.append(_entry(str(_num), raw))
+        if not raw:
+            continue
+        e = _entry(str(_num), raw)
+        # This label occurs again inside its own span, so one of the two is
+        # printed in a title and we cannot tell which. Guessing either way is a
+        # wrong-paper route: taking the first splices reference N-1's tail onto
+        # entry N (and its DOI with it), taking the last truncates a real entry
+        # whose text repeats its own label. Disclose instead.
+        if any(start < s < stop and n == _num for s, _e, n in hits):
+            e.boundary_ambiguous = True
+            e.doi = None
+            e.reason = (
+                f"reference boundary ambiguous — the label [{_num}] appears more than once "
+                "before the next reference, so where this entry begins is a guess; "
+                "not resolved rather than risk judging a claim against the wrong paper"
+            )
+        entries.append(e)
     if not entries:
         entries = _parse_bulleted(text)
     return entries
@@ -123,18 +154,19 @@ def _slug(raw: str, year: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _client(email: str) -> httpx.Client:
+def _client() -> httpx.Client:
     return httpx.Client(
-        headers={"User-Agent": UA.format(email=email)},
+        headers={"User-Agent": UA},
         timeout=25.0,
         follow_redirects=True,
     )
 
 
-def _crossref_doi(client: httpx.Client, raw: str) -> str | None:
+def _crossref_doi(client: httpx.Client, raw: str, email: str) -> str | None:
     r = client.get(
         "https://api.crossref.org/works",
         params={"query.bibliographic": raw[:250], "rows": 1},
+        headers=_contact(email),
     )
     r.raise_for_status()
     items = r.json().get("message", {}).get("items", [])
@@ -142,7 +174,8 @@ def _crossref_doi(client: httpx.Client, raw: str) -> str | None:
 
 
 def _unpaywall_pdf(client: httpx.Client, doi: str, email: str) -> str | None:
-    r = client.get(f"https://api.unpaywall.org/v2/{doi}", params={"email": email})
+    r = client.get(f"https://api.unpaywall.org/v2/{doi}", params={"email": email},
+                   headers=_contact(email))
     if r.status_code != 200:
         return None
     data = r.json()
@@ -186,22 +219,34 @@ _TITLE_STOPWORDS = frozenset(
 )
 
 
-def _title_check_text(raw: str, page_text: str) -> str | None:
+# the three answers the check can give. "unverifiable" used to share `None`
+# with "verified", so a scanned PDF someone supplied by hand was reported as
+# `matched ...` — a successful identity check that never happened.
+TITLE_VERIFIED = "verified"
+TITLE_UNVERIFIABLE = "unverifiable"
+TITLE_MISMATCH = "mismatch"
+
+
+def _title_check_text(raw: str, page_text: str) -> tuple[str, str]:
     """Does the retrieved first page look like the cited reference?
 
-    Returns None on pass, else a human-readable reason. An empty/unreadable
-    page passes: unverifiable is not the same as wrong.
+    Returns (state, detail). Unverifiable is not the same as wrong and neither
+    is the same as right — collapsing the first two into the third is how a
+    scanned wrong paper passes as the source.
     """
     page = re.sub(r"\s+", " ", page_text).lower()
     if not page.strip():
-        return None
+        return TITLE_UNVERIFIABLE, "no readable text on its first page (scanned or image-only)"
     tokens = set(re.findall(r"[a-z]{5,}", raw.lower())) - _TITLE_STOPWORDS
     if not tokens:
-        return None
+        return TITLE_UNVERIFIABLE, "the reference string has no distinctive words to match on"
     found = sum(1 for t in tokens if t in page)
     if found / len(tokens) >= 0.35:
-        return None
-    return f"title check failed: {found}/{len(tokens)} reference tokens on the retrieved first page"
+        return TITLE_VERIFIED, f"{found}/{len(tokens)} reference tokens on its first page"
+    return (
+        TITLE_MISMATCH,
+        f"title check failed: {found}/{len(tokens)} reference tokens on the retrieved first page",
+    )
 
 
 def _first_page_text(pdf_path: Path) -> str:
@@ -217,7 +262,7 @@ def _first_page_text(pdf_path: Path) -> str:
         return ""  # corrupt/scanned/odd PDF — never crash resolution
 
 
-def _title_check(entry: RefEntry, pdf_path: Path) -> str | None:
+def _title_check(entry: RefEntry, pdf_path: Path) -> tuple[str, str]:
     return _title_check_text(entry.raw, _first_page_text(pdf_path))
 
 
@@ -228,7 +273,9 @@ def _accept(
     bytes are discarded, the reason is recorded, and the chain continues."""
     if not _download_pdf(client, url, dest):
         return False
-    if detail := _title_check(entry, dest):
+    state, detail = _title_check(entry, dest)
+    entry.title_check = state
+    if state == TITLE_MISMATCH:
         dest.unlink(missing_ok=True)
         entry.status = "mismatch"
         entry.reason = (
@@ -295,6 +342,13 @@ def resolve_entry(
     provided_dir: Path | None = None,
 ) -> RefEntry:
     """Resolve one reference in place. Never raises — failures land in status/reason."""
+    # before anything else: an ambiguous boundary makes `raw` two references
+    # spliced together, so the slug, the title and any Crossref lookup derived
+    # from it can all name the wrong paper. A recorded gap is the honest result.
+    if entry.boundary_ambiguous:
+        entry.status = "no_doi"
+        return entry
+
     dest = dest_dir / f"{entry.slug}.pdf"
 
     if candidates := _provided_candidates(entry, provided_dir):
@@ -306,8 +360,14 @@ def resolve_entry(
         # a provided file is title-checked like a downloaded one, but a failure
         # is DISCLOSED, not fatal: the user named this file, there is nothing to
         # fall back to, and a scanned PDF yields no text at all
-        unconfirmed = _title_check(entry, provided)
-        note = f" — unverified: {unconfirmed}" if unconfirmed else ""
+        state, detail = _title_check(entry, provided)
+        entry.title_check = state
+        if state == TITLE_VERIFIED:
+            note = f" — identity confirmed: {detail}"
+        else:
+            # "unverified" for both remaining states, because both mean the same
+            # thing to a reader: nobody established that this file is the paper
+            note = f" — identity unverified: {detail}"
         entry.reason = f"matched {provided.name} in your sources folder{others}{note}"
         return entry
 
@@ -319,7 +379,7 @@ def resolve_entry(
 
         if not entry.doi:
             try:
-                entry.doi = _crossref_doi(client, entry.raw)
+                entry.doi = _crossref_doi(client, entry.raw, email)
                 if entry.doi:
                     entry.resolver = "crossref"
             except httpx.HTTPError:
@@ -353,7 +413,7 @@ def resolve_all(
     progress: ProgressCb | None = None,
 ) -> list[RefEntry]:
     dest_dir.mkdir(parents=True, exist_ok=True)
-    with _client(email) as client:
+    with _client() as client:
         for entry in entries:
             resolve_entry(entry, dest_dir, email, client, provided_dir)
             if progress:
