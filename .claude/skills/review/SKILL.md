@@ -58,15 +58,26 @@ proceeding; report anything unreadable immediately, not five steps later.
 
 ## 2 · Inventory — first wow
 
+**Settle the case folder before anything else.** One case folder per paper:
+left alone, `papertrace` names it after the paper's own file and puts it beside
+the paper (`<the paper's folder>/<paper stem>/`), and `-c` overrides that. Fix
+it once, tell the user the path, and pass the same `-c <case>` to every later
+step — the stages that take no paper (`scout`, `check`, `highlight`, `report`)
+have no name to derive and refuse rather than guess between two audits. If the
+folder already holds an audit of this paper, the CLI asks whether to amend it
+(picking up sources added since) or start a numbered sibling; with nobody at a
+terminal it amends and says so.
+
 Run ingest and echo back what you actually found, as a tidy table:
 
 ```bash
-papertrace ingest <paper.pdf> -o case/ingest/manuscript
+papertrace ingest <paper.pdf> -o <case>/ingest/manuscript
 ```
 
 Report: pages, blocks, the detected section headings, how many numbered
-references the paper cites (`papertrace refs --parse-only`), and how many of
-those the user's sources folder already covers. One table, no prose padding.
+references the paper cites (`papertrace refs <paper.pdf> --parse-only`), and
+how many of those the user's sources folder already covers. One table, no
+prose padding.
 If anything looks off (no References section found, scanned/no text layer),
 say so now and ask.
 
@@ -75,7 +86,7 @@ say so now and ask.
 Collect what the user actually wants answered. Read any screenshots with the
 Read tool and extract the exact fields — numbered questions, dropdowns,
 word-limited boxes; take typed questions as they are. Write the combined
-checklist to `case/out/questions.md`, then tell the user:
+checklist to `<case>/out/questions.md`, then tell the user:
 
 > You're asking **N questions**. Every one of them will be answered in the
 > final write-up — here's the list so you can correct me now if I misread
@@ -88,7 +99,7 @@ literature, methods and results consistency — and say you did.
 ## 4 · Retrieval — live ticker
 
 ```bash
-papertrace refs <paper.pdf> --provided <sources_dir> -o case/
+papertrace refs <paper.pdf> --provided <sources_dir> -c <case>
 ```
 
 Stream the per-reference ticker as it runs (✓ retrieved via unpaywall · ✓
@@ -98,7 +109,7 @@ unpublished)”**, and remind the user they can drop more PDFs into the sources
 folder at any point; you'll pick them up on request.
 
 For a published paper, also run the literature scout
-(`papertrace scout -c case/`, `--doi` if the title lookup misses) and show
+(`papertrace scout -c <case>`, `--doi` if the title lookup misses) and show
 its two registers: published since, and existed-but-uncited. Candidates for
 the user's judgement, not accusations.
 
@@ -157,10 +168,10 @@ unsure.
 
 ## 7 · Outputs
 
-Write to `case/out/`:
+Write to `<case>/out/`:
 
 - `results.json` — every claim with verdict + anchors (schema in `schemas/`)
-- `fact_check_report.md` + rendered looks: `papertrace report case/`
+- `fact_check_report.md` + rendered looks: `papertrace report -c <case>`
 - `questions.md` — the user's questions, now answered
 - `findings.md` — the audit narrative: what holds, what doesn't, what
   couldn't be checked, what the scout surfaced
@@ -187,7 +198,8 @@ a busy reader to look at first. Close with:
 - Scout hits and uncited-literature candidates are search-based leads, not
   findings — present them as questions, never as misconduct claims.
 - Do not reproduce >15 consecutive words of the audited paper in any output.
-- Everything stays in the local `case/` folder, which is gitignored.
+- Everything stays in the local case folder, which carries a `.gitignore` of
+  its own — a folder named after a manuscript is not covered by the repo's.
 - When the session is a peer review, additionally: no accept/reject
   recommendation in author-facing text (that reasoning goes only to the
   editor, and even there as reasoning, not a verdict); never sign with the

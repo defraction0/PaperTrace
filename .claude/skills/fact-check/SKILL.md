@@ -43,7 +43,7 @@ with `refs_manifest.json` and per-source ingests under `case/ingest/<slug>/`.
    running head): pick phrases unique within the block.
 
 6. **Crop the evidence.**
-   `papertrace highlight case/ --claim <id>` (or the library call) →
+   `papertrace highlight -c <case> --claim <id>` (or the library call) →
    writes `case/out/evidence/claim_<id>_<slug>_p<page>.png` with red boxes on
    the anchor phrases. If zero boxes were drawn, your anchor phrases don't
    match the page text — fix them (ligatures, hyphenation) rather than
