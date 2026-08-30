@@ -69,9 +69,24 @@ def one_run(gold: dict, gold_path: Path, manuscript: Path, case_dir: Path,
     started = _stamp()
     case_dir.mkdir(parents=True, exist_ok=True)
 
-    cli.ingest(manuscript, case_dir / "ingest" / "manuscript", backend)
-    cli.refs(manuscript, case_dir, None, email, parse_only=False, backend=backend)
-    cli.check(case_dir, model)
+    # keyword-only, every argument: these are Typer commands, so an unpassed
+    # parameter is an OptionInfo sentinel, and one inserted parameter shifts
+    # every later positional. `backend` once landed in `case` this way.
+    cli.ingest(
+        pdf=manuscript,
+        out=case_dir / "ingest" / "manuscript",
+        case=case_dir,
+        backend=backend,
+    )
+    cli.refs(
+        manuscript=manuscript,
+        case=case_dir,
+        provided=None,
+        email=email,
+        parse_only=False,
+        backend=backend,
+    )
+    cli.check(case=case_dir, model=model)
 
     results_path = case_dir / "out" / "results.json"
     results = RunResults.from_json(results_path)
