@@ -4,6 +4,141 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A URL-only reference was resolved to an unrelated paper.** Reference [8] of a
+  real audited manuscript is an ACR news page with no DOI. With no DOI to look
+  up, `resolve_entry` fell through to a Crossref *bibliographic title search* —
+  which always returns something — and that something was `10.1002/acr2.11538`:
+  ACR Open Rheumatology, American College of *Rheumatology*, not Radiology.
+  Unpaywall served Solomon et al.'s editorial on authorship and ChatGPT, the
+  title check passed it at 6/15, and two claims were reported `not_addressed`
+  against a rheumatology editorial. Two of those six matches were `chatgpt` and
+  `source`, harvested from the `?utm_source=chatgpt.com` tracking parameter in
+  the reference's own URL — the tracking parameter is what made a ChatGPT
+  editorial look like a title match. A reference whose identity is carried by a
+  URL — no DOI, no volume, no page range, no identifier — now terminates at
+  `no_doi` with no request sent: a news page was never retrievable as a PDF, so
+  the honest gap costs nothing that was ever on offer. The gate keys on the
+  absence of article structure rather than the presence of a link, because
+  publishers' own reference styles print a URL beside the volume and those
+  references resolve well. Separately the title check no longer takes tokens
+  from a URL, and `verified` now needs four distinct matched words rather than a
+  ratio a three-word reference clears on generic domain vocabulary — falling
+  short reads `unverifiable`, never `mismatch`, since too few words to tell is
+  not evidence of a different paper.
+- **Every audit defaulted into one folder called `case`, in whatever directory the
+  user was standing in.** A first-time user ran a batch audit from the root of a
+  git clone and the output landed in `PaperTrace/case/` — not named for the paper,
+  and the same folder every subsequent paper would have used. `run` and `refs` now
+  default to a folder named after the paper, beside the paper: the one location
+  stable across invocations, so a re-run finds its own case without a flag. An
+  explicit `-c` still wins, unconditionally. `check`, `highlight`, `report` and
+  `scout` have no paper to take a name from, so they are given no default at all —
+  `./case` is still used when it exists, and otherwise they refuse, listing the
+  folders in this directory that look like audits rather than picking one. Because
+  a case folder is no longer named `case`, `.gitignore`'s name-based guardrail no
+  longer covers it, so the folder is created carrying a `.gitignore` of its own.
+- **Re-running a paper reused its case folder silently, including when that was not
+  what the user meant.** Adding source PDFs and re-running is the intended flow, but
+  so is auditing a revised draft, and nothing distinguished them: `_guard_case`
+  refuses a *different* paper and permits the same one without a word. A derived
+  case folder already holding an audit of this paper now asks — amend it
+  (references are resolved again, so sources added since are picked up) or start a
+  numbered sibling, leaving the first untouched. Only for a folder the tool named
+  itself; `-c` is an instruction, not a suggestion. With nobody at a terminal it
+  amends and says so, never blocking on stdin: amend is what a re-run did before,
+  it deletes nothing, and it keeps the report's path predictable, where a fresh
+  folder would move a scripted caller's output somewhere it never named. A
+  different paper in the folder is still exit 2, unchanged.
+- **The skills documented four commands that do not exist.** `papertrace refs …
+  -o case/` (`refs` has no `-o`), `papertrace report case/` and `papertrace
+  highlight case/ --claim <id>` (neither takes a positional argument), and a prose
+  `papertrace refs --parse-only` with no manuscript — each a usage error, in files
+  an agent executes verbatim. Every `papertrace` line in every skill is now parsed
+  against the real Typer commands by a test. Appending `--help` would not have
+  done: `--help` is eager and fires before click reports an unexpected extra
+  argument, so `report case/ --help` exits 0 and the check would have passed a
+  broken line. It parses each documented line into a click context instead, which
+  validates arguments without invoking anything. Scanning one skill is how the
+  fourth command survived while the other three were fixed, so the test walks
+  `.claude/skills/**/*.md`.
+- **docling deleted a hyphen that belonged to the word.** It joins a word split
+  across two lines and drops the hyphen, which is *right* far more often than it
+  is wrong — `approxi-` / `mately` is the single word "approximately", and 87 of
+  94 breaks on the paper measured were of that kind — and wrong when the hyphen
+  is the word's own: `Non-` / `Hispanic` arrived as `NonHispanic`, `thin-fat` as
+  `thinfat`. Latent: it corrupts the text the model reads and the phrases it can
+  quote. The adapter now repairs a join **only where the paper writes that
+  compound out unbroken somewhere else** — the document's own evidence, never a
+  lower→upper junction, which proves nothing (`HbA1c` and `PaperTrace` have one;
+  `Timedependent` has one and is broken). Unproven joins are left exactly as
+  docling produced them rather than repaired by guesswork: on the measured paper
+  that is 4 blocks rewritten, not the 46 a blanket fix touched.
+- **An anchor phrase could be unboxable for typesetting reasons alone, and this
+  one was observed.** `page.search_for` reads a hyphenated line break as a
+  space, so a page printing `Non-` / `Hispanic` carries only `Non- Hispanic` —
+  neither the compound the paper means nor docling's join is on it, and a model
+  tidying a quoted `develop- ing` to `developing` was searching for a string no
+  page has. In a real audit one of two quoted phrases (`sohn-2022` p2) matched
+  nothing, and that claim kept its box only because its second phrase matched.
+  `highlight` now retries a missed phrase in forms the **page** dictates:
+  whitespace beside a dash the phrase already carries, then the phrase rewritten
+  with the page's own line-break hyphenation. Still exact text search, still no
+  similarity matching — a phrase the page does not carry returns no box and
+  `anchor_located = False`, as before. Measured over that audit's 20 anchor
+  phrases: 18 located verbatim, 19 with the retry.
+- **A reference list split by an intervening section was parsed short.** A real
+  pre-proof put refs 1-9 on page 7, a `Declaration of interests` section next,
+  then refs 10-15 on page 8. `references_section` stops at the following section
+  header — the guard that keeps the reference list from swallowing the rest of
+  the paper — so six references were never parsed, never retrieved and never
+  mentioned: the audit reported 9 references on a paper citing 15. The list is
+  now picked up again after an interruption, gated on two independent signals
+  because neither alone separates a split bibliography from an appendix: the
+  entries must be `list`-typed, and the resumed run must be at least two blocks.
+  Restricted to `list` and never `text` on purpose — under the flat backend
+  reference entries are `text`, the same type as every paragraph, so resuming
+  there would swallow the Discussion of any paper whose references are not last.
+  The cost of that asymmetry is that a flat-ingested split list is still parsed
+  short. Only reference-shaped runs are collected, which matters more than it
+  sounds: `_parse_bulleted` appends a non-bullet line to the *previous* entry, so
+  a stray paragraph corrupts a reference rather than merely adding noise.
+
+### Changed
+
+- **The README claimed a figure's contents get checked, which it could not
+  support.** "A claim that lives in a table cell **or inside a figure** is found,
+  checked, and shown like any other" was true of the red box — a figure's numbers
+  are in the PDF text layer, so text search finds them on the real page — and
+  unsupported for the judging half: under the layout backend a figure region
+  reaches the model as `[FIGURE: <caption>]`, and in-figure text arrives only
+  where docling's layout model found a text region inside the figure. On the one
+  paper measured it found none: of 9 figures, 5 carried text in the text layer
+  and no docling text block landed inside any figure region, while the flat-text
+  backend did carry that text. The section now names which backend each half
+  holds for, states the measurement as one paper rather than a rate, and says the
+  two illustrating crops come from **cited sources** — which batch mode always
+  reads as flat text. The same section's claim that a flat-text source delivers
+  "its figures not at all" was wrong in the other direction and now says what it
+  does deliver: loose words with no figure attached.
+
+### Added
+
+- **A resumed reference list says so, in all three formats.** Crossing a section
+  boundary to finish a bibliography is a judgement, and the numbering of the
+  later entries rests on it — so `RefManifest.references_resumed` records it
+  (optional, in `schemas/refs_manifest.schema.json`) and a run-level disclosure
+  carries it into markdown, editor and terminal; `refs` also says so on the
+  console in amber, so the crossed boundary is visible before the report is
+  read. The wording points both ways on
+  purpose: the guess could be wrong, but not making it was the previous
+  behaviour and that failed silently. The terminal template needed an explicit
+  branch, and the mechanical guard added in 0.4.0 caught the omission before any
+  parity test did — its first live catch.
+
 ## [0.4.0] — 2026-08-30 (beta)
 
 ### Added
