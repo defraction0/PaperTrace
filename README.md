@@ -182,7 +182,7 @@ and batching its questions.
 ```bash
 pip install -e ".[full]"        # standard install (see matrix below)
 export PAPERTRACE_EMAIL="you@example.org"     # Unpaywall asks for a contact
-papertrace run paper.pdf --provided ./my_pdfs -c case
+papertrace run paper.pdf --provided ./my_pdfs      # case folder: ./paper/ beside the PDF
 ```
 
 Install options:
@@ -284,24 +284,46 @@ accusations.
 
 ## Tables and figures are evidence too
 
-With the standard install, a claim that lives in a table cell or inside a
-figure is found, checked, and shown like any other — cell and in-figure
-numbers boxed by text search on the real page:
+A number in a table cell, or drawn inside a figure, is still in the PDF's text
+layer — so the red box lands on it whichever backend read the document.
+`highlight` searches the real page, never the extracted text:
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
 </p>
 
+Both crops above come from **cited sources** whose block types (`table block`,
+`picture block`) come from ingesting those sources with the layout backend by
+hand — in batch mode `check` reads a cited source as flat text.
+
+Whether such a number can be *claimed and checked* in the first place is a
+different question, decided by what the backend hands the model:
+
+| | a table cell | text drawn inside a figure |
+|---|---|---|
+| **flat text** (`pymupdf`) | reaches the model linearised — the row and column it belongs to are lost | reaches the model as loose words, with no figure to belong to |
+| **layout-aware** (`docling`; standard install, audited paper only) | reaches the model as a GFM table | the figure arrives as `[FIGURE: <caption>]`; in-figure text arrives only where docling's layout model found a text region inside the figure |
+
+On the one paper measured for this, it found none: of 9 figures, 5 carried text
+in the PDF's text layer, and docling emitted no text block anywhere inside a
+figure region — so that text reached the model nowhere, while the flat-text
+backend did carry it. One paper is not a rate and none is claimed; what is
+claimed is only that in-figure text is **not guaranteed** on the layout path.
+
+So the box is equally trustworthy either way, and the claim behind it is not:
+a table-cell claim is strongest under the layout backend, and an in-figure claim
+is the weakest evidence this tool produces — under the layout backend the judge
+may never have seen the number, and under flat text it saw the number without
+the figure that gives it meaning.
+
 That layout fidelity is spent on the **audited paper**. In batch mode a cited
 source that has **not yet been ingested** is ingested with the fast flat-text
-backend, so its tables reach the judge linearised and its figures not at all.
+backend, so its tables reach the judge linearised and its figures only as
+whatever loose words sat inside them.
 `check` reuses an existing `case/ingest/<slug>/annotated.md` if one is already
 there — so a source you ingested yourself with `papertrace ingest --backend
 docling` keeps its layout, and the report does **not** currently distinguish
-the two cases. The
-red box still lands correctly either way — PDF text search doesn't care about
-layout — but a claim resting on a figure inside a *cited source* is weaker
-evidence than one resting on its prose.
+the two cases.
 
 ## Try the demo yourself
 

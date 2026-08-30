@@ -218,6 +218,31 @@ _TITLE_STOPWORDS = frozenset(
      "elsevier", "springer", "wiley", "volume", "press", "https"}
 )
 
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
+
+
+def _title_tokens(raw: str) -> set[str]:
+    """The reference's own distinctive words — URLs removed first.
+
+    A URL is not part of a title, and a *tracking parameter* least of all:
+    `?utm_source=chatgpt.com` on a cited news page contributed `chatgpt` and
+    `source` to this set, and the wrong paper Crossref returned was an
+    editorial about ChatGPT. Path segments do the same from the other side,
+    inflating the denominator with `firstmedical`, `assuranceprogram` and
+    `publications` — words no first page will carry, so they dilute the ratio
+    the check is measured on.
+    """
+    return set(re.findall(r"[a-z]{5,}", _URL_RE.sub(" ", raw).lower())) - _TITLE_STOPWORDS
+
+
+# Four distinct words, not three. The observed false positive cleared the 0.35
+# ratio on `artificial`, `intelligence` and `medical` — three words that are the
+# subject of most papers in this field, so no stopword list can retire them
+# without rejecting correct matches. Falling below the floor yields
+# `unverifiable`, never `mismatch`: too few words to tell is not evidence of a
+# different paper, and a `mismatch` would discard a possibly-correct download.
+_TITLE_MIN_MATCHES = 4
+
 
 # the three answers the check can give. "unverifiable" used to share `None`
 # with "verified", so a scanned PDF someone supplied by hand was reported as
@@ -237,11 +262,17 @@ def _title_check_text(raw: str, page_text: str) -> tuple[str, str]:
     page = re.sub(r"\s+", " ", page_text).lower()
     if not page.strip():
         return TITLE_UNVERIFIABLE, "no readable text on its first page (scanned or image-only)"
-    tokens = set(re.findall(r"[a-z]{5,}", raw.lower())) - _TITLE_STOPWORDS
+    tokens = _title_tokens(raw)
     if not tokens:
         return TITLE_UNVERIFIABLE, "the reference string has no distinctive words to match on"
     found = sum(1 for t in tokens if t in page)
     if found / len(tokens) >= 0.35:
+        if found < _TITLE_MIN_MATCHES:
+            return (
+                TITLE_UNVERIFIABLE,
+                f"only {found} of the reference's {len(tokens)} distinctive words appear on its "
+                "first page — too few to tell this paper from another on the same subject",
+            )
         return TITLE_VERIFIED, f"{found}/{len(tokens)} reference tokens on its first page"
     return (
         TITLE_MISMATCH,
@@ -334,6 +365,56 @@ def _match_provided(entry: RefEntry, provided_dir: Path | None) -> Path | None:
     return candidates[0] if candidates else None
 
 
+# The structural marks of a journal article besides a DOI: an identifier, a
+# volume, a page range, a `volume:page` pair. Their ABSENCE is what the webpage
+# gate keys on, so this set is deliberately small — every pattern added here
+# sends one more reference into a title search.
+_ARTICLE_SIGNAL_RE = re.compile(
+    r"\bdois?\b"
+    r"|\bpm(?:id|cid)\b"
+    r"|\barxiv\b|\bbiorxiv\b|\bmedrxiv\b|\bssrn\b|\bisbn\b"
+    r"|\bvol(?:ume)?\b\.?\s*\d"  # vol. 12 / volume 12
+    r"|\bpp?\b\.\s*\d"  # p. 225 / pp. 225-232
+    r"|\b\d+\s*\(\s*\d+\s*\)\s*[:,]?\s*\d"  # 89(1061):225
+    r"|\b\d+\s*:\s*e?\d"  # 11:2624 / 5:e230024
+    # a page range: 1068-1083. Two four-digit years either side of the dash are
+    # a date span in a headline ("digital health 2020-2025"), not pages, and a
+    # journal citation that really does span 1981-1990 carries its volume with
+    # it — `388:1981` matches the pattern above.
+    r"|(?<!\d)(?!(?:19|20)\d{2}\s*[-–—]\s*(?:19|20)\d{2}(?!\d))\d{1,4}\s*[-–—]\s*\d{1,4}(?!\d)"
+    r"|\bin press\b|\bepub\b|\bforthcoming\b",
+    re.I,
+)
+
+
+def _is_webpage_reference(raw: str) -> bool:
+    """Is this reference a web page rather than an article?
+
+    A URL plus none of the structural marks of an article. Both halves matter:
+    publishers' own reference styles print a link beside the volume and page
+    range, and those references resolve well — while a reference with no URL at
+    all is exactly what a bibliographic search is for.
+
+    Two alternatives were weighed and rejected. Judging by how much of the
+    string is URL measures nothing: a news page cited with a long headline and a
+    short link scores low, a journal reference carrying a long publisher link
+    scores high. A domain or TLD list is an arms race with every press office,
+    newsroom and society website in existence.
+
+    The error this accepts is the harmless one. A wrongly gated article ends at
+    `no_doi` — a recorded gap; a wrongly searched web page ends with a real
+    paper downloaded, title-checked against a news headline and judged for
+    claims it never made.
+    """
+    if not _URL_RE.search(raw):
+        return False  # no link: nothing here suggests a web page
+    if DOI_RE.search(raw):
+        return False  # a DOI anywhere counts, including inside the link itself
+    # the rest of the marks are looked for with the URL removed, so that a path
+    # segment or a query string cannot impersonate a volume or a page range
+    return not _ARTICLE_SIGNAL_RE.search(_URL_RE.sub(" ", raw))
+
+
 def resolve_entry(
     entry: RefEntry,
     dest_dir: Path,
@@ -376,6 +457,22 @@ def resolve_entry(
             url = f"https://arxiv.org/pdf/{arxiv.group(1)}"
             if _accept(entry, client, url, dest, "arxiv", "arXiv"):
                 return entry
+
+        # A bibliographic title search always returns *something*, and for a web
+        # page that something is a confident wrong answer: `ACR launches first
+        # medical practice artificial intelligence QA program` fetched an ACR
+        # Open Rheumatology editorial (American College of Rheumatology, not
+        # Radiology), which then passed the title check on the shared vocabulary.
+        # A news page was never retrievable as a PDF anyway, so nothing is lost.
+        if not entry.doi and _is_webpage_reference(entry.raw):
+            entry.status = "no_doi"
+            entry.reason = (
+                "this reference is a web page, not an article — no DOI, and no volume, "
+                "page range or identifier to look one up with. Not searched by title: "
+                "Crossref would answer with the closest-looking journal article, and "
+                "judging a claim against that is worse than recording the gap"
+            )
+            return entry
 
         if not entry.doi:
             try:

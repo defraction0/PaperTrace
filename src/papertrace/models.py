@@ -161,6 +161,12 @@ class RefManifest:
     # before content hashing — those fall back to comparing the file name, and
     # say so; they self-heal on the next `papertrace refs`.
     manuscript_sha256: str | None = None
+    # the reference list was picked up again after an intervening section, so
+    # the entry numbering spans a boundary the parser chose to cross. It is a
+    # guess — a defensible one, gated on block type and run length — and the
+    # reader has to be able to check it, because the alternative failure is
+    # silent: a list parsed short simply reports fewer references.
+    references_resumed: bool = False
 
     @property
     def retrieved(self) -> list[RefEntry]:
@@ -174,6 +180,7 @@ class RefManifest:
         payload = {
             "manuscript": self.manuscript,
             "manuscript_sha256": self.manuscript_sha256,
+            "references_resumed": self.references_resumed,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -192,6 +199,8 @@ class RefManifest:
             manuscript=data["manuscript"],
             entries=[RefEntry(**e) for e in data["entries"]],
             manuscript_sha256=data.get("manuscript_sha256"),
+            # .get: a manifest written before this field must still load
+            references_resumed=bool(data.get("references_resumed", False)),
         )
 
 

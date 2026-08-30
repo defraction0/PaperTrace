@@ -73,8 +73,23 @@ def ingest_blocks_pymupdf(pdf_path: Path) -> tuple[int, list[Block]]:
     return pages, blocks
 
 
-def references_section(smap: SourceMap) -> str:
-    """Return the text of the References/Bibliography section, if found.
+# A reference list interrupted by another section is not necessarily over, but
+# resuming across the break is a guess, so it takes two independent signals.
+#
+# `list` only, never `text`: docling types reference entries as `list`, which is
+# structurally distinct from prose. Under the flat backend they are `text` —
+# the same type as every paragraph in the paper — so resuming on a run of
+# `text` would swallow the Discussion of any paper whose references are not
+# last. That asymmetry is the whole reason this is restricted rather than
+# general, and it means a *flat-ingested* split list is still parsed short.
+_RESUMABLE_TYPE = "list"
+# one bulleted block after an unrelated heading is far more likely a sentence
+# than the tail of a bibliography
+_MIN_RESUME_RUN = 2
+
+
+def references_span(smap: SourceMap) -> tuple[str, bool]:
+    """Reference-list text, and whether it was resumed across a section break.
 
     A block whose *entire* text is the heading word counts as the heading even
     when ingest typed it as body text. Flat-text ingest guesses headings from
@@ -84,18 +99,57 @@ def references_section(smap: SourceMap) -> str:
 
     Requiring the whole block to be the word, not merely to start with it, is
     what keeps "References were checked by hand" from swallowing the paper.
+
+    The second return value says the list was picked up again after an
+    intervening section. That is worth surfacing rather than hiding: a real
+    pre-proof put refs 1-9 on page 7, `Declaration of interests` next, then refs
+    10-15 on page 8, and stopping at the first header lost six sources without
+    saying so. Only reference-shaped runs are collected, so the prose of the
+    intervening section never enters the list — which matters because
+    `_parse_bulleted` appends a non-bullet line to the *previous* entry, so a
+    stray paragraph corrupts a reference rather than merely adding noise.
     """
-    started = False
-    out: list[str] = []
-    for b in smap.blocks:
+    blocks = smap.blocks
+    start = next(
         # the SAME rule coverage_audit uses — see models.is_references_heading
-        if is_references_heading(b.type, b.text):
-            if started:
-                break
-            started = True
+        (i + 1 for i, b in enumerate(blocks) if is_references_heading(b.type, b.text)),
+        None,
+    )
+    if start is None:
+        return "", False
+
+    out: list[str] = []
+    entry_type: str | None = None
+    i = start
+    while i < len(blocks):
+        b = blocks[i]
+        if b.type == "sectionheader" or is_references_heading(b.type, b.text):
+            break  # the next real heading ends the contiguous run
+        if entry_type is None:
+            entry_type = b.type
+        out.append(b.text)
+        i += 1
+
+    if not out or entry_type != _RESUMABLE_TYPE:
+        return "\n".join(out), False
+
+    resumed = False
+    rest = blocks[i:]
+    k = 0
+    while k < len(rest):
+        if rest[k].type != entry_type:
+            k += 1
             continue
-        if b.type == "sectionheader" and started:
-            break  # the next real heading ends the list
-        if started:
-            out.append(b.text)
-    return "\n".join(out)
+        j = k
+        while j < len(rest) and rest[j].type == entry_type:
+            j += 1
+        if j - k >= _MIN_RESUME_RUN:
+            out.extend(b.text for b in rest[k:j])
+            resumed = True
+        k = j
+    return "\n".join(out), resumed
+
+
+def references_section(smap: SourceMap) -> str:
+    """The reference-list text. See `references_span` for the resume signal."""
+    return references_span(smap)[0]

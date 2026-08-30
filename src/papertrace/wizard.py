@@ -258,9 +258,15 @@ def equivalent_command(
 
 
 def _suggest_case(pdf: Path) -> str:
-    """A case-folder name the user can accept with one keystroke."""
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", pdf.stem).strip("-.")
-    return stem[:60] or "case"
+    """The folder batch mode would pick, offered for one keystroke.
+
+    Delegated rather than reimplemented: two answers to "where does this audit
+    live" is how the wizard and `papertrace run` came to disagree in the first
+    place. Imported inside the function — `cli` imports this module.
+    """
+    from .cli import default_case
+
+    return str(default_case(pdf))
 
 
 def _ask_paper() -> Path:

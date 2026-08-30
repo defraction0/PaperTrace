@@ -630,3 +630,163 @@ def test_the_user_agent_reports_the_real_version():
 
     assert f"PaperTrace/{__version__}" in UA
     assert f"PaperTrace/{__version__}" in UA_CONTACT.format(email="a@b.org")
+
+
+# --- a web page is not an article, and a title search will not admit that ---
+#
+# Reference [8] of a real audited paper is an ACR news page with no DOI. With no
+# DOI to look up, `resolve_entry` fell through to a Crossref *bibliographic
+# title search*, which answered `10.1002/acr2.11538` — ACR Open Rheumatology
+# (American College of Rheumatology, not Radiology). Unpaywall served that
+# journal's editorial about ChatGPT, the title check passed it at 6/15, and two
+# claims were judged `not_addressed` against a rheumatology editorial.
+
+ACR_WEBPAGE_REF = (
+    "ACR launches first medical practice artificial intelligence QA program. "
+    "https://www.acr.org/News-and-Publications/Media-Center/2024/ACR-Launches-FirstMedical-"
+    "Practice-Artificial-Intelligence-Quality-AssuranceProgram?utm_source=chatgpt.com."
+)
+
+# Verbatim excerpt of the wrong paper's first page as PyMuPDF extracts it —
+# ligatures and all. Inlined so the test stays offline and self-contained.
+ACR_EDITORIAL_FIRST_PAGE = (
+    "E D I T O R I A L\n"
+    "ChatGPT, et al … Artiﬁcial Intelligence, Authorship, and Medical Publishing\n"
+    "Daniel H. Solomon,1 Kelli D. Allen,2 Patricia Katz,3 Amr H. Sawalha,4 and Ed Yelin3\n"
+    "If you have not yet heard of ChatGPT, you will! This artiﬁcial intelligence "
+    "(AI)-based chatbot is making waves in medicine, education, academic publishing, "
+    "and more widely. GPT, generative pretrained transformer, describes the next "
+    "generation in AI-powered chatbots that not only construct full sentences on topic "
+    "but now synthesize information from many ﬁelds, from many sources, and with "
+    "tremendous nuance. The American College of Rheumatology (ACR) journal editors and "
+    "the ACR Committee on Journal Publications have agreed that co-authorship is not "
+    "appropriate, since authorship according to the International Committee of Medical "
+    "Journal Editors requires that authors agree to be accountable. "
+    "This is an open access article under the terms of the Creative Commons "
+    "Attribution-NonCommercial-NoDerivs License, provided the original work is properly "
+    "cited. ChatGPT, et al … Artificial Intelligence, Authorship, and Medical Publishing"
+)
+
+
+def test_a_url_only_reference_never_enters_a_bibliographic_title_search(tmp_path):
+    """Crossref's bibliographic search always returns *something*; for a news
+    page that something is a confident wrong answer. `no_doi` costs nothing
+    real — the page was never retrievable as a PDF — and it is the only honest
+    answer, so the refusal happens before any request goes out."""
+    from papertrace.refs import resolve_entry
+
+    e = RefEntry(num="8", raw=ACR_WEBPAGE_REF, slug="acr-2024")
+    calls: list[str] = []
+    client = httpx.Client(transport=httpx.MockTransport(
+        lambda r: calls.append(str(r.url)) or httpx.Response(
+            200, json={"message": {"items": [{"DOI": "10.1002/acr2.11538"}]}}
+        )
+    ))
+    out = resolve_entry(entry=e, dest_dir=tmp_path, email="a@b.org",
+                       client=client, provided_dir=None)
+
+    assert calls == [], f"a web page reached the network: {calls}"
+    assert out.status == "no_doi"
+    assert out.doi is None, "a title search must not attach a DOI to a web page"
+    assert out.pdf_path is None
+    assert "web page" in out.reason.lower(), out.reason
+
+
+def test_a_journal_reference_that_merely_includes_a_url_still_resolves(tmp_path):
+    """The gate keys on the *absence* of article structure, not the presence of
+    a URL — publishers' own reference styles print a link beside the volume and
+    page range, and those references are exactly what Crossref answers well."""
+    from papertrace.refs import resolve_entry
+
+    raw = (
+        "Smith A, Jones B (2021) Deep learning for chest radiographs: a systematic "
+        "review. Radiology 298:120-130. Available at: "
+        "https://pubs.rsna.org/journal/radiology"
+    )
+    page = (
+        "Deep learning for chest radiographs: a systematic review. "
+        "A. Smith, B. Jones. Radiology 2021; 298:120-130."
+    )
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if "api.crossref.org" in str(request.url):
+            return httpx.Response(200, json={"message": {"items": [{"DOI": "10.1148/r.2021"}]}})
+        if "api.unpaywall.org" in str(request.url):
+            return httpx.Response(
+                200, json={"best_oa_location": {"url_for_pdf": "https://x/oa.pdf"}}
+            )
+        return httpx.Response(200, content=_real_pdf_bytes(page))
+
+    e = RefEntry(num="9", raw=raw, slug="smith-2021")
+    out = resolve_entry(entry=e, dest_dir=tmp_path, email="a@b.org",
+                        client=httpx.Client(transport=httpx.MockTransport(handler)),
+                        provided_dir=None)
+
+    assert any("api.crossref.org" in c for c in calls), f"never asked Crossref: {calls}"
+    assert out.status == "retrieved" and out.doi == "10.1148/r.2021"
+
+
+def test_a_year_span_in_a_headline_is_not_a_page_range():
+    """The gate reads a page range as proof of an article, and `2020-2025` in a
+    policy document's title has that shape. Two four-digit years either side of
+    a dash are a date span, not pages — the pattern that clears the gate has to
+    be able to tell the difference, or every government report with a date
+    range in its title goes to a title search."""
+    from papertrace.refs import _is_webpage_reference
+
+    assert _is_webpage_reference(
+        "World Health Organization. Global strategy on digital health 2020-2025. "
+        "https://www.who.int/publications/i/item/9789240020924"
+    )
+    # and a real page range still clears it
+    assert not _is_webpage_reference(
+        "Smith A. Deep learning triage. Clin Radiol. 2022; pages 1068-1083. "
+        "https://www.clinicalradiologyonline.net/toc"
+    )
+
+
+def test_a_doi_that_lives_only_inside_the_link_is_still_a_doi():
+    """URLs are stripped before the article signals are looked for, which hides
+    a DOI written only as `https://doi.org/10.…`. `resolve_entry` happens not to
+    ask in that case — it consults the gate only when no DOI was found — but a
+    predicate that is wrong on its own is a trap for the next caller."""
+    from papertrace.refs import _is_webpage_reference
+
+    assert not _is_webpage_reference(
+        "Zenodo dataset for the segmentation challenge. "
+        "Available at: https://doi.org/10.5281/zenodo.1234567"
+    )
+
+
+def test_a_tracking_parameter_is_not_part_of_a_title():
+    """`?utm_source=chatgpt.com` put `chatgpt` and `source` into the reference's
+    token set, and the wrong paper is an editorial about ChatGPT — so the URL
+    supplied two of the six matches that passed it. URL fragments inflate both
+    the numerator and the denominator; neither belongs to a title."""
+    from papertrace.refs import _title_tokens
+
+    tokens = _title_tokens(ACR_WEBPAGE_REF)
+    assert "chatgpt" not in tokens, "a tracking parameter matched the wrong paper's subject"
+    assert "source" not in tokens
+    assert not any(t in tokens for t in ("firstmedical", "assuranceprogram", "publications"))
+    assert {"launches", "practice", "artificial"} <= tokens, "the title's own words survive"
+
+
+def test_three_generic_domain_words_are_not_an_identity_check():
+    """The last line of defence, in case a URL-only reference reaches it by some
+    other route: with the URL stripped the ACR news page still scores 3/7 =
+    0.43 against the rheumatology editorial, on `artificial`, `intelligence`
+    and `medical` alone. A ratio is trivially cleared by a short reference full
+    of generic domain vocabulary, and in this field that vocabulary is most
+    papers' subject."""
+    from papertrace.refs import _title_check_text
+
+    state, detail = _title_check_text(ACR_WEBPAGE_REF, ACR_EDITORIAL_FIRST_PAGE)
+    assert state != "verified", detail
+    # and not laundered the other way either: nobody established this is a
+    # different paper, only that the check cannot tell
+    assert state == "unverifiable", detail
+    # a page with none of the reference's words is still called wrong outright
+    assert _title_check_text(ACR_WEBPAGE_REF, RIGHT_PAGE)[0] == "mismatch"

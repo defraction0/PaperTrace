@@ -3,10 +3,17 @@
 Boxes come from text search on the PDF — never hand-placed — so a box always
 sits where the evidence actually is. The crop region defaults to the anchored
 block's bbox (from the source's own source_map), padded for context.
+
+A quote can miss the page for typesetting reasons alone: a hyphenated line break
+reads as "Non- Hispanic" to `search_for`, and the text the model read says
+"Non-Hispanic" or "NonHispanic". `_search` retries such a phrase, but only in
+forms the page itself dictates and always by exact search — never by similarity,
+so an unlocated anchor still comes back unlocated.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 try:
@@ -19,6 +26,66 @@ RED = (214, 48, 42)
 PAD_PT = 6.0  # context padding around the anchor region (PDF points)
 BOX_PAD = 2.0  # breathing room around a matched phrase
 TARGET_W = 2400  # rendered crop width in pixels (retina-ish)
+
+_DASHES = "-\u2010\u2011"  # hyphen-minus, Unicode hyphen, non-breaking hyphen
+_MAX_VARIANTS = 8  # a phrase full of dashes is not worth a combinatorial search
+_LINE_BREAK_HYPHEN = re.compile(rf"(\w+)[{_DASHES}\u00ad]\n(\w+)")
+
+
+def _dash_variants(phrase: str) -> list[str]:
+    """The phrase, then one-space-at-one-dash variants of it.
+
+    A page that breaks a hyphenated word across lines reads as "Non- Hispanic"
+    to `search_for` — the line break is a space — and a model quoting that
+    passage tidies it to "Non-Hispanic", which that occurrence does not carry.
+    Only
+    whitespace beside a dash the phrase already has moves here: no character is
+    invented, no similarity is computed, and every candidate is still located by
+    exact text search, so a hit sits on text the page really carries.
+    """
+    variants = [phrase]
+    for i, ch in enumerate(phrase):
+        if ch not in _DASHES or i == 0 or i == len(phrase) - 1:
+            continue
+        rest = phrase[i + 1:]
+        variant = phrase[: i + 1] + (rest.lstrip(" ") if rest[0] == " " else " " + rest)
+        if variant not in variants:
+            variants.append(variant)
+        if len(variants) >= _MAX_VARIANTS:
+            break
+    return variants
+
+
+def _as_the_page_breaks_it(page, phrase: str) -> str:
+    """`phrase` with every word this page splits at a hyphen put back as it reads.
+
+    The ingest text says "approximately" and the page says "approxi-" / newline
+    "mately"; `search_for` reads that break as a space, so the phrase is on the
+    page only as "approxi- mately". The rewrite is dictated by the page — no
+    split position is guessed, and a word the page does not break is untouched.
+    """
+    for tail, head in _LINE_BREAK_HYPHEN.findall(page.get_text()):
+        joined = tail + head
+        if joined in phrase:
+            phrase = re.sub(rf"(?<!\w){re.escape(joined)}(?!\w)", f"{tail}- {head}", phrase)
+    return phrase
+
+
+def _search(page, phrase: str, clip=None) -> list:
+    """Locate `phrase` on `page`; retry the page's own hyphenation of it.
+
+    Every candidate is still an exact `search_for`, and every difference from
+    the model's phrase comes from the page: whitespace beside a dash the phrase
+    already carries, or a break the page itself makes. Returns [] when the page
+    carries none of them — a genuine miss stays a miss, and the caller records
+    anchor_located = False rather than boxing something that resembles the quote.
+    """
+    for candidate in _dash_variants(phrase):
+        hits = page.search_for(candidate, clip=clip)
+        if hits:
+            return hits
+    broken = _as_the_page_breaks_it(page, phrase)  # last, it costs a text extraction
+    return page.search_for(broken, clip=clip) if broken != phrase else []
 
 
 def source_page_count(pdf_path: Path) -> int:
@@ -62,7 +129,7 @@ def crop_evidence(
 
     boxes = 0
     for phrase in phrases:
-        for hit in page.search_for(phrase, clip=rect):
+        for hit in _search(page, phrase, clip=rect):
             x0 = (hit.x0 - BOX_PAD - rect.x0) * zoom
             y0 = (hit.y0 - BOX_PAD - rect.y0) * zoom
             x1 = (hit.x1 + BOX_PAD - rect.x0) * zoom
@@ -116,7 +183,7 @@ def crop_for_anchor(anchor, claim_id: int, sources_dir: Path, ingest_root: Path,
         # fall back to the union of phrase hits on the page, padded
         doc = fitz.open(pdf)
         page = doc[anchor.source_page - 1]
-        hits = [h for p in anchor.anchor_phrases for h in page.search_for(p)]
+        hits = [h for p in anchor.anchor_phrases for h in _search(page, p)]
         doc.close()
         if not hits:
             # the phrases were searched against the real page and matched

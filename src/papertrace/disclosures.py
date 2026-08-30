@@ -30,6 +30,7 @@ ANCHOR_LOCATED_TOKEN = "red box = matched text"
 ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase was found on this page"
 ANCHOR_UNKNOWN_TOKEN = "anchor match not recorded"
 SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
+REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
 
 
 @dataclass(frozen=True)
@@ -298,6 +299,28 @@ def _source_identity(unverified: list, mismatched: list) -> Disclosure:
     )
 
 
+def _references_resumed(total: int) -> Disclosure:
+    """The reference list continued past an intervening section.
+
+    Worth the reader's eye in both directions. Crossing the boundary is a guess,
+    so the numbering of the later entries could be wrong — but *not* crossing it
+    was the previous behaviour, and that failed silently: a real pre-proof put
+    refs 1-9 on one page, a declaration section next, then refs 10-15, and the
+    audit simply reported nine references and never attempted the other six.
+    """
+    return Disclosure(
+        key="references_resumed",
+        level="warn",
+        token=REFERENCES_RESUMED_TOKEN,
+        text=(
+            f"The {REFERENCES_RESUMED_TOKEN}, and the parser followed it — all {total} "
+            "entries here span that boundary. Check the numbering of the later entries "
+            "against the paper: a list read short would instead have gone unmentioned."
+        ),
+        short=f"{REFERENCES_RESUMED_TOKEN} — {total} entries, numbering worth a check",
+    )
+
+
 def run_disclosures(results, manifest=None) -> list[Disclosure]:
     """Every run-level disclosure this RunResults owes its reader.
 
@@ -328,6 +351,8 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
         mismatched = [e for e in in_use if e.title_check == "mismatch"]
         if unverified or mismatched:
             out.append(_source_identity(unverified, mismatched))
+        if getattr(manifest, "references_resumed", False):
+            out.append(_references_resumed(len(manifest.entries)))
     return out
 
 

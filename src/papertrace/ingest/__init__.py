@@ -19,9 +19,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..models import Block, SourceMap
-from .pymupdf_ import ingest_blocks_pymupdf, references_section
+from .pymupdf_ import ingest_blocks_pymupdf, references_section, references_span
 
-__all__ = ["ingest_pdf", "references_section", "available_backends"]
+__all__ = ["ingest_pdf", "references_section", "references_span", "available_backends"]
 
 
 def _docling_available() -> bool:
