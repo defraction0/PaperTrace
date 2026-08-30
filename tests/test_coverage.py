@@ -863,3 +863,105 @@ def test_the_occurrence_list_is_capped_with_a_pointer_to_results_json(tmp_path):
                            tmp_path / "out")
     assert "… 5 more in `results.json`" in rendered["report.md"]
     assert "… 22 more in results.json" in rendered["report_terminal.html"]
+
+
+# --- _judgement_from is total by construction, and stays that way -----------
+
+
+@pytest.mark.parametrize("page", [
+    "9" * 5000,          # passes isascii() and isdigit(), then int() raises
+    "9" * 4301,          # one past CPython's default limit
+    "0" * 6000,          # leading zeros: cheap to convert, still not a page
+], ids=["9x5000", "9x4301", "0x6000"])
+def test_an_absurdly_long_page_number_degrades_instead_of_raising(page):
+    """`_judgement_from` is documented total by construction — every branch an
+    isinstance test, so a malformed model response yields `unchecked` with a
+    note, never an exception. A 5,000-digit ASCII page passed both guards and
+    then hit CPython's integer string-conversion limit, so a `ValueError` escaped
+    into the group loop and could abort a whole claim group.
+    """
+    import papertrace.check as check_mod
+
+    j, note = check_mod._judgement_from({"id": 1, "verdict": "supported", "source_page": page})
+    assert j is None
+    assert "unusable" in note
+
+
+@pytest.mark.parametrize("page", [
+    float("nan"), float("inf"), [3], {"p": 3}, (3,), b"3", "²", "３", " 3 ", "3.0", "-1", 0,
+], ids=["nan", "inf", "list", "dict", "tuple", "bytes", "superscript2",
+        "fullwidth3", "padded3", "float-str", "negative", "zero"])
+def test_other_page_shapes_still_degrade_rather_than_raise(page):
+    """The neighbouring shapes, pinned together so a future guard cannot fix one
+    by breaking another. `" 3 "` is deliberately accepted after stripping."""
+    import papertrace.check as check_mod
+
+    j, note = check_mod._judgement_from({"id": 1, "verdict": "supported", "source_page": page})
+    if isinstance(page, str) and page.strip() == "3":
+        assert j is not None and j["source_page"] == 3  # a dict, not a dataclass
+    else:
+        assert j is None, f"{page!r} produced a judgement"
+        assert "unusable" in note
+
+
+# --- one boundary for the bibliography, shared by both readers --------------
+
+
+def _map_with_body_typed_references(case_dir: Path) -> Path:
+    """A source map shaped the way flat ingest really produced one.
+
+    On a real Elsevier paper the font-size heuristic typed author lines as
+    headings and left `References` as body text. `references_section` was taught
+    to accept that; occurrence scanning was not.
+    """
+    from papertrace.models import Block, SourceMap
+
+    blocks = [
+        Block(id="block_0001", type="text", page=1, bbox=(0, 0, 10, 10),
+              heading_path=["Methods"], text="Body text citing [1] once."),
+        Block(id="block_0002", type="text", page=2, bbox=(0, 0, 10, 10),
+              heading_path=[], text="References"),
+        Block(id="block_0003", type="text", page=2, bbox=(0, 0, 10, 10),
+              heading_path=[], text="[1] Smith A. First paper. 2020."),
+        Block(id="block_0004", type="text", page=2, bbox=(0, 0, 10, 10),
+              heading_path=[], text="[2] Jones B. Second paper. 2021."),
+    ]
+    out = case_dir / "ingest" / "manuscript"
+    out.mkdir(parents=True)
+    smap = SourceMap(doc="p.pdf", pages=2, converter="pymupdf", blocks=blocks)
+    smap.to_json(out / "source_map.json")
+    return out / "source_map.json"
+
+
+def test_the_bibliography_is_not_counted_as_body_citations(tmp_path):
+    """Coverage counted every `[N]` in the reference list as a manuscript
+    citation, so a paper with one real citation reported three occurrences and
+    two invented gaps. `references_section` stopped at a body-typed `References`
+    block; `citation_occurrences` only stopped at a `sectionheader`.
+    """
+    from papertrace.check import citation_occurrences
+
+    _map_with_body_typed_references(tmp_path)
+    occ, source = citation_occurrences(tmp_path)
+
+    assert source == "source_map"
+    assert [o["label"] for o in occ] == ["1"], occ
+    assert all(o["block"] == "block_0001" for o in occ)
+
+
+def test_both_readers_agree_on_where_the_bibliography_starts(tmp_path):
+    """The two must not re-derive the boundary independently — that divergence
+    is the defect. Same source map, same answer."""
+    from papertrace.check import citation_occurrences
+    from papertrace.ingest import references_section
+    from papertrace.models import SourceMap
+
+    path = _map_with_body_typed_references(tmp_path)
+    smap = SourceMap.from_json(path)
+
+    refs_text = references_section(smap)
+    assert "Smith" in refs_text and "Jones" in refs_text
+    assert "Body text" not in refs_text
+
+    occ, _ = citation_occurrences(tmp_path)
+    assert [o["label"] for o in occ] == ["1"]

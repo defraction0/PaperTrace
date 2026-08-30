@@ -25,9 +25,15 @@ from .models import (
     RefManifest,
     SourceJudgement,
     UncitedClaim,
+    is_references_heading,
 )
 
 CLAUDE_TIMEOUT = 600
+
+# `claude -p` fails transiently, so a judging call gets one retry. Named here
+# because the wizard quotes a worst-case cost and the two must not drift:
+# a promised ceiling that the retry can exceed is a false promise about money.
+ASK_ATTEMPTS = 2
 
 # model actually used by the last `claude -p` call, when the CLI reports it —
 # stamped into results.json so the report discloses its judge
@@ -264,7 +270,6 @@ _EXCERPT_RADIUS = 120
 
 # structural, not textual: the source map says a block IS a section header, so
 # the References cut no longer depends on ingest happening to emit `## `
-_REFS_SECTION = re.compile(r"^\s*#*\s*(references|bibliography|literature)\b", re.I)
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -354,7 +359,8 @@ def citation_occurrences(case_dir: Path) -> tuple[list[dict], str]:
 
         out: list[dict] = []
         for b in SourceMap.from_json(smap).blocks:
-            if b.type == "sectionheader" and _REFS_SECTION.match(b.text or ""):
+            # the SAME rule `references_section` uses — see models.is_references_heading
+            if is_references_heading(b.type, b.text or ""):
                 break
             out += _occurrences_in(
                 b.text or "",
@@ -523,6 +529,9 @@ def _slug_for_ref(manifest: RefManifest, label: str):
     return next((e for e in manifest.entries if e.num == label), None)
 
 
+_MAX_PAGE_DIGITS = 5  # a page number, not an integer literal
+
+
 def _judgement_from(entry) -> tuple[dict | None, str]:
     """Validate one model response object into claim fields, or say why not.
 
@@ -575,7 +584,15 @@ def _judgement_from(entry) -> tuple[dict | None, str]:
         # .isascii() carries weight: "\u00b2".isdigit() is True but int() raises on it
         if not (digits.isascii() and digits.isdigit()):
             return None, unusable_page
-        page = int(digits)
+        # CPython refuses to convert more than 4300 digits, so isdigit() alone
+        # left a ValueError escaping this function — which is documented total.
+        # No PDF has a six-digit page, so the bound costs nothing real.
+        if len(digits) > _MAX_PAGE_DIGITS:
+            return None, unusable_page
+        try:
+            page = int(digits)
+        except ValueError:  # narrow on purpose — a blanket catch here would
+            return None, unusable_page  # relabel our own bugs as the model's
     else:
         page = raw_page
     if page < 1:

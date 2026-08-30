@@ -1,4 +1,12 @@
-"""Ingest → highlight → report on a generated fixture PDF. No network, no LLM."""
+"""Ingest → highlight → report on a generated fixture PDF. No network, no LLM.
+
+Every `ingest_pdf` call here passes `backend="pymupdf"` explicitly. The default
+is `backend="auto"`, which prefers docling whenever it happens to be importable
+and downloads its layout models from Hugging Face on first use — so an
+unqualified call makes these tests network-dependent on a `[dev,full]` install
+and silently exercises a different backend than on CI's `[dev]` install. The
+docling adapter is covered against stubs in `tests/test_ingest_backends.py`.
+"""
 
 import sys
 from pathlib import Path
@@ -41,10 +49,10 @@ def fixture_pdf(tmp_path) -> Path:
 
 
 def test_ingest_blocks_and_headings(fixture_pdf, tmp_path):
-    smap = ingest_pdf(fixture_pdf, tmp_path / "ingest" / "fixture-2020")
+    smap = ingest_pdf(fixture_pdf, tmp_path / "ingest" / "fixture-2020", backend="pymupdf")
     assert smap.pages == 1
     types = {b.type for b in smap.blocks}
-    # docling may additionally classify the numbered references as a list block
+    # subset, not equality — the flat backend may also emit a list block here
     assert {"sectionheader", "text"} <= types
     heads = [b.text for b in smap.blocks if b.type == "sectionheader"]
     assert "Abstract" in heads and "References" in heads
@@ -54,7 +62,7 @@ def test_ingest_blocks_and_headings(fixture_pdf, tmp_path):
 
 
 def test_references_section(fixture_pdf, tmp_path):
-    smap = ingest_pdf(fixture_pdf, tmp_path / "i")
+    smap = ingest_pdf(fixture_pdf, tmp_path / "i", backend="pymupdf")
     refs = references_section(smap)
     assert "Smith" in refs and "Jones" in refs
     assert "Dice" not in refs  # body text stays out
@@ -62,7 +70,7 @@ def test_references_section(fixture_pdf, tmp_path):
 
 def test_crop_and_reports(fixture_pdf, tmp_path):
     ingest_root = tmp_path / "ingest"
-    smap = ingest_pdf(fixture_pdf, ingest_root / "fixture-2020")
+    smap = ingest_pdf(fixture_pdf, ingest_root / "fixture-2020", backend="pymupdf")
     target = next(b for b in smap.blocks if "CT scans only" in b.text)
 
     claim = ClaimResult(
@@ -206,7 +214,7 @@ def test_refs_manifest_roundtrips_the_manuscript_hash(tmp_path):
 
 def test_matched_anchor_sets_anchor_located_and_captions_the_box(fixture_pdf, tmp_path):
     ingest_root = tmp_path / "ingest"
-    smap = ingest_pdf(fixture_pdf, ingest_root / "fixture-2020")
+    smap = ingest_pdf(fixture_pdf, ingest_root / "fixture-2020", backend="pymupdf")
     target = next(b for b in smap.blocks if "CT scans only" in b.text)
 
     claim = ClaimResult(
@@ -230,7 +238,7 @@ def test_zero_box_crop_is_disclosed_not_captioned_as_matched(fixture_pdf, tmp_pa
     useful), but it carries no red box — so the report must not caption it as
     matched text."""
     ingest_root = tmp_path / "ingest"
-    smap = ingest_pdf(fixture_pdf, ingest_root / "fixture-2020")
+    smap = ingest_pdf(fixture_pdf, ingest_root / "fixture-2020", backend="pymupdf")
     target = next(b for b in smap.blocks if "CT scans only" in b.text)
 
     claim = ClaimResult(
@@ -268,7 +276,7 @@ def test_page_beyond_the_source_is_not_a_crash_and_not_a_missed_match(fixture_pd
     was absent, when there was no page to search.
     """
     ingest_root = tmp_path / "ingest"
-    smap = ingest_pdf(fixture_pdf, ingest_root / "fixture-2020")
+    smap = ingest_pdf(fixture_pdf, ingest_root / "fixture-2020", backend="pymupdf")
     assert smap.pages == 1  # the fixture is one page; 47 is beyond it
 
     claim = ClaimResult(

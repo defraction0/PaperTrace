@@ -16,7 +16,7 @@ try:
 except ImportError:  # pragma: no cover - older PyMuPDF exposes only `fitz`
     import fitz
 
-from ..models import Block, SourceMap
+from ..models import Block, SourceMap, is_references_heading
 
 _HEADING_MAX_LEN = 120
 
@@ -85,15 +85,11 @@ def references_section(smap: SourceMap) -> str:
     Requiring the whole block to be the word, not merely to start with it, is
     what keeps "References were checked by hand" from swallowing the paper.
     """
-    pat = re.compile(r"^(references|bibliography|literature)\b", re.I)
-    # "7. References" / "References:" / "REFERENCES" and nothing else
-    exact = re.compile(r"^(?:\d+\.?\s*)?(references|bibliography|literature)\s*:?$", re.I)
     started = False
     out: list[str] = []
     for b in smap.blocks:
-        text = b.text.strip()
-        is_heading = pat.match(text) if b.type == "sectionheader" else bool(exact.match(text))
-        if is_heading:
+        # the SAME rule coverage_audit uses — see models.is_references_heading
+        if is_references_heading(b.type, b.text):
             if started:
                 break
             started = True
