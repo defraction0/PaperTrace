@@ -492,3 +492,130 @@ def test_a_journal_issue_number_in_parens_is_not_read_as_a_year():
     e = parse_references(raw)[0]
     assert e.year == "2016", f"got {e.year!r}"
     assert e.slug == "a-2016"
+
+
+# --- the paper's own DOI, not one it cites ---------------------------------
+
+
+def _one_pager(path: Path, body: str) -> Path:
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    y = 72
+    for line in body.splitlines():
+        page.insert_text((60, y), line, fontsize=10)
+        y += 14
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_a_cited_dois_is_never_offered_as_the_papers_own(tmp_path):
+    """`detect_doi`'s comment says only the front matter is read, because "a
+    reference list is full of other papers' DOIs and picking one up would anchor
+    the literature scout to somebody else's work without any error to notice."
+    The code read the whole first page, so on a short paper it did exactly that
+    — and the confirmation defaulted to yes.
+    """
+    pdf = _one_pager(tmp_path / "m.pdf", "\n".join([
+        "A Short Communication On Imaging",
+        "Anna Author, Ben Body",
+        "Abstract. We looked at scans.",
+        "References",
+        "[1] Other A. Someone else's paper. 2019. doi:10.5555/cited-paper",
+    ]))
+    assert wizard.detect_doi(pdf) is None
+
+
+def test_the_papers_own_doi_is_still_found(tmp_path):
+    """The regression guard: a real front-matter DOI must still be offered."""
+    pdf = _one_pager(tmp_path / "m.pdf", "\n".join([
+        "A Real Published Paper",
+        "https://doi.org/10.1000/mine",
+        "Abstract. Findings.",
+        "References",
+        "[1] Other A. Another paper. 2019. doi:10.5555/cited-paper",
+    ]))
+    assert wizard.detect_doi(pdf) == "10.1000/mine"
+
+
+def test_an_uncertain_doi_is_not_confirmed_by_pressing_return(tmp_path, monkeypatch):
+    """A default of yes means an inattentive user anchors the whole scout to
+    whatever was found. The question must be answered, not defaulted."""
+    import inspect
+
+    src = inspect.getsource(wizard._ask_doi)
+    assert 'Is that this paper\'s own DOI?", default=True' not in src, (
+        "the DOI confirmation still defaults to yes"
+    )
+
+
+# --- the printed command must actually run, and mean the same thing ---------
+
+
+def test_the_equivalent_command_survives_paths_with_spaces_and_carries_the_email(tmp_path):
+    """It was interpolated raw, so a path with a space split into two arguments
+    and Typer rejected `/tmp/My`. The email was absent entirely, so the printed
+    replay either failed or silently used a different saved address."""
+    import shlex
+
+    from typer.testing import CliRunner
+
+    from papertrace.cli import app
+
+    paper = _one_pager(tmp_path / "My Paper.pdf", "Title\nBody [1].\nReferences\n[1] A. 2020.")
+    case = tmp_path / "My Case"
+
+    cmd = wizard.equivalent_command(
+        manuscript=paper, case=case, doi="10.1000/x", png=False,
+        with_scout=False, provided=None, email="me@example.org",
+    )
+    argv = shlex.split(cmd)
+    assert argv[0] == "papertrace"
+    assert str(paper) in argv, f"the path was split: {argv}"
+    assert str(case) in argv
+    assert "--email" in argv and "me@example.org" in argv
+
+    # and it must parse: --help short-circuits before any work happens
+    res = CliRunner().invoke(app, argv[1:] + ["--help"])
+    assert res.exit_code == 0, res.output
+
+
+def test_a_path_with_a_quote_is_still_one_argument(tmp_path):
+    import shlex
+
+    cmd = wizard.equivalent_command(
+        manuscript=Path("/tmp/it's a paper.pdf"), case=Path("/tmp/c"), doi=None,
+        png=True, with_scout=True, provided=None, email=None,
+    )
+    assert "/tmp/it's a paper.pdf" in shlex.split(cmd)
+
+
+# --- the cost estimate must not be exceeded by the documented retry ---------
+
+
+def test_the_worst_case_call_count_includes_the_retry(tmp_path):
+    """The wizard promised "up to N model calls" from one extraction plus one
+    per cited source. `_ask` retries once, so a single-source run advertised as
+    2 could issue 3. The ceiling now comes from check.py's own attempt count,
+    so the two cannot drift."""
+    from papertrace.check import ASK_ATTEMPTS
+
+    pdf = _one_pager(tmp_path / "m.pdf",
+                     "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
+    w = wizard.workload(pdf)
+
+    assert w["model_calls"] == 2, w
+    assert w["model_calls_max"] == 1 + ASK_ATTEMPTS * 1, w
+    assert w["model_calls_max"] >= w["model_calls"]
+
+
+def test_the_printed_estimate_does_not_promise_a_ceiling_it_can_exceed():
+    import inspect
+
+    src = inspect.getsource(wizard.run_wizard)
+    assert "model_calls_max" in src, "the worst case is computed but never shown to the user"
+    assert "up to [bold]{w['model_calls']}" not in src, (
+        "the base estimate is still presented as a ceiling"
+    )

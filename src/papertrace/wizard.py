@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,8 +25,9 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
 from . import config
-from .check import _LABEL_GROUP, _expand_label_group, claude_available
+from .check import _LABEL_GROUP, ASK_ATTEMPTS, _expand_label_group, claude_available
 from .ingest import _docling_available as docling_available
+from .models import is_references_heading
 from .refs import DOI_RE
 
 console = Console()
@@ -161,9 +163,21 @@ def detect_doi(pdf: Path) -> str | None:
             )
     except Exception:  # noqa: BLE001 - an unreadable PDF is "no DOI found"
         return None
-    if m := DOI_RE.search(text):
+    # a short paper's first page reaches its own reference list, and every DOI
+    # printed there belongs to a different paper. The page count alone was never
+    # the front-matter boundary the comment above claims it is.
+    if m := DOI_RE.search(_before_references(text)):
         return m.group(0).rstrip(".,);]")
     return None
+
+
+def _before_references(text: str) -> str:
+    """The text above the reference list, using the ingest boundary rule."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if is_references_heading("text", line):
+            return "\n".join(lines[:i])
+    return text
 
 
 def workload(pdf: Path) -> dict:
@@ -202,6 +216,10 @@ def workload(pdf: Path) -> dict:
         "multi": multi,
         "labels": len(labels),
         "model_calls": 1 + cited_source_calls,
+        # the retry is real spend: one extraction plus, per judging call, up to
+        # ASK_ATTEMPTS attempts. Derived from check.py rather than a local
+        # multiplier, so the estimate cannot drift from the policy.
+        "model_calls_max": 1 + ASK_ATTEMPTS * cited_source_calls,
         "style_unrecognised": len(groups) == 0,
     }
 
@@ -214,22 +232,29 @@ def equivalent_command(
     png: bool,
     with_scout: bool,
     provided: Path | None,
+    email: str | None = None,
 ) -> str:
     """The `papertrace run` line this session amounts to.
 
     Printed at the end on purpose: a wizard that hides the CLI leaves its user
-    unable to repeat, script or share what they just did.
+    unable to repeat, script or share what they just did — which only holds if
+    the line actually runs. Built as argv and joined with `shlex.join`, because
+    interpolating a path with a space in it printed a command that split into
+    the wrong arguments. `--email` is included for the same reason: without it
+    the replay either fails or silently picks up a different saved address.
     """
-    parts = [f"papertrace run {manuscript}", f"-c {case}"]
+    argv = ["papertrace", "run", str(manuscript), "-c", str(case)]
     if provided:
-        parts.append(f"--provided {provided}")
+        argv += ["--provided", str(provided)]
     if doi:
-        parts.append(f"--doi {doi}")
+        argv += ["--doi", doi]
+    if email:
+        argv += ["--email", email]
     if not with_scout:
-        parts.append("--no-scout")
+        argv.append("--no-scout")
     if png:
-        parts.append("--png")
-    return " ".join(parts)
+        argv.append("--png")
+    return shlex.join(argv)
 
 
 def _suggest_case(pdf: Path) -> str:
@@ -270,8 +295,14 @@ def _ask_doi(pdf: Path) -> tuple[str | None, bool]:
     """Returns (doi, with_scout). The scout needs the paper identified."""
     found = detect_doi(pdf)
     if found:
-        console.print(f"\n  I found a DOI on the first page: [cyan]{found}[/cyan]")
-        if Confirm.ask("  Is that this paper's own DOI?", default=True):
+        console.print(
+            f"\n  I found a DOI in the front matter: [cyan]{found}[/cyan]"
+            "\n  [dim]It must be this paper's own — a DOI belonging to something it "
+            "cites would point the literature scout at the wrong paper.[/dim]"
+        )
+        # no default: pressing return used to accept whatever was found, and the
+        # cost of a wrong yes is a scout anchored to somebody else's paper
+        if Confirm.ask("  Is that this paper's own DOI?"):
             return found, True
     else:
         console.print("\n  No DOI on the first page.")
@@ -350,7 +381,9 @@ def run_wizard() -> None:
     console.print(
         "  This makes live requests to Crossref, Unpaywall"
         + (" and Europe PMC" if with_scout else "")
-        + f", and up to [bold]{w['model_calls']}[/bold] model calls through `claude -p`."
+        + f", and about [bold]{w['model_calls']}[/bold] model calls through `claude -p`"
+        + (f" — up to [bold]{w['model_calls_max']}[/bold] if calls have to be retried."
+           if w["model_calls_max"] != w["model_calls"] else ".")
     )
     if w["multi"]:
         console.print(
@@ -364,7 +397,7 @@ def run_wizard() -> None:
 
     cmd = equivalent_command(
         manuscript=paper, case=case, doi=doi, png=png,
-        with_scout=with_scout, provided=None,
+        with_scout=with_scout, provided=None, email=email,
     )
     console.print(f"\n[dim]Same thing as one command, for next time:[/dim]\n  [cyan]{cmd}[/cyan]\n")
 
