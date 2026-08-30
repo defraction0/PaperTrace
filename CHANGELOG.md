@@ -4,7 +4,190 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] — 2026-08-30 (beta)
+
+### Added
+
+- **A resumed reference list says so, in all three formats.** Crossing a section
+  boundary to finish a bibliography is a judgement, and the numbering of the
+  later entries rests on it — so `RefManifest.references_resumed` records it
+  (optional, in `schemas/refs_manifest.schema.json`) and a run-level disclosure
+  carries it into markdown, editor and terminal; `refs` also says so on the
+  console in amber, so the crossed boundary is visible before the report is
+  read. The wording points both ways on
+  purpose: the guess could be wrong, but not making it was the previous
+  behaviour and that failed silently. The terminal template needed an explicit
+  branch, and the mechanical guard added in 0.4.0 caught the omission before any
+  parity test did — its first live catch.
+
+- **`evals/` — an offline evaluation harness and its design.**
+  [`evals/DESIGN.md`](evals/DESIGN.md) specifies the evaluation unit, paired
+  faithful/altered cases, the metric definitions (verdict accuracy, per-class
+  precision/recall, macro F1, source-page accuracy, anchor localization,
+  citation-label coverage, error rates, repeated-run agreement), the run
+  provenance record and the human-labelling policy. Metrics keep retrieval
+  failures (`not_retrieved`) and harness errors (`unchecked`) separate from
+  model judgements, every rate carries its denominator, and an undefined rate
+  renders as `—` rather than `0%`. Scoring is deterministic and offline; the
+  live runner is a plain script that refuses to run in CI.
+- `evals/gold/demo_v1.gold.json` — the demo's planted defects as machine-readable
+  gold, labelled a **demonstration**, not a benchmark.
+- `schemas/eval_gold.schema.json`, `schemas/eval_run.schema.json`, plus the
+  first automated validation of the four pre-existing schemas.
+- `docs/RELEASING.md` and `evals/PROPOSAL.md` (draft benchmark issue, unposted).
+- CI badge, and a Python 3.10–3.14 matrix in place of 3.11 alone.
+- `src/papertrace/disclosures.py` — the single place a report disclosure is
+  defined, so the three formats differ in styling only.
+- `evals/eligibility.py` (one mechanism deciding which cases are scored, and
+  why not) and `evals/tool_coverage.py` (refuses an unreadable coverage audit
+  wholesale rather than half-reading it into confident wrong attributions).
+- `tests/test_disclosure_parity.py` and `tests/test_packaging.py`; the sdist
+  verification steps in `docs/RELEASING.md`.
+- The record gained a `populations` block and every rate names its population,
+  so a percentage can no longer sit beside one drawn from a different
+  denominator without saying so (`eval_run/2`).
+- **A regression test for every finding above**, plus the disclosure parity
+  loop and the sdist assertions. The suite more than doubled from 119; the
+  CI badge is the live count, because a number written here goes stale.
+
+
+- **The ingest backend is stated where it can be seen.** It was printed once,
+  during `ingest`, above that wall of noise and never repeated across a
+  four-minute run — and `papertrace report` alone printed no provenance at all.
+  `report` now names the backend that read the manuscript, `run` repeats it on
+  its closing line, and both say that **cited sources are always read as flat
+  text** — deliberate behaviour (`check.py` ingests sources with
+  `backend="pymupdf"`) that no reader could infer from a line naming docling.
+  The `/review` skill now names the backend unconditionally rather than only
+  when it is bad news.
+
+
+- **A guided audit: run `papertrace` with no arguments.** Simulating a
+  first-time, non-technical user surfaced nine bumps, and none of them were
+  bugs — every flag was correct and documented, but a newcomer had to assemble
+  six decisions from a `--help` screen before anything happened, and three of
+  the ways a run can fail only surfaced minutes in. The wizard checks the
+  environment *first* (a missing `claude` CLI is now a sentence, not a
+  traceback twenty minutes later), then asks one question at a time, and states
+  the cost — counted from the paper — before spending it. It ends by printing
+  the equivalent `papertrace run` line, because a wizard that hides the CLI
+  leaves its user unable to repeat or script what they just did. Without an
+  interactive terminal it prints help rather than waiting on stdin.
+- **`--doi` no longer has to be explained.** It means the DOI of the paper being
+  audited, not of anything it cites — and saying so did not stop it being
+  misread, including once by this project's own documentation. The wizard reads
+  the DOI off the paper's first page and asks "is that this paper's own DOI?",
+  turning a definition into a yes/no. Only the front matter is read: a reference
+  list is full of other papers' DOIs, and picking one up would anchor the
+  literature scout to somebody else's work with no error to notice.
+- **A saved contact email.** `~/.config/papertrace/config.json`, read after
+  `--email` and the environment so an explicit value always wins. JSON, not
+  TOML, on purpose: `requires-python` is `>=3.10` and `tomllib` is 3.11+.
+  A missing, empty or corrupt file reads as `{}` — a convenience may not become
+  a hard failure.
+- **Python 3.14 in the CI matrix.** `requires-python` said `>=3.10` while CI
+  tested 3.10–3.13, so anyone installing on 3.14 — which is what Homebrew's
+  `python3` now is — ran on a version nothing verified. It passes, so the
+  matrix says so rather than the metadata over-promising.
+- **`papertrace ingest -c`.** `-c` meant the case folder in every subcommand
+  except `ingest`, which failed with `No such option: -c`. `-o/--out` is
+  unchanged.
+
+### Changed
+
+- **The README claimed a figure's contents get checked, which it could not
+  support.** "A claim that lives in a table cell **or inside a figure** is found,
+  checked, and shown like any other" was true of the red box — a figure's numbers
+  are in the PDF text layer, so text search finds them on the real page — and
+  unsupported for the judging half: under the layout backend a figure region
+  reaches the model as `[FIGURE: <caption>]`, and in-figure text arrives only
+  where docling's layout model found a text region inside the figure. On the one
+  paper measured it found none: of 9 figures, 5 carried text in the text layer
+  and no docling text block landed inside any figure region, while the flat-text
+  backend did carry that text. The section now names which backend each half
+  holds for, states the measurement as one paper rather than a rate, and says the
+  two illustrating crops come from **cited sources** — which batch mode always
+  reads as flat text. The same section's claim that a flat-text source delivers
+  "its figures not at all" was wrong in the other direction and now says what it
+  does deliver: loose words with no figure attached.
+
+- **A co-cited claim is judged against every source it cites, not just the
+  first.** Batch mode used to pick `avail[0]`, judge against that, and file
+  every other co-citation as never opened. Co-citation is an offer of support,
+  so each retrievable source now gets its own model call, its own note and its
+  own evidence crop, with a count beside the claim — *"4 cited sources checked:
+  2 fully support it; 1 partially supports it; 1 contradicts it"*. The claim's
+  headline is the **most adverse** verdict any source gave, so one dissenting
+  reference is never averaged away by two agreeing ones, and the per-source
+  breakdown is always rendered so the headline cannot overstate the split.
+  `unjudged_refs` consequently narrows to one meaning: the source could not be
+  obtained. Cost note: a claim citing four retrievable sources now costs four
+  model calls instead of one.
+- **New verdict `not_addressed`** — the source was read and says nothing about
+  the claim. Fanning a claim out to its co-citations makes this unavoidable: a
+  source cited for another part of a compound claim is not `contradicted` (it
+  does not say otherwise) and not `partial` (there is no true kernel), and
+  forcing it into either would manufacture a finding. An inapt citation is a
+  real result and now has a name. It is appended to `JUDGMENT_VERDICTS`, which keeps
+  the judgement group's own order stable but **does shift the concatenated
+  `VERDICTS` tuple**: `not_retrieved` moves from index 3 to 4 and `unchecked`
+  from 4 to 5. Nothing in this repository indexes `VERDICTS` positionally, and
+  `counts()` gains a key without reordering one — but an external consumer that
+  does index it will read the wrong name, so this is a breaking change for
+  anyone who does. It is also the one verdict with no `source_page`, since
+  there is no passage to point at — demanding one would force the model to cite
+  an absence.
+- **`examples/demo/output/` regenerated** against the current pipeline
+  (2026-08-30, docling 2.118.1). The committed report predated the disclosure
+  work and showed none of it: it named the checker only as `Claude`, reported
+  `all 4 citation labels covered`, and carried neither the converter stamp nor
+  the attribution caveat. It now reads `5/5 citation occurrences ... across 4
+  labels`, identifies the judging model, and renders through the per-source
+  judgement path. Same verdicts as documented: 2 supported, 2 contradicted,
+  1 not retrieved, 1 uncited assertion — the evidence crop for claim 4 moved
+  from page 1 to page 2, which is anchor-location variation between runs, not a
+  different verdict. No demo claim is co-cited, so the per-source summary count
+  still has no committed example; the README says so rather than leaving it to
+  be assumed.
+
+- **Citation coverage is now per occurrence, not per label.** The audit tracked
+  a *set of labels*: if two sentences cited `[3]` and only one became an
+  extracted claim, label 3 counted as covered and the omitted sentence was
+  invisible. This was the tool's single largest overstatement — and the demo
+  manuscript contains exactly that shape, so it was live, not theoretical.
+  Coverage now tracks each citation **occurrence** — the marker at its position,
+  with its block, page and surrounding sentence — and lists the ones no
+  extracted claim reached. `labels_in_text`, `covered` and `missing` keep their
+  exact previous meaning and computation, so every existing consumer is
+  unaffected; `occurrences`, `labels_partially_covered` and `attribution` are
+  additive under `"schema": "coverage/2"`. A `results.json` from an older build
+  still loads and still renders its label-level line.
+
+  Occurrence coverage is **not** strictly better, and the report says so on its
+  face: attributing a claim to a specific marker is a text match that can be
+  wrong; an extractor that legitimately merges two adjacent sentences will show
+  one as unaddressed; the denominator still inherits the bracketed-numeric-only
+  regex, so an unseen style contributes zero occurrences and makes the ratio
+  look *better* than reality; and the figure is not comparable between papers.
+  An attribution the tool cannot make is reported as **uncertain** and counted
+  as **not** covered.
+- `evals/align.py` now treats a **partially** covered label as an
+  `extraction_gap` too. Previously a gold case on a label's second occurrence
+  was blamed on the evaluator's matcher rather than on the tool; the blame moves
+  toward the tool, never away.
+- **README rewritten for accuracy.** The "high-value claims" framing is gone —
+  no value-based selection exists in the code, which asks for *every*
+  citation-backed claim and relies on the coverage audit to disclose what
+  extraction missed. New "Testing and evaluation" section separates software
+  tests from model evaluation. Newly documented: Claude proposes page/block/anchor
+  phrases while Python locates them and draws the boxes; the model reads
+  extracted text with page markers, not page images; the coverage audit reads
+  bracketed numeric citations only. The single real-run example is framed as one
+  illustrative run, not a measurement.
+- Coverage wording throughout now says *labels reached by an extracted claim*
+  rather than "covered" — the audit measures extraction reach, not that a source
+  was read.
+- `jsonschema` added to the `dev` extra; `testpaths` now includes `evals/tests`.
 
 ### Fixed
 
@@ -106,197 +289,6 @@ All notable changes to PaperTrace are documented here. The format follows
   short. Only reference-shaped runs are collected, which matters more than it
   sounds: `_parse_bulleted` appends a non-bullet line to the *previous* entry, so
   a stray paragraph corrupts a reference rather than merely adding noise.
-
-### Changed
-
-- **The README claimed a figure's contents get checked, which it could not
-  support.** "A claim that lives in a table cell **or inside a figure** is found,
-  checked, and shown like any other" was true of the red box — a figure's numbers
-  are in the PDF text layer, so text search finds them on the real page — and
-  unsupported for the judging half: under the layout backend a figure region
-  reaches the model as `[FIGURE: <caption>]`, and in-figure text arrives only
-  where docling's layout model found a text region inside the figure. On the one
-  paper measured it found none: of 9 figures, 5 carried text in the text layer
-  and no docling text block landed inside any figure region, while the flat-text
-  backend did carry that text. The section now names which backend each half
-  holds for, states the measurement as one paper rather than a rate, and says the
-  two illustrating crops come from **cited sources** — which batch mode always
-  reads as flat text. The same section's claim that a flat-text source delivers
-  "its figures not at all" was wrong in the other direction and now says what it
-  does deliver: loose words with no figure attached.
-
-### Added
-
-- **A resumed reference list says so, in all three formats.** Crossing a section
-  boundary to finish a bibliography is a judgement, and the numbering of the
-  later entries rests on it — so `RefManifest.references_resumed` records it
-  (optional, in `schemas/refs_manifest.schema.json`) and a run-level disclosure
-  carries it into markdown, editor and terminal; `refs` also says so on the
-  console in amber, so the crossed boundary is visible before the report is
-  read. The wording points both ways on
-  purpose: the guess could be wrong, but not making it was the previous
-  behaviour and that failed silently. The terminal template needed an explicit
-  branch, and the mechanical guard added in 0.4.0 caught the omission before any
-  parity test did — its first live catch.
-
-## [0.4.0] — 2026-08-30 (beta)
-
-### Added
-
-- **`evals/` — an offline evaluation harness and its design.**
-  [`evals/DESIGN.md`](evals/DESIGN.md) specifies the evaluation unit, paired
-  faithful/altered cases, the metric definitions (verdict accuracy, per-class
-  precision/recall, macro F1, source-page accuracy, anchor localization,
-  citation-label coverage, error rates, repeated-run agreement), the run
-  provenance record and the human-labelling policy. Metrics keep retrieval
-  failures (`not_retrieved`) and harness errors (`unchecked`) separate from
-  model judgements, every rate carries its denominator, and an undefined rate
-  renders as `—` rather than `0%`. Scoring is deterministic and offline; the
-  live runner is a plain script that refuses to run in CI.
-- `evals/gold/demo_v1.gold.json` — the demo's planted defects as machine-readable
-  gold, labelled a **demonstration**, not a benchmark.
-- `schemas/eval_gold.schema.json`, `schemas/eval_run.schema.json`, plus the
-  first automated validation of the four pre-existing schemas.
-- `docs/RELEASING.md` and `evals/PROPOSAL.md` (draft benchmark issue, unposted).
-- CI badge, and a Python 3.10–3.14 matrix in place of 3.11 alone.
-- `src/papertrace/disclosures.py` — the single place a report disclosure is
-  defined, so the three formats differ in styling only.
-- `evals/eligibility.py` (one mechanism deciding which cases are scored, and
-  why not) and `evals/tool_coverage.py` (refuses an unreadable coverage audit
-  wholesale rather than half-reading it into confident wrong attributions).
-- `tests/test_disclosure_parity.py` and `tests/test_packaging.py`; the sdist
-  verification steps in `docs/RELEASING.md`.
-- The record gained a `populations` block and every rate names its population,
-  so a percentage can no longer sit beside one drawn from a different
-  denominator without saying so (`eval_run/2`).
-- **A regression test for every finding above**, plus the disclosure parity
-  loop and the sdist assertions. The suite more than doubled from 119; the
-  CI badge is the live count, because a number written here goes stale.
-
-
-- **The ingest backend is stated where it can be seen.** It was printed once,
-  during `ingest`, above that wall of noise and never repeated across a
-  four-minute run — and `papertrace report` alone printed no provenance at all.
-  `report` now names the backend that read the manuscript, `run` repeats it on
-  its closing line, and both say that **cited sources are always read as flat
-  text** — deliberate behaviour (`check.py` ingests sources with
-  `backend="pymupdf"`) that no reader could infer from a line naming docling.
-  The `/review` skill now names the backend unconditionally rather than only
-  when it is bad news.
-
-
-- **A guided audit: run `papertrace` with no arguments.** Simulating a
-  first-time, non-technical user surfaced nine bumps, and none of them were
-  bugs — every flag was correct and documented, but a newcomer had to assemble
-  six decisions from a `--help` screen before anything happened, and three of
-  the ways a run can fail only surfaced minutes in. The wizard checks the
-  environment *first* (a missing `claude` CLI is now a sentence, not a
-  traceback twenty minutes later), then asks one question at a time, and states
-  the cost — counted from the paper — before spending it. It ends by printing
-  the equivalent `papertrace run` line, because a wizard that hides the CLI
-  leaves its user unable to repeat or script what they just did. Without an
-  interactive terminal it prints help rather than waiting on stdin.
-- **`--doi` no longer has to be explained.** It means the DOI of the paper being
-  audited, not of anything it cites — and saying so did not stop it being
-  misread, including once by this project's own documentation. The wizard reads
-  the DOI off the paper's first page and asks "is that this paper's own DOI?",
-  turning a definition into a yes/no. Only the front matter is read: a reference
-  list is full of other papers' DOIs, and picking one up would anchor the
-  literature scout to somebody else's work with no error to notice.
-- **A saved contact email.** `~/.config/papertrace/config.json`, read after
-  `--email` and the environment so an explicit value always wins. JSON, not
-  TOML, on purpose: `requires-python` is `>=3.10` and `tomllib` is 3.11+.
-  A missing, empty or corrupt file reads as `{}` — a convenience may not become
-  a hard failure.
-- **Python 3.14 in the CI matrix.** `requires-python` said `>=3.10` while CI
-  tested 3.10–3.13, so anyone installing on 3.14 — which is what Homebrew's
-  `python3` now is — ran on a version nothing verified. It passes, so the
-  matrix says so rather than the metadata over-promising.
-- **`papertrace ingest -c`.** `-c` meant the case folder in every subcommand
-  except `ingest`, which failed with `No such option: -c`. `-o/--out` is
-  unchanged.
-
-### Changed
-
-- **A co-cited claim is judged against every source it cites, not just the
-  first.** Batch mode used to pick `avail[0]`, judge against that, and file
-  every other co-citation as never opened. Co-citation is an offer of support,
-  so each retrievable source now gets its own model call, its own note and its
-  own evidence crop, with a count beside the claim — *"4 cited sources checked:
-  2 fully support it; 1 partially supports it; 1 contradicts it"*. The claim's
-  headline is the **most adverse** verdict any source gave, so one dissenting
-  reference is never averaged away by two agreeing ones, and the per-source
-  breakdown is always rendered so the headline cannot overstate the split.
-  `unjudged_refs` consequently narrows to one meaning: the source could not be
-  obtained. Cost note: a claim citing four retrievable sources now costs four
-  model calls instead of one.
-- **New verdict `not_addressed`** — the source was read and says nothing about
-  the claim. Fanning a claim out to its co-citations makes this unavoidable: a
-  source cited for another part of a compound claim is not `contradicted` (it
-  does not say otherwise) and not `partial` (there is no true kernel), and
-  forcing it into either would manufacture a finding. An inapt citation is a
-  real result and now has a name. It is appended to `JUDGMENT_VERDICTS`, which keeps
-  the judgement group's own order stable but **does shift the concatenated
-  `VERDICTS` tuple**: `not_retrieved` moves from index 3 to 4 and `unchecked`
-  from 4 to 5. Nothing in this repository indexes `VERDICTS` positionally, and
-  `counts()` gains a key without reordering one — but an external consumer that
-  does index it will read the wrong name, so this is a breaking change for
-  anyone who does. It is also the one verdict with no `source_page`, since
-  there is no passage to point at — demanding one would force the model to cite
-  an absence.
-- **`examples/demo/output/` regenerated** against the current pipeline
-  (2026-08-30, docling 2.118.1). The committed report predated the disclosure
-  work and showed none of it: it named the checker only as `Claude`, reported
-  `all 4 citation labels covered`, and carried neither the converter stamp nor
-  the attribution caveat. It now reads `5/5 citation occurrences ... across 4
-  labels`, identifies the judging model, and renders through the per-source
-  judgement path. Same verdicts as documented: 2 supported, 2 contradicted,
-  1 not retrieved, 1 uncited assertion — the evidence crop for claim 4 moved
-  from page 1 to page 2, which is anchor-location variation between runs, not a
-  different verdict. No demo claim is co-cited, so the per-source summary count
-  still has no committed example; the README says so rather than leaving it to
-  be assumed.
-
-- **Citation coverage is now per occurrence, not per label.** The audit tracked
-  a *set of labels*: if two sentences cited `[3]` and only one became an
-  extracted claim, label 3 counted as covered and the omitted sentence was
-  invisible. This was the tool's single largest overstatement — and the demo
-  manuscript contains exactly that shape, so it was live, not theoretical.
-  Coverage now tracks each citation **occurrence** — the marker at its position,
-  with its block, page and surrounding sentence — and lists the ones no
-  extracted claim reached. `labels_in_text`, `covered` and `missing` keep their
-  exact previous meaning and computation, so every existing consumer is
-  unaffected; `occurrences`, `labels_partially_covered` and `attribution` are
-  additive under `"schema": "coverage/2"`. A `results.json` from an older build
-  still loads and still renders its label-level line.
-
-  Occurrence coverage is **not** strictly better, and the report says so on its
-  face: attributing a claim to a specific marker is a text match that can be
-  wrong; an extractor that legitimately merges two adjacent sentences will show
-  one as unaddressed; the denominator still inherits the bracketed-numeric-only
-  regex, so an unseen style contributes zero occurrences and makes the ratio
-  look *better* than reality; and the figure is not comparable between papers.
-  An attribution the tool cannot make is reported as **uncertain** and counted
-  as **not** covered.
-- `evals/align.py` now treats a **partially** covered label as an
-  `extraction_gap` too. Previously a gold case on a label's second occurrence
-  was blamed on the evaluator's matcher rather than on the tool; the blame moves
-  toward the tool, never away.
-- **README rewritten for accuracy.** The "high-value claims" framing is gone —
-  no value-based selection exists in the code, which asks for *every*
-  citation-backed claim and relies on the coverage audit to disclose what
-  extraction missed. New "Testing and evaluation" section separates software
-  tests from model evaluation. Newly documented: Claude proposes page/block/anchor
-  phrases while Python locates them and draws the boxes; the model reads
-  extracted text with page markers, not page images; the coverage audit reads
-  bracketed numeric citations only. The single real-run example is framed as one
-  illustrative run, not a measurement.
-- Coverage wording throughout now says *labels reached by an extracted claim*
-  rather than "covered" — the audit measures extraction reach, not that a source
-  was read.
-- `jsonschema` added to the `dev` extra; `testpaths` now includes `evals/tests`.
-
-### Fixed
 
 - **A bracketed label inside a reference could steal the next entry, and its
   DOI.** The mid-line marker rule exists because Elsevier PDFs run entries
