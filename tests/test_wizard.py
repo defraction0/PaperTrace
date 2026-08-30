@@ -11,6 +11,7 @@ invented rather than asked for.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -20,6 +21,20 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from papertrace import config, wizard  # noqa: E402
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(out: str) -> str:
+    """Help text with styling removed, whitespace collapsed.
+
+    rich styles individual words inside a sentence, so with colour on the help
+    screen contains `Run \x1b[1;2mpapertrace\x1b[0m\x1b[2m with no arguments`
+    and a plain substring test for that phrase fails. CI has colour on and a
+    developer terminal usually does not, which is how this passed locally and
+    broke on all five Python versions at once.
+    """
+    return " ".join(_ANSI.sub("", out).split())
 
 
 @pytest.fixture()
@@ -286,7 +301,8 @@ def test_ingest_accepts_dash_c_like_every_other_subcommand():
 
     from papertrace.cli import app
 
-    out = CliRunner().invoke(app, ["ingest", "--help"]).output
+    out = _plain(CliRunner().invoke(app, ["ingest", "--help"], color=True,
+                                     env={"FORCE_COLOR": "1"}).output)
     assert "-c" in out and "-o" in out
 
 
@@ -314,7 +330,8 @@ def test_the_help_screen_says_which_of_nine_commands_to_type():
 
     from papertrace.cli import app
 
-    out = " ".join(CliRunner().invoke(app, ["--help"]).output.split())
+    out = _plain(CliRunner().invoke(app, ["--help"], color=True,
+                             env={"FORCE_COLOR": "1"}).output)
     assert "Start here" in out
     assert "Pipeline stages" in out
     assert "papertrace with no arguments" in out

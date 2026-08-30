@@ -160,6 +160,13 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ### Fixed
 
+- **A `--help` assertion passed locally and failed on all five Python versions
+  in CI.** rich styles single words inside a sentence, so with colour enabled the
+  help screen renders `Run \x1b[1;2mpapertrace\x1b[0m\x1b[2m with no arguments`
+  and a plain substring test for that phrase cannot match. CI has colour on and a
+  developer terminal usually does not. The test now forces colour on for the
+  render and strips it before asserting, so it exercises the styled path
+  everywhere instead of depending on the terminal it runs in.
 - **The live progress marks reported every source as unretrieved while judging
   it.** `tick` read `ClaimResult.verdict`, but multi-source checking only assigns
   that field in `apply_headline()`, which runs after *every* source group — so
