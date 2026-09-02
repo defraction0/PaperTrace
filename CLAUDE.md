@@ -63,7 +63,7 @@ stay out of CI). `playwright install chromium` once, only for `--png`.
 
 ## Architecture
 
-Seven stages, each a CLI subcommand, chained by `run`. Every stage writes a
+Six stages, each a CLI subcommand, chained by `run`. Every stage writes a
 JSON/markdown artifact to the case folder and the next stage reads only that —
 there is no in-memory pipeline object:
 
