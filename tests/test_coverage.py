@@ -153,15 +153,36 @@ def test_failed_check_is_unchecked_never_not_retrieved(tmp_path, monkeypatch):
     assert claims2[0].verdict == "not_retrieved"
 
 
+def _ingested(dirpath, slug: str, pages: int = 2) -> None:
+    """An ingested source: the text AND the map that proves where its blocks are.
+
+    Both, always — a source map is no longer optional. `check` validates every
+    substantive verdict's page and block against it, so a source without one
+    can produce no verdict at all.
+    """
+    from papertrace.models import Block, SourceMap
+
+    dirpath.mkdir(parents=True, exist_ok=True)
+    (dirpath / "annotated.md").write_text(
+        f"<!-- block_0001, page 1 -->\nText of {slug}.\n"
+        f"<!-- block_0002, page 2 -->\nMore of {slug}.\n"
+    )
+    SourceMap(
+        doc=f"{slug}.pdf", pages=pages,
+        blocks=[
+            Block("block_0001", "text", 1, (0.0, 0.0, 100.0, 20.0), [], f"Text of {slug}."),
+            Block("block_0002", "text", 2, (0.0, 0.0, 100.0, 20.0), [], f"More of {slug}."),
+        ],
+    ).to_json(dirpath / "source_map.json")
+
+
 def _one_source_manifest(tmp_path, *entries):
-    """Manifest + an ingested annotated.md for every retrieved entry."""
+    """Manifest + a fully ingested source for every retrieved entry."""
     from papertrace.models import RefManifest
 
     for e in entries:
         if e.status in ("retrieved", "provided"):
-            d = tmp_path / "ingest" / e.slug
-            d.mkdir(parents=True, exist_ok=True)
-            (d / "annotated.md").write_text(f"<!-- block_0001, page 1 -->\nText of {e.slug}.")
+            _ingested(tmp_path / "ingest" / e.slug, e.slug)
     return RefManifest(manuscript="m.pdf", entries=list(entries))
 
 
@@ -483,7 +504,7 @@ def test_a_bug_in_our_validator_is_not_relabelled_as_the_models_fault(tmp_path, 
                                    ' "source_page":1,"anchor_phrases":[]}]',
     )
 
-    def our_bug(entry):
+    def our_bug(entry, provenance):
         raise AttributeError("a bug in PaperTrace, not in the model's answer")
 
     monkeypatch.setattr(check_mod, "_judgement_from", our_bug)
@@ -868,6 +889,16 @@ def test_the_occurrence_list_is_capped_with_a_pointer_to_results_json(tmp_path):
 # --- _judgement_from is total by construction, and stays that way -----------
 
 
+def _prov():
+    """A three-page source with one block per page — enough that the page-shape
+    guards below fail on the shape, not on a location that doesn't exist."""
+    from papertrace.check import SourceProvenance
+
+    return SourceProvenance(
+        pages=3, block_pages={"block_0001": 1, "block_0002": 2, "block_0003": 3}
+    )
+
+
 @pytest.mark.parametrize("page", [
     "9" * 5000,          # passes isascii() and isdigit(), then int() raises
     "9" * 4301,          # one past CPython's default limit
@@ -882,7 +913,10 @@ def test_an_absurdly_long_page_number_degrades_instead_of_raising(page):
     """
     import papertrace.check as check_mod
 
-    j, note = check_mod._judgement_from({"id": 1, "verdict": "supported", "source_page": page})
+    j, note = check_mod._judgement_from(
+        {"id": 1, "verdict": "supported", "source_page": page,
+         "source_block": "block_0003"}, _prov()
+    )
     assert j is None
     assert "unusable" in note
 
@@ -896,7 +930,10 @@ def test_other_page_shapes_still_degrade_rather_than_raise(page):
     by breaking another. `" 3 "` is deliberately accepted after stripping."""
     import papertrace.check as check_mod
 
-    j, note = check_mod._judgement_from({"id": 1, "verdict": "supported", "source_page": page})
+    j, note = check_mod._judgement_from(
+        {"id": 1, "verdict": "supported", "source_page": page,
+         "source_block": "block_0003"}, _prov()
+    )
     if isinstance(page, str) and page.strip() == "3":
         assert j is not None and j["source_page"] == 3  # a dict, not a dataclass
     else:

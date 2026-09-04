@@ -532,15 +532,54 @@ def _slug_for_ref(manifest: RefManifest, label: str):
 _MAX_PAGE_DIGITS = 5  # a page number, not an integer literal
 
 
-def _judgement_from(entry) -> tuple[dict | None, str]:
+@dataclass(frozen=True)
+class SourceProvenance:
+    """What one source actually contains, read from its own source map.
+
+    The yardstick a judgement is held to. Without it a verdict's page and block
+    are the model's unchecked word for it, which is how `page 99999` and
+    `block_nope` survived into a report as provenance.
+    """
+
+    pages: int
+    block_pages: dict[str, int]  # block id -> the page it is on
+
+    @classmethod
+    def from_map(cls, smap) -> SourceProvenance:
+        return cls(pages=smap.pages, block_pages={b.id: b.page for b in smap.blocks})
+
+    @classmethod
+    def read(cls, source_map: Path) -> SourceProvenance | None:
+        """None when the map is missing or unreadable — never a permissive default.
+
+        A guessed yardstick measures nothing. The caller turns None into
+        `unchecked`, so an unverifiable location is refused rather than trusted.
+        """
+        if not source_map.exists():
+            return None
+        try:
+            from .models import SourceMap
+
+            return cls.from_map(SourceMap.from_json(source_map))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+
+def _judgement_from(entry, provenance: SourceProvenance | None) -> tuple[dict | None, str]:
     """Validate one model response object into claim fields, or say why not.
 
-    Total by construction: every branch is an isinstance test, so this cannot
-    raise. A validator that throws would turn a bug in OUR code into a note
-    blaming the model — the same laundering `unchecked` exists to prevent.
+    Total by construction: every branch is an isinstance test or a lookup, so
+    this cannot raise. A validator that throws would turn a bug in OUR code into
+    a note blaming the model — the same laundering `unchecked` exists to prevent.
 
     Rejection is all-or-nothing. The caller writes no field unless every field
     validated, so a bad response never leaves half-applied provenance behind.
+
+    `provenance` is the source's own source map. A substantive verdict must
+    name a page that exists and a block that exists **on that page**, because
+    the block is what guarantees the reader an evidence image: `crop_for_anchor`
+    takes its region from the block's bbox, so a valid block always produces a
+    crop and the anchor phrases only decide whether a red box is drawn on it.
     """
     if not isinstance(entry, dict):
         return None, f"model returned an unusable verdict (not an object: {type(entry).__name__})"
@@ -598,12 +637,44 @@ def _judgement_from(entry) -> tuple[dict | None, str]:
     if page < 1:
         return None, unusable_page  # highlight does doc[page - 1]
 
-    # optional — but a non-string block id is never coerced into one
-    block = entry.get("source_block")
-    if block is not None and not isinstance(block, str):
+    # the source map is the only thing that can contradict the model here. With
+    # no map nothing can, so nothing does — and a location nobody can check is
+    # refused rather than trusted.
+    if provenance is None:
         return None, (
-            f"model returned an unusable verdict for this claim: {verdict!r} with a "
-            f"source_block that is not a block id ({block!r})"
+            f"model returned {verdict!r} but the source map could not be read, so "
+            f"the page and block it names cannot be checked against the source — "
+            f"re-run `papertrace ingest` for this source, then `papertrace check`"
+        )
+    if page > provenance.pages:
+        return None, (
+            f"model returned {verdict!r} for a passage on page {page}, but the "
+            f"source has {provenance.pages} page{'s' if provenance.pages != 1 else ''} "
+            f"— there is no such page to show"
+        )
+
+    # REQUIRED, not optional: the block's bbox is what `crop_for_anchor` uses as
+    # the crop region, so a judgement without one can leave the reader with no
+    # evidence image at all — a verdict nobody can look at.
+    block = entry.get("source_block")
+    if not isinstance(block, str) or not block.strip():
+        return None, (
+            f"model returned {verdict!r} with no source_block ({block!r}) — without "
+            f"one there is no region to crop, so the verdict would carry no evidence "
+            f"image a reader could check"
+        )
+    block = block.strip()
+    block_page = provenance.block_pages.get(block)
+    if block_page is None:
+        return None, (
+            f"model returned {verdict!r} citing {block}, which is not a block of "
+            f"this source — nothing to crop, nothing to check"
+        )
+    if block_page != page:
+        return None, (
+            f"model returned {verdict!r} citing {block}, which is on page "
+            f"{block_page}, not the page {page} it named — a crop of page {page} "
+            f"would show the reader a different passage"
         )
 
     # absent means "none offered" and is allowed, as is an empty list. null, a
@@ -676,6 +747,11 @@ def check_claims(
         try:
             ingest_dir = case_dir / "ingest" / slug
             annotated = ingest_dir / "annotated.md"
+            # a missing source_map.json is NOT re-ingested here: `entry.pdf_path`
+            # may be gone, and turning one absent artifact into a group-wide
+            # FileNotFoundError buries the real problem. It degrades per
+            # judgement instead, with a note naming the fix — see
+            # SourceProvenance.read.
             if not annotated.exists():
                 entry = next(e for e in manifest.entries if e.slug == slug)
                 from .ingest import ingest_pdf
@@ -716,6 +792,7 @@ def check_claims(
         # deliberately NO per-claim `except Exception`: a blanket catch would
         # relabel our own bugs as the model's fault. The per-group except above
         # stays as scoped — ingest/prompt/_ask failures really are group-wide.
+        provenance = SourceProvenance.read(case_dir / "ingest" / slug / "source_map.json")
         for c in group:
             j = next((x for x in c.judgements if x.source_slug == slug), None)
             if j is None:  # pragma: no cover - group membership implies one
@@ -724,7 +801,7 @@ def check_claims(
             if v is None:
                 j.verdict, j.note = "unchecked", "model returned no verdict for this claim"
                 continue
-            fields, why = _judgement_from(v)
+            fields, why = _judgement_from(v, provenance)
             if fields is None:
                 j.verdict, j.note = "unchecked", why
                 continue

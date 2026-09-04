@@ -622,6 +622,32 @@ def check(
         console.print(f"[cyan]{len(uncited)} uncited assertions[/cyan] — see report section")
 
 
+def _downgrade_unshowable(anchor) -> bool:
+    """A substantive verdict with no evidence image stops being a verdict.
+
+    `check` validates page and block against the source map, which is what
+    normally guarantees a crop. This is the same rule enforced against reality:
+    the PDF can be absent from `sources_resolved/`, and a source map can
+    disagree with the PDF it was built from. `not_addressed` is exempt — it
+    never claimed a passage, so it owes no picture.
+
+    Returns True when it downgraded, so the caller can say so on the console.
+    """
+    substantive = ("supported", "partial", "contradicted")
+    if anchor.verdict not in substantive or anchor.evidence_image:
+        return False
+    anchor.verdict = "unchecked"
+    anchor.note = (
+        "no evidence image could be produced for the passage this verdict rests on "
+        f"(page {anchor.source_page}"
+        + (f", {anchor.source_block}" if anchor.source_block else "")
+        + ") — the source PDF is missing from sources_resolved/, or its pages no "
+        "longer match the source map it was ingested from. Re-run "
+        "`papertrace refs` and `papertrace check` for this source."
+    )
+    return True
+
+
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def highlight(
     case: Path = typer.Option(
@@ -662,12 +688,22 @@ def highlight(
             if img:
                 a.evidence_image = str(Path(img).relative_to(case / "out"))
                 done += 1
-                if a.anchor_located:
+                # `is True` / `is False` / `is None` — never truthiness. None
+                # means nothing was ever searched for, and calling that "not
+                # found on the page" asserts a search that did not happen.
+                if a.anchor_located is True:
                     console.print(f"  [green]✓[/green] {tag}: {a.evidence_image}")
+                elif a.anchor_located is False:
+                    console.print(
+                        f"  [yellow]○ {tag}: {a.evidence_image} — the anchor phrase "
+                        f"was searched for and not found on the page; crop written "
+                        f"unboxed[/yellow]"
+                    )
                 else:
                     console.print(
                         f"  [yellow]○ {tag}: {a.evidence_image} — no anchor phrase "
-                        f"found on the page; crop written unboxed[/yellow]"
+                        f"was offered, so none was searched for; crop written "
+                        f"unboxed[/yellow]"
                     )
             elif a.source_slug and a.source_page:
                 # a page the source does not have is not the same as a page that
@@ -679,6 +715,10 @@ def highlight(
                         f"but {a.source_slug} has {n} — no page to read, so no crop "
                         f"and no anchor claim[/yellow]"
                     )
+            if _downgrade_unshowable(a):
+                console.print(
+                    f"  [yellow]⚠ {tag}: {a.note}[/yellow]"
+                )
         # the claim-level evidence_image must follow the deciding judgement, or
         # the crop shown beside the headline belongs to a different source
         c.apply_headline()

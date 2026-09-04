@@ -304,14 +304,35 @@ def test_a_hand_built_legacy_results_json_loads_and_still_renders(tmp_path):
 # --- the fan-out ----------------------------------------------------------
 
 
+def _ingested(dirpath, slug: str, pages: int = 2) -> None:
+    """An ingested source: the text AND the map that proves where its blocks are.
+
+    Both, always — a source map is no longer optional. `check` validates every
+    substantive verdict's page and block against it, so a source without one
+    can produce no verdict at all.
+    """
+    from papertrace.models import Block, SourceMap
+
+    dirpath.mkdir(parents=True, exist_ok=True)
+    (dirpath / "annotated.md").write_text(
+        f"<!-- block_0001, page 1 -->\nText of {slug}.\n"
+        f"<!-- block_0002, page 2 -->\nMore of {slug}.\n"
+    )
+    SourceMap(
+        doc=f"{slug}.pdf", pages=pages,
+        blocks=[
+            Block("block_0001", "text", 1, (0.0, 0.0, 100.0, 20.0), [], f"Text of {slug}."),
+            Block("block_0002", "text", 2, (0.0, 0.0, 100.0, 20.0), [], f"More of {slug}."),
+        ],
+    ).to_json(dirpath / "source_map.json")
+
+
 def _case(tmp_path: Path, slugs: list[str]):
-    """A case folder with an ingested annotated.md per source."""
+    """A case folder with a fully ingested source per slug."""
     from papertrace.models import RefEntry, RefManifest
 
     for slug in slugs:
-        d = tmp_path / "ingest" / slug
-        d.mkdir(parents=True)
-        (d / "annotated.md").write_text(f"<!-- block_0001, page 1 -->\nText of {slug}.")
+        _ingested(tmp_path / "ingest" / slug, slug)
     manifest = RefManifest(
         manuscript="m.pdf",
         entries=[
