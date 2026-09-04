@@ -208,7 +208,10 @@ honest scope — when behaviour changes, that list changes with it. Specific
 current constraints documented there, worth not re-breaking: the coverage audit
 reads bracketed numeric labels only; batch mode judges a co-cited claim against
 every retrievable source and reports the most adverse verdict as the claim's
-headline; the model reads extracted text with page
+headline — where `not_addressed` is deliberately unranked and becomes the
+headline only when no source addressed the claim at all; a substantive verdict
+must name a page and a block that exist in the source's own map, so a verdict
+nobody can be shown is `unchecked`; the model reads extracted text with page
 markers, not page images.
 
 Update `CHANGELOG.md` for any user-visible change, and `README.md` when flags,

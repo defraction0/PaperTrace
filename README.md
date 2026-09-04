@@ -59,14 +59,22 @@ went uncited?**
   or unreadable** (scanned, image-only) **passes** — unverifiable is not the
   same as wrong, so a scanned source is checked rather than silently discarded.
 - Attempt to extract **every** citation-backed claim, then judge each against
-  the text of its cited source, with page-level provenance for every verdict.
+  the text of its cited source. Every `supported`, `partial` or `contradicted`
+  verdict carries a page **and** the source block it rests on, both checked
+  against that source's own ingest — a verdict naming a page or block the
+  source does not have is reported `⚠ not checked`, not published. `◌ does not
+  address the claim` carries no page by design: the source was read and says
+  nothing, so there is no passage to point at.
   Extraction is a model step, so it is an attempt, not a guarantee — which is
   why the coverage audit below exists.
 - Show the evidence: real page crops with the matched text boxed in red.
   Claude proposes the page, the block and verbatim anchor phrases; Python then
   finds those phrases in the PDF and draws the boxes — placed by text search,
-  never by hand, and never by the model. A crop whose anchor matched nothing
-  is shown unboxed and labelled as such.
+  never by hand, and never by the model. The crop region comes from the source
+  block the verdict names, so a crop whose anchor phrase matched nothing is
+  still shown — unboxed, and captioned as unboxed. Where no anchor phrase was
+  offered at all, the caption says that instead: "searched and not found" and
+  "never searched for" are different facts and are never merged.
 - Preserve unavailable sources as explicit gaps: a claim whose source
   couldn't be retrieved is `⊘ not retrieved` — recorded, never guessed.
 - Report every citation **occurrence** — each bracketed marker at its own place
@@ -87,7 +95,11 @@ went uncited?**
   verdict any of them gave, so one dissenting source is never averaged away.
   A source that turns out to say nothing about the claim is `◌ does not address
   the claim` — an inapt citation, distinct from a contradiction and from a
-  retrieval gap.
+  retrieval gap. It is deliberately **not ranked** among the three: while any
+  source actually spoke to the claim, that source decides the headline, and
+  `◌` becomes the headline only when no available source addressed the claim
+  at all. The per-source breakdown beside the headline is where an inapt
+  citation stays visible.
 - Disclose its ingest fidelity: every report — markdown, editor and terminal —
   names the converter that read the **audited paper**, and a flat-text fallback
   says so loudly. Cited sources are ingested separately (see *Tables and
@@ -138,9 +150,13 @@ went uncited?**
 ### Guided — `papertrace`, and answer the questions
 
 ```bash
+git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
 pip install -e ".[full]"     # standard install — layout-aware ingest
 papertrace                   # asks for the paper, the DOI and your email
 ```
+
+*(PaperTrace is not on PyPI yet, so the clone is not optional — `pip install -e .`
+installs the checkout you are standing in.)*
 
 Nothing to memorise. It checks your setup first — so a missing `claude` CLI is
 a sentence before you type anything, not a traceback twenty minutes in — then
@@ -180,6 +196,7 @@ and batching its questions.
 ### Batch — one command, scriptable
 
 ```bash
+git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
 pip install -e ".[full]"        # standard install (see matrix below)
 export PAPERTRACE_EMAIL="you@example.org"     # Unpaywall asks for a contact
 papertrace run paper.pdf --provided ./my_pdfs      # case folder: ./paper/ beside the PDF
@@ -221,11 +238,13 @@ title-checked like downloaded ones, but a mismatch is recorded in the manifest
 rather than refused — you named the file, so it is used and the doubt is
 disclosed.
 
-Output in `case/out/`: `report.md` with inline evidence images, the same
+Output in `<case>/out/` — where `<case>` defaults to a folder named after the
+paper, beside the paper (`paper.pdf` → `./paper/`), and `-c` chooses another.
+It holds `report.md` with inline evidence images, the same
 report as a dark **editor-window** page and as a **terminal-run** page
 (`report_editor.html`, `report_terminal.html`), plus machine-readable
 `results.json` and `scout.json`. The retrieval manifest is written one level
-up, at `case/refs_manifest.json`. Want shareable PNG images of the report
+up, at `<case>/refs_manifest.json`. Want shareable PNG images of the report
 looks? Add `--png` (one-time setup: `playwright install chromium`).
 
 **`--doi` is the DOI of the paper you are auditing** — not of anything it
@@ -284,9 +303,12 @@ accusations.
 
 ## Tables and figures are evidence too
 
-A number in a table cell, or drawn inside a figure, is still in the PDF's text
-layer — so the red box lands on it whichever backend read the document.
-`highlight` searches the real page, never the extracted text:
+A number in a table cell is in the PDF's text layer, and so is text drawn
+inside a figure **when the figure carries a text layer at all** — a vector
+chart usually does, a scanned or raster-exported one does not, and nothing can
+box text that is only pixels. Where the text is there, the red box lands on it
+whichever backend read the document, because `highlight` searches the real
+page, never the extracted text:
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">

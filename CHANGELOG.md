@@ -4,6 +4,101 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.4.1] — unreleased
+
+### Changed
+
+- **A substantive verdict must now name a page and a block the source actually
+  has, and must be showable.** `check` validates every `supported`, `partial`
+  and `contradicted` judgement against the cited source's own
+  `source_map.json`: the page must exist, `source_block` is now **required**,
+  and it must sit on the page the verdict names. Anything else is
+  `unchecked` with a note, never a verdict. `highlight` enforces the same rule
+  against reality — a substantive judgement that produced no evidence image is
+  downgraded there too, because the PDF can be missing from
+  `sources_resolved/` and a source map can disagree with the PDF it came from.
+
+  The block requirement is what makes the picture unconditional: the crop
+  region is the block's bbox, so a valid block always yields an image and the
+  anchor phrases only decide whether a red box is drawn on it. `CHECK_PROMPT`
+  already asked for `source_block` and already told the model to omit it only
+  for `not_addressed`, so no prompt text changed and eval runs stay comparable
+  across this release.
+
+  **This changes counts.** A run that previously reported a verdict resting on
+  page-only provenance, an impossible page or a nonexistent block now reports a
+  gap. `not_addressed` is unaffected — it never claimed a passage.
+
+- **A source with no `source_map.json` can no longer produce a verdict.** Its
+  judgements are `unchecked`, with a note naming the re-ingest that fixes it.
+  Previously the location it named could not be checked against anything.
+
+### Fixed
+
+- **Two ways around the one-case-one-paper guard.** `papertrace ingest` never
+  consulted `_guard_case`, so a different paper could overwrite
+  `<case>/ingest/manuscript` — the slot `refs` fills and the coverage audit
+  reads — while the manifest still described the first paper. The guard now
+  runs whenever the output *is* that slot, recognised by shape so `--out`
+  cannot walk in behind `-c`'s back; a cited source ingested into
+  `<case>/ingest/<slug>` is untouched. And `refs --parse-only` on a pre-hash
+  case re-ingested the manuscript slot and then returned before writing the
+  manifest; an inspection command now reads the paper into a temporary
+  directory and mutates nothing.
+
+- **Claims whose headline is `not_retrieved` or `unchecked` now show their full
+  per-source state.** The gap sections printed the claim text alone, so a claim
+  citing [1,2] where source 1's check failed and source 2 was never obtainable
+  said neither thing, and a `not_addressed` from a source that *was* read
+  vanished behind the `unchecked` headline that outranks it. All three formats
+  now render the co-citation breakdown, the unretrieved co-citations and one
+  row per judgement with its note. The editor look also labelled a whole
+  section row with `items[0].verdict`, calling a mixed section whichever
+  verdict came first; it is one row per claim now.
+
+- **The anchor tri-state is no longer flattened.** `anchor_located` is `True`
+  (searched and located), `False` (searched, not located) or `None` (never
+  searched) — three facts. The disclosure was gated on `evidence_image`, so a
+  verdict with a page and no crop disclosed nothing; it is gated on provenance
+  now, with wording that does not describe a picture that was not written. The
+  `highlight` console branched on truthiness and described `None` as "no anchor
+  phrase found on the page", asserting a search that never happened.
+
+### Evaluation harness
+
+Developer tooling; none of this affects an ordinary audit.
+
+- Gold-case eligibility is decided **before** alignment, not after. An
+  unresolved or drift-invalidated case used to compete for predictions and
+  consume the one an eligible case needed — which then reported as the tool's
+  extraction gap, moving blame off the tool silently.
+- Cases that were never eligible no longer vote in repeated-run agreement.
+- Duplicate prediction ids are refused with an error naming them, instead of a
+  dict comprehension keeping whichever came last — the one place alignment's
+  documented order-independence did not hold.
+- Repeated-run agreement enforces the whole **(`set_id`, prompt fingerprint,
+  ingest converter)** triple. The error message already claimed the triple
+  while only `set_id` was checked.
+- The two agreement figures are renamed for what they are: **penalized**
+  (a genuine lower bound) and **complete-case** (a different population, not a
+  bound in either direction). `intersection` was labelled the upper bound,
+  which is false — dropping a case whose true agreement is high pulls the mean
+  down.
+- `not_addressed` is a rendered confusion-matrix **column**, not only a row.
+  The arithmetic always had four classes; the table printed three, so a
+  mistake was counted and then hidden.
+- `evals/DESIGN.md` describes all four judgement classes.
+
+### Documentation
+
+`README.md` corrections, each a statement that did not match the code: page
+provenance is not universal (`not_addressed` has none by design) and is now
+page *and* block; an unboxed crop needs a valid block to exist at all;
+`not_addressed` is deliberately unranked in the headline rule; the default case
+folder is the paper's stem, not `case/`; text drawn inside a raster figure has
+no text layer to box; and both Quick Starts need `git clone` because PaperTrace
+is not on PyPI.
+
 ## [0.4.0] — 2026-08-30 (beta)
 
 ### Added
