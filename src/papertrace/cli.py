@@ -12,6 +12,7 @@ import datetime
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import typer
@@ -136,6 +137,19 @@ def _case_conflict(case: Path, manuscript: Path) -> tuple[str | None, str]:
     return (None if same else previous.manuscript), "name"
 
 
+def _manuscript_slot_owner(out: Path) -> Path | None:
+    """The case folder whose manuscript slot `out` is, or None.
+
+    `<case>/ingest/manuscript` is the one output path that stands for the
+    audited paper itself. Recognised by shape rather than by flag, so `--out`
+    cannot walk in behind `-c`'s back.
+    """
+    out = Path(out)
+    if out.name != "manuscript" or out.parent.name != "ingest":
+        return None
+    return out.parent.parent
+
+
 def _guard_case(case: Path, manuscript: Path) -> str:
     """Refuse a case that holds another paper; return what that rested on.
 
@@ -161,8 +175,9 @@ def _guard_case(case: Path, manuscript: Path) -> str:
         # uninformed and less usable, and `refs` re-ingests to make it true
         console.print(
             "[yellow]⚠ this case folder predates content hashing, so its identity is "
-            "unverified — only the file name was compared. Re-reading the paper from "
-            "scratch so the manifest and its hash describe the same file.[/yellow]"
+            "unverified — only the file name was compared, and two different papers "
+            "are routinely both called the same thing. The paper is re-read from "
+            "scratch rather than trusted from cache.[/yellow]"
         )
     return basis
 
@@ -361,6 +376,14 @@ def ingest(
     # ingest -c foo` used to fail with "No such option: -c" while its
     # neighbours all took it. --out stays authoritative and unchanged.
     out = out or (case or default_case(pdf)) / "ingest" / pdf.stem
+    # the guard is about the manuscript SLOT, not the folder. A cited source
+    # ingested into <case>/ingest/<slug> is not the audited paper and must stay
+    # ingestable — `check` does exactly that. But <case>/ingest/manuscript is
+    # what `refs` filled and `coverage_audit` reads, so a different paper
+    # landing there is the mixing `_guard_case` exists to prevent, reached by a
+    # command that never asked it.
+    if (owner := _manuscript_slot_owner(out)) is not None:
+        _guard_case(owner, pdf)
     smap = ingest_pdf(pdf, out, backend=backend)
     by_type = {t: sum(1 for b in smap.blocks if b.type == t) for t in
                ("sectionheader", "text", "table", "picture", "list")}
@@ -422,6 +445,13 @@ def refs(
     # to share this one's name, so re-read the paper we were actually given
     if cached.exists() and basis != "name":
         smap = SourceMap.from_json(cached)
+    elif parse_only:
+        # --parse-only is an inspection: "List references, no network". It must
+        # not rewrite the case's manuscript slot and then return before the
+        # manifest catches up, which left the source map describing one paper
+        # and the manifest another. Read the paper somewhere disposable instead.
+        with tempfile.TemporaryDirectory() as scratch:
+            smap = ingest_pdf(manuscript, Path(scratch), backend=backend)
     else:
         smap = ingest_pdf(manuscript, ingest_dir, backend=backend)
 

@@ -281,3 +281,95 @@ def test_the_wizard_suggests_the_folder_batch_mode_would_use(tmp_path):
     pdf.parent.mkdir(parents=True)
     pdf.write_bytes(b"%PDF-1.4\n")
     assert wizard._suggest_case(pdf) == str(cli.default_case(pdf))
+
+
+# --- the two ways around the guard -----------------------------------------
+#
+# `_guard_case` only ever ran inside `refs`. Two other paths could write into a
+# case's manuscript slot: `ingest` never consulted the guard at all, and
+# `refs --parse-only` re-ingested a legacy case and then returned before the
+# manifest caught up. Both leave one case folder describing two papers, which
+# is precisely the state the guard exists to make impossible.
+
+
+def test_ingest_refuses_to_overwrite_another_papers_manuscript_slot(tmp_path, offline):
+    """`papertrace ingest manuscript.pdf -c CASE` writes <case>/ingest/manuscript
+    — the same slot `refs` filled and `coverage_audit` reads. A different paper
+    landing there leaves the source map describing NEW and the manifest OLD.
+    """
+    case = tmp_path / "case"
+    old_pdf = _paper(tmp_path / "old" / "manuscript.pdf", "OLD", "10.1000/old")
+    new_pdf = _paper(tmp_path / "new" / "manuscript.pdf", "NEW", "10.1000/new")
+
+    cli.refs(manuscript=old_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+
+    with pytest.raises(typer.Exit):
+        cli.ingest(pdf=new_pdf, out=None, case=case, backend="pymupdf")
+
+    smap = json.loads((case / "ingest" / "manuscript" / "source_map.json").read_text())
+    body = " ".join(b.get("text", "") for b in smap["blocks"])
+    assert "NEW" not in body, "a different paper overwrote the case's manuscript"
+    assert "OLD" in body
+
+
+def test_ingest_of_a_cited_source_into_the_same_case_is_untouched(tmp_path, offline):
+    """The guard is about the manuscript slot, not the folder. A cited source
+    ingested into `<case>/ingest/<slug>` is not the audited paper and must stay
+    ingestable — guarding it would break `check`'s own source ingest."""
+    case = tmp_path / "case"
+    paper = _paper(tmp_path / "a" / "paper.pdf", "PAPER", "10.1000/paper")
+    source = _paper(tmp_path / "b" / "smith-2020.pdf", "SOURCE", "10.1000/src")
+
+    cli.refs(manuscript=paper, case=case, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    cli.ingest(pdf=source, out=None, case=case, backend="pymupdf")
+
+    assert (case / "ingest" / "smith-2020" / "source_map.json").exists()
+
+
+def test_parse_only_on_a_legacy_case_leaves_the_case_coherent(tmp_path, offline):
+    """`--parse-only` says "List references, no network" — an inspection. On a
+    legacy case it re-ingested into the manuscript slot and then returned before
+    writing the manifest, so the source map described NEW while the manifest and
+    its (absent) hash still described OLD.
+    """
+    case = tmp_path / "case"
+    old_pdf = _paper(tmp_path / "old" / "paper.pdf", "OLD", "10.1000/old")
+    new_pdf = _paper(tmp_path / "new" / "paper.pdf", "NEW", "10.1000/new")
+
+    cli.refs(manuscript=old_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    payload = json.loads((case / "refs_manifest.json").read_text())
+    del payload["manuscript_sha256"]
+    (case / "refs_manifest.json").write_text(json.dumps(payload))
+
+    cli.refs(manuscript=new_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=True, backend="pymupdf")
+
+    smap = json.loads((case / "ingest" / "manuscript" / "source_map.json").read_text())
+    body = " ".join(b.get("text", "") for b in smap["blocks"])
+    manifest = RefManifest.from_json(case / "refs_manifest.json")
+    raws = " ".join(e.raw for e in manifest.entries)
+    assert ("NEW" in body) == ("NEW PAPER" in raws), (
+        "the source map and the manifest describe different papers"
+    )
+
+
+def test_parse_only_still_lists_the_new_papers_references(tmp_path, offline, capsys):
+    """Not mutating the case must not mean reading the wrong paper: the listing
+    is of the file that was passed, whatever the case folder holds."""
+    case = tmp_path / "case"
+    old_pdf = _paper(tmp_path / "old" / "paper.pdf", "OLD", "10.1000/old")
+    new_pdf = _paper(tmp_path / "new" / "paper.pdf", "NEW", "10.1000/new")
+
+    cli.refs(manuscript=old_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    payload = json.loads((case / "refs_manifest.json").read_text())
+    del payload["manuscript_sha256"]
+    (case / "refs_manifest.json").write_text(json.dumps(payload))
+    capsys.readouterr()
+
+    cli.refs(manuscript=new_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=True, backend="pymupdf")
+    assert "NEW PAPER" in capsys.readouterr().out
