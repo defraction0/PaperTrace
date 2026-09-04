@@ -208,7 +208,7 @@
 {% endfor %}
 {% endfor %}
     </table>
-{% if scout and (scout.newer or scout.overlooked or scout.error) %}
+{% if scout and (scout.newer or scout.overlooked or scout.same_year or scout.error) %}
 
     <h2><span class="hx">##</span> Literature scout <span class="q">— what the reference list doesn't know</span></h2>
     <p class="gap-intro">Candidates for your judgement, not accusations — search-based (Europe PMC{% if scout.paper_year %}, paper year {{ scout.paper_year }}{% endif %}),
@@ -219,11 +219,19 @@
         <td class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> <code>{{ h.doi }}</code>{% endif %}</td></tr>
 {% endfor %}
 {% for h in scout.overlooked[:8] %}
-      <tr><td class="sec">uncited · {{ h.year or "?" }}</td><td class="st">existed at pub. time</td>
+      <tr><td class="sec">uncited · {{ h.year or "?" }}</td><td class="st">in print before pub.</td>
+        <td class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> <code>{{ h.doi }}</code>{% endif %}</td></tr>
+{% endfor %}
+{% for h in scout.same_year[:8] %}
+      <tr><td class="sec">same year · {{ h.year or "?" }}</td><td class="st">may postdate submission</td>
         <td class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> <code>{{ h.doi }}</code>{% endif %}</td></tr>
 {% endfor %}
     </table>
-{% if scout.newer|length > 10 or scout.overlooked|length > 8 %}
+{% if scout.same_year %}
+    <p class="gap-intro" style="margin-top:8px">Same-year candidates are listed apart on purpose: one from the paper's own year may
+      have appeared after submission, so it is neither literature published since nor something the authors should have known.</p>
+{% endif %}
+{% if scout.newer|length > 10 or scout.overlooked|length > 8 or scout.same_year|length > 8 %}
     <p class="gap-intro" style="margin-top:8px">Full lists in <code>scout.json</code>.</p>
 {% endif %}
 {% endif %}

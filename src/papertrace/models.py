@@ -506,10 +506,18 @@ class ScoutResults:
     """Post-publication scan around one paper.
 
     `newer` holds what appeared after the paper (citing articles + later
-    keyword hits); `overlooked` holds what existed by the paper's year but is
-    absent from its reference list. Both are candidates for the user's
-    judgement — search-based, so absence from these lists proves nothing.
+    keyword hits); `overlooked` holds what was in print *before* the paper's
+    year and is absent from its reference list. Both are candidates for the
+    user's judgement — search-based, so absence from these lists proves nothing.
     A non-empty `error` means the scan soft-failed and may be incomplete.
+
+    `same_year` is the third register, and it is deliberately not folded into
+    either neighbour. A paper from the manuscript's own year may have appeared
+    after submission, so "existed but uncited" holds it to a standard no author
+    can meet — on one real 2026 manuscript all fifteen overlooked candidates
+    were from 2026. It is not `newer` either, since it did not appear after.
+    Dropping it would lose a real finding: a paper published early in the same
+    year is exactly what a reviewer might legitimately raise.
     """
 
     paper_title: str = ""
@@ -520,6 +528,8 @@ class ScoutResults:
     date: str = ""
     newer: list[ScoutHit] = field(default_factory=list)
     overlooked: list[ScoutHit] = field(default_factory=list)
+    # the paper's own year — neither "since" nor "should have known"
+    same_year: list[ScoutHit] = field(default_factory=list)
     error: str = ""
 
     def to_json(self, path: Path) -> None:
@@ -532,9 +542,14 @@ class ScoutResults:
             },
             "query": self.query,
             "date": self.date,
-            "counts": {"newer": len(self.newer), "overlooked": len(self.overlooked)},
+            "counts": {
+                "newer": len(self.newer),
+                "overlooked": len(self.overlooked),
+                "same_year": len(self.same_year),
+            },
             "newer": [asdict(h) for h in self.newer],
             "overlooked": [asdict(h) for h in self.overlooked],
+            "same_year": [asdict(h) for h in self.same_year],
             "error": self.error,
         }
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -552,5 +567,7 @@ class ScoutResults:
             date=data.get("date", ""),
             newer=[ScoutHit(**h) for h in data.get("newer", [])],
             overlooked=[ScoutHit(**h) for h in data.get("overlooked", [])],
+            # .get: a scout.json written before the third register still loads
+            same_year=[ScoutHit(**h) for h in data.get("same_year", [])],
             error=data.get("error", ""),
         )

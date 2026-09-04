@@ -554,6 +554,15 @@ def scout(
         console.print(f"    [cyan]{h.year or '?'}[/cyan] {h.title[:76]}")
     if len(res.overlooked) > 5:
         console.print(f"    [dim]… {len(res.overlooked) - 5} more in scout.json[/dim]")
+    if res.same_year:
+        console.print(
+            f"[yellow]▸[/yellow] same year as the paper: [bold]{len(res.same_year)}[/bold]"
+            " candidates [dim]— may postdate submission, so neither newer nor owed[/dim]"
+        )
+        for h in res.same_year[:5]:
+            console.print(f"    [cyan]{h.year or '?'}[/cyan] {h.title[:76]}")
+        if len(res.same_year) > 5:
+            console.print(f"    [dim]… {len(res.same_year) - 5} more in scout.json[/dim]")
     console.print(
         "[dim]search-based — absence from these lists proves nothing; presence is a"
         " candidate for your judgement, not an accusation.[/dim]"

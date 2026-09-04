@@ -1,11 +1,15 @@
 """Scout the literature around a paper — what its reference list doesn't know.
 
-Two registers, both candidates for the user's judgement, never accusations:
+Three registers, all candidates for the user's judgement, never accusations:
 
 - ``newer``      — appeared after the paper: articles that cite it, plus later
                    keyword hits. What the paper could not have known.
-- ``overlooked`` — existed by the paper's year but is absent from its
+- ``overlooked`` — in print *before* the paper's year and absent from its
                    reference list. What it could have cited.
+- ``same_year``  — the paper's own year. Split out because it answers neither
+                   question: it may have appeared after submission, so it is
+                   not a citation the authors owed, and it did not come after,
+                   so it is not literature published since.
 
 Search-based (Europe PMC) and therefore incomplete by construction — absence
 from these lists proves nothing. Network failures soft-fail: the error is
@@ -15,6 +19,7 @@ recorded in ``scout.json`` and the pipeline continues.
 from __future__ import annotations
 
 import datetime
+import html
 import re
 from pathlib import Path
 
@@ -31,6 +36,13 @@ _STOPWORDS = {
     "the", "and", "for", "with", "from", "into", "using", "based", "toward",
     "towards", "study", "analysis", "review", "novel", "between", "among",
     "their", "this", "that", "after", "before", "during", "versus",
+    # verbs and framing nouns that state what a paper CLAIMS, not what it is
+    # about. `improves` matched a stroke abstract shouting "IMPROVES" at a
+    # pancreatic-cancer paper, which is how this list grew.
+    "improve", "improves", "improved", "improving", "improvement",
+    "increase", "increases", "increased", "reduce", "reduces", "reduced",
+    "enhance", "enhances", "enhanced", "enables", "enabling",
+    "assessment", "evaluation", "comparison", "investigation",
 }
 
 
@@ -64,13 +76,35 @@ def _norm_title(title: str) -> str:
 
 
 def _keywords(title: str, n: int = 4) -> list[str]:
+    """The n most specific-looking words of a title, for the neighbour search.
+
+    Ranked by length, not by position. Taking the first n searched the opening
+    of the title and never reached its subject: "Image registration improves
+    inter-reader agreement ... in CT assessment of pancreas adenocarcinoma"
+    produced `image AND registration AND improves AND inter-reader`, so the
+    query described a method and omitted the disease entirely.
+
+    Length is a proxy for topical specificity and nothing more — `adenocarcinoma`
+    over `image`. It is a heuristic, but it is one rule rather than a word list
+    that has to grow with every title style. The stop list only holds words that
+    carry no topic in any paper; guessing at more is how a filter starts
+    dropping real subject terms.
+    """
     words = re.findall(r"[A-Za-z][A-Za-z\-]{3,}", title.lower())
-    return [w for w in words if w not in _STOPWORDS][:n]
+    seen: dict[str, int] = {}
+    for i, w in enumerate(words):
+        if w not in _STOPWORDS and w not in seen:
+            seen[w] = i
+    ranked = sorted(seen, key=lambda w: (-len(w), seen[w]))
+    return ranked[:n]
 
 
 def _hit(d: dict, via: str) -> ScoutHit:
+    # Europe PMC escapes the markup its titles carry, so `CTV<sub>boost</sub>`
+    # arrives as `CTV&lt;sub&gt;boost&lt;/sub&gt;` and was rendered verbatim
+    # into the report. Decoded once, here, where every hit is built.
     return ScoutHit(
-        title=" ".join((d.get("title") or "").split()).rstrip("."),
+        title=" ".join(html.unescape(d.get("title") or "").split()).rstrip("."),
         year=_year(d.get("pubYear")),
         doi=(d.get("doi") or "").lower(),
         via=via,
@@ -238,13 +272,20 @@ def scout_case(
                         continue  # undatable → can't be placed honestly
                     if res.paper_year and h.year > res.paper_year:
                         res.newer.append(h)
-                    elif not _probably_cited(h, cited_dois, cited_slugs):
+                    elif _probably_cited(h, cited_dois, cited_slugs):
+                        continue
+                    elif res.paper_year and h.year == res.paper_year:
+                        # its own year is neither "since" nor "should have
+                        # known" — see ScoutResults for why it gets a register
+                        res.same_year.append(h)
+                    else:
                         res.overlooked.append(h)
 
-            res.newer.sort(key=lambda h: (-(h.year or 0), h.title))
-            res.overlooked.sort(key=lambda h: (-(h.year or 0), h.title))
+            for reg in (res.newer, res.overlooked, res.same_year):
+                reg.sort(key=lambda h: (-(h.year or 0), h.title))
             res.newer = res.newer[:NEWER_CAP]
             res.overlooked = res.overlooked[:OVERLOOKED_CAP]
+            res.same_year = res.same_year[:OVERLOOKED_CAP]
     except httpx.HTTPError as e:
         res.error = f"network: {type(e).__name__} — scan incomplete"
     return res

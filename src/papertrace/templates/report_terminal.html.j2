@@ -181,7 +181,7 @@
 {% endfor %}
 {% endfor %}
 {% endfor %}
-{% if scout and (scout.newer or scout.overlooked or scout.error) %}
+{% if scout and (scout.newer or scout.overlooked or scout.same_year or scout.error) %}
 
     <div style="height:14px"></div>
     <div class="nr-head"><span class="cyan">◆</span> literature the reference list doesn't know <span class="c">(scout · europe pmc{% if scout.paper_year %} · paper year {{ scout.paper_year }}{% endif %})</span></div>
@@ -197,6 +197,12 @@
 {% endfor %}
 {% if scout.overlooked|length > 6 %}
     <div class="nr-sub" style="margin-top:7px">… {{ scout.overlooked|length - 6 }} more uncited candidates in scout.json</div>
+{% endif %}
+{% for h in scout.same_year[:6] %}
+    <div class="nrrow"><span class="sec">same year · {{ h.year or "?" }}</span><span class="n">[{{ h.via[:6] }}]</span><span class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> {{ h.doi }}{% endif %}</span></div>
+{% endfor %}
+{% if scout.same_year %}
+    <div class="nr-sub" style="margin-top:7px">same-year candidates listed apart — one from the paper's own year may postdate submission, so it is neither newer literature nor a citation the authors owed{% if scout.same_year|length > 6 %} · … {{ scout.same_year|length - 6 }} more in scout.json{% endif %}</div>
 {% endif %}
 {% endif %}
 

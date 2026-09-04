@@ -119,7 +119,7 @@ flagged for you to weigh.
 - **[U{{ u.id }}]** {{ u.claim }}{% if u.location %} *({{ u.location }})*{% endif %}
 {% endfor %}
 {% endif %}
-{% if scout and (scout.newer or scout.overlooked or scout.error) %}
+{% if scout and (scout.newer or scout.overlooked or scout.same_year or scout.error) %}
 
 ## Literature scout — what the reference list doesn't know
 
@@ -146,12 +146,28 @@ What the paper could not have known — articles citing it, plus later keyword h
 
 ### Existed but uncited ({{ scout.overlooked|length }} candidates)
 
-In print by the paper's year and absent from its reference list (matched by
-DOI and first-author heuristics — verify against the reference list yourself).
+In print **before** the paper's year and absent from its reference list (matched
+by DOI and first-author heuristics — verify against the reference list yourself).
 
 | Year | Title | Journal | DOI |
 |------|-------|---------|-----|
 {% for h in scout.overlooked %}
+| {{ h.year or "?" }} | {{ h.title[:90] }} | {{ h.journal[:30] }} | {{ h.doi or "—" }} |
+{% endfor %}
+{% endif %}
+{% if scout.same_year %}
+
+### Same year as the paper ({{ scout.same_year|length }} candidates)
+
+Published in {{ scout.paper_year or "the paper's own year" }} and not cited.
+Held apart from the list above on purpose: a paper from the manuscript's own
+year may have appeared after it was submitted, so it is **not** evidence of
+something the authors should have known. It is also not literature published
+since. Judge each on its date.
+
+| Year | Title | Journal | DOI |
+|------|-------|---------|-----|
+{% for h in scout.same_year %}
 | {{ h.year or "?" }} | {{ h.title[:90] }} | {{ h.journal[:30] }} | {{ h.doi or "—" }} |
 {% endfor %}
 {% endif %}
