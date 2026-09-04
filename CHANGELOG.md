@@ -49,6 +49,43 @@ DOIs attached.
   in-press pre-proof, and a stronger fact than a failed title heuristic. Both
   registers being empty is absence of data, not a clean literature search.
 
+### Fixed — the literature scout, and the escaping hole it uncovered
+
+Found by a second live audit, of a pancreatic-cancer paper.
+
+- **The keyword query is about the subject now.** `_keywords` took the first
+  four content words of the title, so *"Image registration improves inter-reader
+  agreement of objective response in CT assessment of pancreas adenocarcinoma"*
+  searched for `image AND registration AND improves AND inter-reader` — a method
+  phrase containing a verb, never reaching the disease. It matched a stroke
+  conference abstract on the word IMPROVES. Words are now ranked by length as a
+  proxy for topical specificity rather than by position, and a short list of
+  words that state what a paper *claims* rather than what it is *about*
+  (`improves`, `reduces`, `assessment`, …) joins the stop list. The same title
+  now yields `adenocarcinoma AND registration AND inter-reader AND agreement`.
+
+- **A paper from the manuscript's own year is no longer "existed but uncited".**
+  That register invites the reader to ask what the authors missed, and a
+  same-year paper may have appeared after submission — on the audited paper all
+  fifteen candidates were from its own year. `same_year` is a third register,
+  rendered apart and labelled, because folding it into either neighbour states
+  something false and dropping it would lose a finding a reviewer might
+  legitimately raise. Additive in `schemas/scout.schema.json`; an older
+  `scout.json` still loads.
+
+- **Europe PMC's escaped markup is decoded.** Titles arrived as
+  `CTV&lt;sub&gt;boost&lt;/sub&gt;` and were rendered verbatim.
+
+- **The HTML reports actually escape their interpolations.** `report.py` passed
+  `select_autoescape(["html"])`, which matches a name ending in `.html` — the
+  templates are `report_editor.html.j2` and `report_terminal.html.j2`, so
+  nothing ever matched and **autoescape was off for all three formats**. It
+  stayed invisible because the one field carrying angle brackets, a Europe PMC
+  title, arrived pre-escaped from the API; decoding those entities above is what
+  made it reachable. Cited source PDFs are downloaded from third parties and
+  their text reaches the report, so this was not hypothetical. Matched on
+  `.html.j2` now. Markdown is not HTML and is left verbatim.
+
 ### Changed
 
 - **A substantive verdict must now name a page and a block the source actually
