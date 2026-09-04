@@ -145,6 +145,10 @@
       <img class="crop" src="{{ j.evidence_image }}">
       <figcaption>![evidence] {{ j.source_slug }} · page {{ j.source_page }} · {% for d in judgement_disclosures(j) %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}</figcaption>
     </figure>
+{% else %}
+{% for d in judgement_disclosures(j) %}
+    <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
+{% endfor %}
 {% endif %}
 {% endfor %}
 {% else %}
@@ -157,6 +161,10 @@
       <img class="crop" src="{{ c.evidence_image }}">
       <figcaption>![evidence] {{ c.source_slug }} · page {{ c.source_page }} · {% for d in claim_disclosures(c) if d.key == "anchor" %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}</figcaption>
     </figure>
+{% else %}
+{% for d in claim_disclosures(c) if d.key == "anchor" %}
+    <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
+{% endfor %}
 {% endif %}
 {% if c.note %}
     <p class="cap">{{ c.note }}</p>
@@ -178,9 +186,26 @@
     <p class="gap-intro">Either the cited PDF could not be obtained, or the check step failed on an
       available source (see notes). Reported as such — never filled in from memory.</p>
     <table class="gaptbl">
+{# one row per CLAIM, not per section: `items[0].verdict` labelled a section
+   holding one not_retrieved and one unchecked as whichever came first #}
 {% for section, items in gaps.items() %}
-      <tr><td class="sec">{{ section }}</td><td class="st">{{ items[0].verdict|replace("_", " ") }} · {{ items|length }}</td>
-        <td class="it">{% for c in items %}{{ c.claim }}{% if not loop.last %}<span class="s">·</span>{% endif %}{% endfor %}</td></tr>
+{% for c in items %}
+      <tr><td class="sec">{{ section if loop.first else "" }}</td><td class="st">{{ c.verdict|replace("_", " ") }}</td>
+        <td class="it">{{ c.claim }}
+{% if c.note %}
+          <div class="cap">{{ c.note }}</div>
+{% endif %}
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs") %}
+          <div class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></div>
+{% endfor %}
+{% for j in c.judgements %}
+          <div class="cap"><span class="slug">{{ j.source_slug }}</span> cited as [{{ j.ref }}] — <span class="status {{ j.verdict }}">{{ j.verdict }}</span>{% if j.source_page %} · p.{{ j.source_page }}{% endif %}{% if j.note %} — {{ j.note }}{% endif %}</div>
+{% for d in judgement_disclosures(j) %}
+          <div class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></div>
+{% endfor %}
+{% endfor %}
+        </td></tr>
+{% endfor %}
 {% endfor %}
     </table>
 {% if scout and (scout.newer or scout.overlooked or scout.error) %}

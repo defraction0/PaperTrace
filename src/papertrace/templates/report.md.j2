@@ -53,8 +53,13 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if j.evidence_image %}
 
 ![evidence]({{ j.evidence_image }})
-{% for d in judgement_disclosures(j) %}{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}{% endfor %}
 {% endif %}
+{% for d in judgement_disclosures(j) %}
+{% if not j.evidence_image %}
+
+{% endif %}
+{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}
+{% endfor %}
 {% endfor %}
 {% else %}
 {% if c.source_slug %}
@@ -65,8 +70,13 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if c.evidence_image %}
 
 ![evidence]({{ c.evidence_image }})
-{% for d in claim_disclosures(c) if d.key == "anchor" %}{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}{% endfor %}
 {% endif %}
+{% for d in claim_disclosures(c) if d.key == "anchor" %}
+{% if not c.evidence_image %}
+
+{% endif %}
+{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}
+{% endfor %}
 {% endif %}
 {% if c.note %}
 
@@ -86,7 +96,16 @@ Reported as such — never filled in from memory.
 {% for section, items in gaps.items() %}
 - **{{ section }}** ({{ items|length }}):
 {% for c in items %}
-  - [{{ c.refs|join(', ') }}] {{ c.claim }}{% if c.note %} — *{{ c.note }}*{% endif %}
+  - {{ c.label }} · [{{ c.refs|join(', ') }}] {{ c.claim }}{% if c.note %} — *{{ c.note }}*{% endif +%}
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs") %}
+    - {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
+{% endfor %}
+{% for j in c.judgements %}
+    - `{{ j.source_slug }}` cited as [{{ j.ref }}] — **{{ j.verdict }}**{% if j.source_page %} · p.{{ j.source_page }}{% endif %}{% if j.note %} — *{{ j.note }}*{% endif +%}
+{% for d in judgement_disclosures(j) %}
+      - {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
+{% endfor %}
+{% endfor %}
 {% endfor %}
 {% endfor %}
 {% if r.uncited %}

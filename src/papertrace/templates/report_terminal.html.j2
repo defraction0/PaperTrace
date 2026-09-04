@@ -114,18 +114,18 @@
 {% endif %}
 {% if j.evidence_image %}
       <div class="imgwrap" data-src="{{ j.source_slug }} · page {{ j.source_page }}"><img src="{{ j.evidence_image }}"></div>
+{% endif %}
 {% for d in judgement_disclosures(j) %}
       <div class="cl-meta"><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
-{% endif %}
 {% endfor %}
 {% else %}
 {% if c.evidence_image %}
       <div class="imgwrap" data-src="{{ c.source_slug }} · page {{ c.source_page }}"><img src="{{ c.evidence_image }}"></div>
+{% endif %}
 {% for d in claim_disclosures(c) if d.key == "anchor" %}
       <div class="cl-meta"><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
-{% endif %}
 {% if c.note %}
       <div class="note"><span class="a">└─</span> {{ c.note }}</div>
 {% endif %}
@@ -168,7 +168,18 @@
     <div class="nr-head"><span class="dim">○</span> not verified — source not retrieved or check failed <span class="c">({{ gap_total }} / {{ r.claims|length }})</span></div>
     <div class="nr-sub">the cited PDF couldn’t be fetched — or the check step failed on an available source — so the claim is reported unverified, never guessed.</div>
 {% for section, items in gaps.items() %}
-    <div class="nrrow"><span class="sec">{{ section|lower }}</span><span class="n">[{{ items|length }}]</span><span class="it">{% for c in items %}{{ c.claim }}{% if not loop.last %}<span class="s">·</span>{% endif %}{% endfor %}</span></div>
+{% for c in items %}
+    <div class="nrrow"><span class="sec">{{ section|lower if loop.first else "" }}</span><span class="n">{{ c.verdict|replace("_", " ") }}</span><span class="it">{{ c.claim }}{% if c.note %} <span class="s">·</span> {{ c.note }}{% endif %}</span></div>
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs") %}
+    <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
+{% endfor %}
+{% for j in c.judgements %}
+    <div class="nrrow"><span class="sec"></span><span class="n">[{{ j.ref }}]</span><span class="it dim">{{ j.source_slug }} <span class="s">·</span> {{ j.verdict }}{% if j.source_page %} <span class="s">·</span> p.{{ j.source_page }}{% endif %}{% if j.note %} <span class="s">·</span> {{ j.note }}{% endif %}</span></div>
+{% for d in judgement_disclosures(j) %}
+    <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
+{% endfor %}
+{% endfor %}
+{% endfor %}
 {% endfor %}
 {% if scout and (scout.newer or scout.overlooked or scout.error) %}
 

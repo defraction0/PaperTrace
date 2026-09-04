@@ -98,6 +98,62 @@ ANCHOR: dict[str, Disclosure] = {
     ),
 }
 
+# The same three facts when no crop was written. Same tokens on purpose — the
+# parity contract is the token, so a format cannot drop one by taking this
+# branch — but the sentence must not describe a picture that does not exist.
+ANCHOR_NO_IMAGE: dict[str, Disclosure] = {
+    "located": Disclosure(
+        key="anchor",
+        level="info",
+        token=ANCHOR_LOCATED_TOKEN,
+        text=(
+            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located on this page "
+            "by text search, though no evidence image was written for it."
+        ),
+        short=f"{ANCHOR_LOCATED_TOKEN} — no evidence image",
+    ),
+    "not_located": Disclosure(
+        key="anchor",
+        level="warn",
+        token=ANCHOR_NOT_LOCATED_TOKEN,
+        text=(
+            f"{ANCHOR_NOT_LOCATED_TOKEN}, and no evidence image was produced — so "
+            "the page named above is the only provenance this verdict carries."
+        ),
+        short=f"{ANCHOR_NOT_LOCATED_TOKEN} — and no evidence image",
+    ),
+    "unknown": Disclosure(
+        key="anchor",
+        level="warn",
+        token=ANCHOR_UNKNOWN_TOKEN,
+        text=(
+            f"{ANCHOR_UNKNOWN_TOKEN} — no anchor phrase was searched for, or the "
+            "highlight step did not run, and no evidence image was produced. "
+            "Nothing here claims a match."
+        ),
+        short=f"{ANCHOR_UNKNOWN_TOKEN} — and no evidence image",
+    ),
+}
+
+
+def anchor_disclosure(anchor) -> Disclosure | None:
+    """The anchor caption for one claim or judgement, or None if it owes none.
+
+    Gated on *provenance*, not on the picture. A judgement that names a page has
+    made a claim about where the evidence is, and owes the reader a statement
+    about whether anything was found there — whether or not a crop was written.
+    Gating on `evidence_image` was how a verdict with a page number and no crop
+    came to disclose nothing at all.
+
+    A claim with no page (`not_retrieved`, or a check that failed before any
+    location was offered) gets None: silence about nothing is not a dropped
+    disclosure.
+    """
+    if getattr(anchor, "source_page", None) is None:
+        return None
+    table = ANCHOR if getattr(anchor, "evidence_image", None) else ANCHOR_NO_IMAGE
+    return table[anchor_state(anchor)]
+
 
 # --------------------------------------------------------------------------
 # run-level and claim-level rules
@@ -428,7 +484,8 @@ def judgement_disclosures(j) -> list[Disclosure]:
     has no co-citations and no breakdown of its own, only the anchor state of
     the single page it points at.
     """
-    return [ANCHOR[anchor_state(j)]] if j.evidence_image else []
+    d = anchor_disclosure(j)
+    return [d] if d else []
 
 
 def claim_disclosures(claim) -> list[Disclosure]:
@@ -438,6 +495,6 @@ def claim_disclosures(claim) -> list[Disclosure]:
         out.append(_sources(claim))
     if claim.unjudged_refs:
         out.append(_unjudged(claim))
-    if claim.evidence_image:
-        out.append(ANCHOR[anchor_state(claim)])
+    if (d := anchor_disclosure(claim)) is not None:
+        out.append(d)
     return out
