@@ -6,6 +6,49 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ## [0.4.1] — unreleased
 
+### Fixed — the tool could invent a reference
+
+Found by the first real audit: a 43-reference Elsevier paper was reported as
+having 46, and the three extra "references" were the paper's own table
+captions, published in the retrieval manifest as `paywalled` works with real
+DOIs attached.
+
+- **A resumed reference list must look like references.** `references_span`
+  scanned to the end of the document for any run of blocks sharing the
+  bibliography's block *type*, with no test on the text — so three `list`
+  blocks under a `TABLE TITLES` heading became references 44–46. A candidate
+  run now has to be at least half reference-shaped. Half rather than all,
+  because a genuine continuation can carry a bare-URL entry with no year. The
+  docstring claimed this was already the case; it was not.
+
+- **A non-reference is never title-searched, and a component DOI is never
+  accepted.** Crossref answered a title search for "Table 1. Dataset
+  characteristics" with `10.7717/peerj.7892/table-1` — a *table* belonging to
+  an unrelated paper — and nothing caught it, because the title sanity check
+  only runs on the download path and no copy was ever downloaded. Entries that
+  read as nothing citable are refused before the search, mirroring the existing
+  web-page gate, and any DOI naming a table, figure or supplement is rejected
+  wherever it came from.
+
+  `looks_like_reference` accepts a year, a DOI, an arXiv id **or an author
+  list**. The author clause is not decoration: two real references in the same
+  paper reached the resolver truncated mid-title with no year at all, and
+  Crossref found both correct DOIs from the author string. A year-only test
+  turned them into gaps.
+
+- **The retrieval manifest keeps the evidence for a title check that passed.**
+  `title_check: verified` and `title_check: unverifiable` both arrived as bare
+  assurances; the detail was recorded only on mismatch. Accepted downloads now
+  carry it too — `title check: 18/19 reference tokens on its first page`.
+
+- **The scout says which failure it was.** With `--doi` supplied and no record
+  found, it reported "paper not identified in Europe PMC — pass `--doi` to pin
+  it", advising the operator to do what they had just done, and wrote
+  `"doi": ""` into `scout.json` so the artifact could not show what was tried.
+  A DOI that returns nothing means the paper is not indexed — usual for an
+  in-press pre-proof, and a stronger fact than a failed title heuristic. Both
+  registers being empty is absence of data, not a clean literature search.
+
 ### Changed
 
 - **A substantive verdict must now name a page and a block the source actually
