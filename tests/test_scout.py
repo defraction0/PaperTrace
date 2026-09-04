@@ -175,3 +175,54 @@ def test_email_fallback_old_env_var(monkeypatch):
     assert _email(None) == "old@example.org"
     monkeypatch.setenv("PAPERTRACE_EMAIL", "new@example.org")
     assert _email(None) == "new@example.org"  # new name wins
+
+
+# --- a failure has to say which failure it was ------------------------------
+#
+# On a real audit the operator was told "paper not identified in Europe PMC —
+# pass --doi to pin it", so they found the DOI and re-ran with it. Same message.
+# They then curled Europe PMC by hand to establish what the tool already knew:
+# the paper is a Journal Pre-proof and simply is not indexed. `scout.json` also
+# recorded `"doi": ""`, so the artifact could not show what had been tried.
+
+
+def _no_hits(request):
+    return httpx.Response(200, json={"resultList": {"result": []}})
+
+
+def test_a_pinned_doi_that_finds_nothing_does_not_ask_for_a_doi(tmp_path):
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1016/j.ejrad.2026.113206",
+                     transport=httpx.MockTransport(_no_hits))
+
+    assert "--doi" not in res.error, res.error
+    assert "10.1016/j.ejrad.2026.113206" in res.error, res.error
+
+
+def test_a_pinned_doi_that_finds_nothing_says_the_paper_is_not_indexed(tmp_path):
+    """A DOI lookup returning nothing is a stronger fact than a failed title
+    heuristic, and a different one: absence of indexing, not absence of skill.
+    Zero candidates must not read as a clean literature search."""
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1016/j.ejrad.2026.113206",
+                     transport=httpx.MockTransport(_no_hits))
+
+    assert "not indexed" in res.error.lower(), res.error
+    assert res.newer == [] and res.overlooked == []
+
+
+def test_the_doi_that_was_tried_survives_into_the_artifact(tmp_path):
+    """`scout.json` carried an empty doi, so the null was uninterpretable from
+    the file alone."""
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1016/j.ejrad.2026.113206",
+                     transport=httpx.MockTransport(_no_hits))
+
+    assert res.paper_doi == "10.1016/j.ejrad.2026.113206"
+
+
+def test_without_a_doi_the_advice_to_pin_one_still_stands(tmp_path):
+    """The original message is right when no DOI was given — keep it."""
+    case = _case(tmp_path)
+    res = scout_case(case, transport=httpx.MockTransport(_no_hits))
+    assert "--doi" in res.error

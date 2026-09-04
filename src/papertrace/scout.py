@@ -189,10 +189,23 @@ def scout_case(
         with _client(email, transport) as client:
             paper = _resolve_paper(client, doi, _title_from_case(case))
             if paper is None:
-                res.error = (
-                    "paper not identified in Europe PMC — pass --doi to pin it "
-                    "(title heuristics can miss)"
-                )
+                # Which failure this was decides what the reader should do, and
+                # the two are not the same fact. Telling an operator who just
+                # passed --doi to pass --doi sent them to verify by hand what
+                # the tool already knew.
+                if doi:
+                    res.paper_doi = doi  # so the artifact shows what was tried
+                    res.error = (
+                        f"Europe PMC returned no record for DOI {doi}, so this paper is "
+                        "not indexed there — usual for an in-press or pre-proof article. "
+                        "Both registers below are empty for want of a starting point, "
+                        "which is absence of data, not a clean literature search"
+                    )
+                else:
+                    res.error = (
+                        "paper not identified in Europe PMC — pass --doi to pin it "
+                        "(title heuristics can miss)"
+                    )
                 return res
             res.paper_title = paper["title"]
             res.paper_doi = paper["doi"]
