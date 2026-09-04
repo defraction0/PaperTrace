@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 
 from . import __version__
-from .models import RefEntry
+from .models import RefEntry, looks_like_reference
 
 # Two user agents on purpose. The contact address is sent ONLY to the services
 # that ask for one — Unpaywall requires it, Crossref's polite pool uses it. One
@@ -315,7 +315,11 @@ def _accept(
         )
         return False
     entry.status, entry.resolver, entry.pdf_path = "retrieved", resolver, str(dest)
-    entry.reason = why
+    # Carry the check's own evidence. The mismatch branch above already states
+    # its detail; the accepting branch discarded it, so `title_check: verified`
+    # and `title_check: unverifiable` reached the manifest as bare assurances
+    # with nothing behind them — and those two mean very different things.
+    entry.reason = f"{why} · title check: {detail}" if detail else why
     return True
 
 
@@ -385,6 +389,38 @@ _ARTICLE_SIGNAL_RE = re.compile(
     r"|\bin press\b|\bepub\b|\bforthcoming\b",
     re.I,
 )
+
+
+# A DOI naming a PART of a work: Crossref mints these for tables, figures and
+# supplements, and a title search will happily return one. `/table-1` came back
+# for the caption "Table 1. Dataset characteristics" and was reported as a
+# paywalled cited work.
+_COMPONENT_DOI_RE = re.compile(
+    r"/(?:table|figure|fig|scheme|supp(?:l|lement(?:al|ary)?)?)[-_.]?\d+/?$"
+    r"|\.s\d{3,}$",
+    re.I,
+)
+
+
+def _component_doi_reason(doi: str | None) -> str:
+    return (
+        f"the only DOI available ({doi}) names a table, figure or supplement, not a "
+        "paper — a part of a work is never the work a reference cites. Recorded as "
+        "no DOI rather than resolved, because fetching it would judge claims against "
+        "someone else's table"
+    )
+
+
+def _is_component_doi(doi: str | None) -> bool:
+    """Does this DOI name a table, figure or supplement rather than a work?
+
+    A part of a paper is never the thing a reference cites, so accepting one is
+    always wrong — whether it arrived from a Crossref title search or was
+    printed in the reference itself. Anchored at the end of the DOI so an
+    ordinary suffix that merely contains the word (`.../figures-in-radiology`)
+    is untouched.
+    """
+    return bool(doi and _COMPONENT_DOI_RE.search(doi))
 
 
 def _is_webpage_reference(raw: str) -> bool:
@@ -474,9 +510,38 @@ def resolve_entry(
             )
             return entry
 
+        # The parser is fallible, so this is the second line of defence. An
+        # entry with no year, no DOI and no arXiv id is not a citable work, and
+        # a bibliographic search always answers with *something*: three of one
+        # paper's own table captions were searched by title and came back as
+        # table-component DOIs belonging to unrelated papers, then published as
+        # paywalled references.
+        if not entry.doi and not looks_like_reference(entry.raw):
+            entry.status = "no_doi"
+            entry.reason = (
+                "this entry carries no year, DOI or arXiv id, so nothing here reads as "
+                "a cited work — it is more likely a caption or a heading the reference "
+                "parser swept in. Not searched by title: Crossref would answer with the "
+                "closest-looking record, and inventing a reference is worse than "
+                "reporting one the parser got wrong"
+            )
+            return entry
+
+        # a DOI printed in the reference can name a part of a paper too
+        if _is_component_doi(entry.doi):
+            entry.status, entry.reason = "no_doi", _component_doi_reason(entry.doi)
+            entry.doi = None
+            return entry
+
         if not entry.doi:
             try:
-                entry.doi = _crossref_doi(client, entry.raw, email)
+                found = _crossref_doi(client, entry.raw, email)
+                if _is_component_doi(found):
+                    # a title match is not a work match — a table's title is the
+                    # table's, and this one belonged to a different paper
+                    entry.status, entry.reason = "no_doi", _component_doi_reason(found)
+                    return entry
+                entry.doi = found
                 if entry.doi:
                     entry.resolver = "crossref"
             except httpx.HTTPError:

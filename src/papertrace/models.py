@@ -46,6 +46,50 @@ def is_references_heading(block_type: str, text: str) -> bool:
     return bool(_REFS_HEADING_EXACT.match(text))
 
 
+# What marks a line as a bibliographic reference rather than back matter.
+# Deliberately three cheap structural marks and nothing else — the question is
+# only "is this a citable work at all", not "is this a good reference".
+_REF_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+_REF_DOI = re.compile(r"10\.\d{4,9}/\S", re.I)
+_REF_ARXIV = re.compile(r"arxiv[:\s]*\d{4}\.\d{4,5}", re.I)
+# An author list, in the two styles that actually turn up: `M.A. Slabaugh` and
+# `Slabaugh MA`. Two names, not one — a single match is easy to hit by accident.
+_REF_AUTHORS = re.compile(
+    r"\b[A-Z]\.(?:\s*[A-Z]\.)*\s*[A-Z][a-z]+"   # M.A. Slabaugh
+    r"|\b[A-Z][a-z]+\s+[A-Z]{1,3}\b"              # Slabaugh MA
+)
+
+
+def looks_like_reference(text: str) -> bool:
+    """Could this line be a cited work? A year, a DOI or an arXiv id.
+
+    Lives here rather than in `refs.py` or `ingest/` for the same reason
+    `is_references_heading` does: two readers need the rule, they cannot import
+    each other, and each keeping its own copy is a defect this codebase has
+    already shipped once.
+
+    The bar is deliberately low. This is not a quality test on a reference — it
+    is the difference between a cited work and the paper's own back matter.
+    `Table 1. Dataset characteristics` carries none of the three, and three of
+    those became references 44-46 of a 43-reference paper, were title-searched
+    against Crossref, and came back as table-component DOIs belonging to other
+    papers.
+
+    Being wrong in the permissive direction is the cheap error: a stray line
+    that sneaks through is one bad entry in a manifest. Being wrong in the
+    strict direction drops a real reference from the audit entirely, and that
+    failure is silent.
+    """
+    text = text or ""
+    if _REF_YEAR.search(text) or _REF_DOI.search(text) or _REF_ARXIV.search(text):
+        return True
+    # An author list, for the references that arrive truncated. Two real
+    # references in one audit reached the resolver as authors plus half a title
+    # and nothing else — no journal, no year — and Crossref found both correct
+    # DOIs from exactly that. A year-only test threw them away.
+    return len(_REF_AUTHORS.findall(text)) >= 2
+
+
 @dataclass
 class Block:
     """One layout block of a source document, with page-level provenance.

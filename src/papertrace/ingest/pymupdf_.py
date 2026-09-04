@@ -16,7 +16,7 @@ try:
 except ImportError:  # pragma: no cover - older PyMuPDF exposes only `fitz`
     import fitz
 
-from ..models import Block, SourceMap, is_references_heading
+from ..models import Block, SourceMap, is_references_heading, looks_like_reference
 
 _HEADING_MAX_LEN = 120
 
@@ -88,6 +88,17 @@ _RESUMABLE_TYPE = "list"
 _MIN_RESUME_RUN = 2
 
 
+def _mostly_references(run) -> bool:
+    """Does this run of same-typed blocks read as a bibliography?
+
+    Half, not all. Requiring every entry would drop a real continuation over one
+    bare-URL entry; requiring one would let a single dated line drag a whole
+    section of back matter in behind it.
+    """
+    hits = sum(1 for b in run if looks_like_reference(b.text))
+    return hits * 2 >= len(run)
+
+
 def references_span(smap: SourceMap) -> tuple[str, bool]:
     """Reference-list text, and whether it was resumed across a section break.
 
@@ -104,10 +115,19 @@ def references_span(smap: SourceMap) -> tuple[str, bool]:
     intervening section. That is worth surfacing rather than hiding: a real
     pre-proof put refs 1-9 on page 7, `Declaration of interests` next, then refs
     10-15 on page 8, and stopping at the first header lost six sources without
-    saying so. Only reference-shaped runs are collected, so the prose of the
-    intervening section never enters the list — which matters because
-    `_parse_bulleted` appends a non-bullet line to the *previous* entry, so a
-    stray paragraph corrupts a reference rather than merely adding noise.
+    saying so. The prose of the intervening section never enters the list, which
+    matters because `_parse_bulleted` appends a non-bullet line to the *previous*
+    entry, so a stray paragraph corrupts a reference rather than merely adding
+    noise.
+
+    A run has to look like references, not merely share their block type. This
+    docstring used to claim that and it was false — the only test was the type,
+    so three `list` blocks under a `TABLE TITLES` heading became references
+    44-46 of a 43-reference paper, and the resolver title-searched the paper's
+    own table captions into table-component DOIs belonging to other papers.
+    The test is applied to the run rather than to each entry: a genuine
+    continuation can hold a bare URL entry with no year, and rejecting the whole
+    run over it would undo the fix above.
     """
     blocks = smap.blocks
     start = next(
@@ -143,7 +163,7 @@ def references_span(smap: SourceMap) -> tuple[str, bool]:
         j = k
         while j < len(rest) and rest[j].type == entry_type:
             j += 1
-        if j - k >= _MIN_RESUME_RUN:
+        if j - k >= _MIN_RESUME_RUN and _mostly_references(rest[k:j]):
             out.extend(b.text for b in rest[k:j])
             resumed = True
         k = j

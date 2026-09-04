@@ -790,3 +790,147 @@ def test_three_generic_domain_words_are_not_an_identity_check():
     assert state == "unverifiable", detail
     # a page with none of the reference's words is still called wrong outright
     assert _title_check_text(ACR_WEBPAGE_REF, RIGHT_PAGE)[0] == "mismatch"
+
+
+# --- the resolver must not mint bibliographic facts -------------------------
+#
+# A first real audit reported 46 references on a paper citing 43. Three of the
+# paper's own table captions reached the resolver, and Crossref answered a title
+# search for "Table 1. Dataset characteristics" with 10.7717/peerj.7892/table-1
+# — a table-component DOI belonging to an unrelated paper. The report published
+# all three as `paywalled`, i.e. as real works held behind a paywall. The title
+# sanity check never fired, because it only runs on the download path and
+# nothing was ever downloaded.
+
+
+def test_a_non_reference_is_never_title_searched(tmp_path):
+    """The parser is fallible, so the resolver is the second line. An entry with
+    no year, no DOI and no arXiv id is not a citable work, and Crossref always
+    answers a title search with *something*."""
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(str(request.url))
+        return httpx.Response(
+            200, json={"message": {"items": [{"DOI": "10.7717/peerj.7892/table-1"}]}}
+        )
+
+    e = RefEntry(num="44", raw="Table 1. Dataset characteristics")
+    resolve_entry(e, tmp_path, "t@example.org", httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert asked == [], f"a table caption was sent to a bibliographic search: {asked}"
+    assert e.status == "no_doi"
+    assert e.doi is None
+
+
+def test_the_refusal_says_why_rather_than_reading_as_a_lookup_failure(tmp_path):
+    """`no_doi` alone would read as "we looked and found nothing"."""
+    e = RefEntry(num="44", raw="Table 2. Accuracy and reliability of thresholding models")
+    resolve_entry(e, tmp_path, "t@example.org", _client({}))
+    assert "not searched by title" in e.reason.lower()
+
+
+def test_a_component_doi_from_a_title_search_is_refused(tmp_path):
+    """Belt and braces: even a reference-shaped entry must not accept a DOI that
+    names a table, a figure or a supplement. Those are parts of a work, never a
+    work, whatever the title matched."""
+    e = RefEntry(num="7", raw="Someone S. A real-looking reference. J Imaging 2020;5:1-9.")
+    client = _client({
+        "api.crossref.org": httpx.Response(
+            200, json={"message": {"items": [{"DOI": "10.7717/peerj-cs.847/table-10"}]}}
+        ),
+    })
+    resolve_entry(e, tmp_path, "t@example.org", client)
+
+    assert e.doi is None, f"accepted a component DOI: {e.doi}"
+    assert e.status == "no_doi"
+    assert "table" in e.reason.lower() or "component" in e.reason.lower()
+
+
+def test_a_component_doi_printed_in_the_reference_is_also_refused(tmp_path):
+    """The same rule wherever the DOI came from — a supplement DOI printed in
+    the reference itself is still not the paper.
+
+    Parsed through `parse_references` on purpose: building a RefEntry by hand
+    leaves `doi` unset, so the test would pass without exercising the guard.
+    """
+    (e,) = parse_references(
+        "References\n1. Someone S. A paper. J Imaging 2020. doi:10.1234/abcd.2020.s001\n"
+    )
+    assert e.doi == "10.1234/abcd.2020.s001", "fixture did not parse the DOI it is testing"
+
+    resolve_entry(e, tmp_path, "t@example.org", _client({}))
+    assert e.status == "no_doi"
+    assert e.doi is None
+
+
+def test_an_ordinary_reference_still_reaches_crossref(tmp_path):
+    """The guard must not gate real references — the failure that matters most
+    here is the strict one, because a dropped reference is silent."""
+    e = RefEntry(num="1", raw="Fixture F, Example E (2023) A method. J Synth Methods 5:e230024")
+    client = _client({
+        "api.crossref.org": httpx.Response(
+            200, json={"message": {"items": [{"DOI": "10.1148/ryai.230024"}]}}
+        ),
+        "api.unpaywall.org": httpx.Response(200, json={}),
+    })
+    resolve_entry(e, tmp_path, "t@example.org", client)
+    assert e.doi == "10.1148/ryai.230024"
+    assert e.status == "paywalled"
+
+
+def test_an_accepted_download_records_what_its_title_check_rested_on(tmp_path):
+    """`title_check: verified` with no evidence beside it is a bare assurance.
+
+    The mismatch branch always stated its detail; the accepting branch threw it
+    away, so a real audit's manifest showed six sources marked verified with
+    nothing a reader could weigh — and `unverifiable` looked the same.
+    """
+    pdf = _real_pdf_bytes("Preoperative deltoid size and fatty infiltration of the deltoid")
+    (e,) = parse_references(
+        "References\n1. B.P. Wiater et al. Preoperative deltoid size and fatty "
+        "infiltration of the deltoid. Clin Orthop 2015. doi:10.1007/s11999-014-4047-2\n"
+    )
+    client = _client({
+        "api.unpaywall.org": httpx.Response(
+            200, json={"best_oa_location": {"url_for_pdf": "https://x/oa.pdf"}}
+        ),
+        "https://x/oa.pdf": httpx.Response(200, content=pdf),
+    })
+    resolve_entry(e, tmp_path, "t@example.org", client)
+
+    assert e.status == "retrieved" and e.title_check == "verified"
+    assert "title check:" in e.reason, e.reason
+    assert "tokens on its first page" in e.reason, e.reason
+
+
+def test_a_truncated_but_real_reference_is_still_searched(tmp_path):
+    """The strict-direction error, caught on real data before it shipped.
+
+    Two references in one audit reached the resolver truncated mid-title —
+    authors plus half a title, no journal, no volume, no year — because the
+    converter cut them short. Crossref found both correct DOIs from exactly
+    that string. A shape test keyed on the year alone refused them, turning two
+    resolvable references into recorded gaps: the silent failure, and the one
+    that matters more than letting a stray caption through.
+    """
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(str(request.url))
+        if "api.crossref.org" in str(request.url):
+            return httpx.Response(
+                200, json={"message": {"items": [{"DOI": "10.1177/0363546512452714"}]}}
+            )
+        return httpx.Response(404)
+
+    e = RefEntry(
+        num="14",
+        raw="M.A. Slabaugh, N.A. Friel, V. Karas, A.A. Romeo, N.N. Verma, B.J. Cole, "
+            "Interobserver and intraobserver reliability of the Goutallier Classification using",
+    )
+    resolve_entry(e, tmp_path, "t@example.org",
+                  httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert any("crossref" in u for u in asked), "a real reference was never looked up"
+    assert e.doi == "10.1177/0363546512452714"
