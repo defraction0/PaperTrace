@@ -392,3 +392,27 @@ def test_an_anchor_state_without_a_crop_still_reaches_every_format(tmp_path, anc
     anchor = next(d for d in claim_disclosures(claim) if d.key == "anchor")
     for name, body in rendered.items():
         assert anchor.token in body, f"anchor token missing from {name}"
+
+
+# --- the HTML reports actually escape what they interpolate ------------------
+
+
+def test_markup_in_source_text_cannot_reach_the_html_reports_unescaped(tmp_path):
+    """`select_autoescape(["html"])` matches names ending `.html`. The templates
+    are named `report_editor.html.j2`, so nothing ever matched and autoescape
+    was off for all three formats — including the two that emit HTML.
+
+    It went unnoticed because Europe PMC pre-escapes the markup in its titles,
+    so the one field carrying angle brackets arrived already safe. Cited source
+    PDFs are downloaded from third parties, and their text reaches the report.
+    """
+    hostile = '<script>alert("xss")</script>'
+    claim = _claim(claim=f"a claim containing {hostile}", verdict="supported")
+    rendered = _render(RunResults(manuscript="m.pdf", claims=[claim]), tmp_path)
+
+    for name in ("report_editor.html", "report_terminal.html"):
+        assert "<script>" not in rendered[name], f"{name} interpolated raw markup"
+        assert "&lt;script&gt;" in rendered[name], f"{name} did not escape it"
+
+    # markdown is not HTML and must not grow entities — it stays verbatim
+    assert hostile in rendered["report.md"]

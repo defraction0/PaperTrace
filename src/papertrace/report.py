@@ -12,7 +12,7 @@ import shutil
 from importlib import resources
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from . import __version__
 from .disclosures import (
@@ -27,10 +27,27 @@ from .models import JUDGMENT_VERDICTS, RefManifest, RunResults, ScoutResults
 TEMPLATES = Path(str(resources.files("papertrace") / "templates"))
 
 
+def _autoescape(name: str | None) -> bool:
+    """Escape interpolations in the HTML looks, never in the markdown one.
+
+    Matched on `.html.j2`, not by `select_autoescape(["html"])`, which tests for
+    a name ending in `.html` — these templates end in `.j2`, so nothing ever
+    matched and every format rendered unescaped. It stayed invisible because the
+    one field that carries angle brackets, a Europe PMC title, arrives
+    pre-escaped from the API; decoding those entities is what made it reachable.
+
+    Cited source PDFs are downloaded from third parties and their text reaches
+    the report, so this is not hypothetical. No template interpolation is meant
+    to emit markup — there is no `|safe` anywhere — so escaping every one of
+    them is the whole fix. Markdown is not HTML and is left alone.
+    """
+    return bool(name) and name.endswith((".html.j2", ".htm.j2"))
+
+
 def _env() -> Environment:
     return Environment(
         loader=FileSystemLoader(TEMPLATES),
-        autoescape=select_autoescape(["html"]),
+        autoescape=_autoescape,
         trim_blocks=True,
         lstrip_blocks=True,
     )
