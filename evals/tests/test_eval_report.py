@@ -64,10 +64,20 @@ def test_rendered_report_carries_the_denial(record):
 
 def test_every_percentage_carries_its_denominator(record):
     md = render(record)
+    # the fuzzy-alignment caveats are the one exemption: they are a property of
+    # the matcher, not a rate over a population. The window looks BOTH ways —
+    # "33% of matches were fuzzy" puts the word after the number, and a
+    # lookbehind-only guard missed it the moment the fraction crossed its
+    # threshold.
+    # the fuzzy-alignment caveats are the one exemption: they describe the
+    # matcher, not a rate over a population. The window looks BOTH ways —
+    # "33% of matches were fuzzy" puts the word after the number, and the
+    # lookbehind-only guard missed it as soon as the fraction crossed its
+    # reporting threshold.
     bare = [
         m.group(0)
         for m in re.finditer(r"\d+%(?! \(\d+/\d+\))", md)
-        if "fuzzy" not in md[max(0, m.start() - 120):m.start()]
+        if "fuzzy" not in md[max(0, m.start() - 120):m.end() + 120]
     ]
     assert not bare, f"percentages without (k/n): {bare}"
 
@@ -238,6 +248,6 @@ def test_no_percentage_from_the_new_sections_is_bare(gold_mini, results_mini):
     bare = [
         m.group(0)
         for m in re.finditer(r"\d+%(?! \(\d+/\d+\))", md)
-        if "fuzzy" not in md[max(0, m.start() - 120):m.start()]
+        if "fuzzy" not in md[max(0, m.start() - 120):m.end() + 120]
     ]
     assert not bare, f"percentages without (k/n): {bare}"

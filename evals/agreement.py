@@ -18,6 +18,12 @@ a reason whenever anything is ABSENT rather than computing over a table it does
 not describe. `fleiss_kappa` itself is correct and is not touched; the guard
 lives in `agreement()`.
 
+**Two figures, and only one of them is a bound.** `agreement_report` reports
+a *penalized* figure over every case seen in any run and a *complete-case*
+figure over the cases every run answered. The penalized one is a true lower
+bound; the complete-case one is a different population and is labelled as such,
+because a dropped case whose true agreement is high pulls the mean down.
+
 **The run count is passed, never inferred.** Deriving `k` from the first vector
 is only safe when something upstream has already guaranteed equal lengths —
 which used to be the caller's intersection filter, the very thing that
@@ -85,60 +91,99 @@ def agreement(vectors: dict[str, list[str]], runs: int) -> dict:
     }
 
 
-def require_one_set_id(set_ids: list[str | None]) -> str | None:
-    """Refuse to aggregate two gold sets. A category error, not a partial view.
+def _distinct(values: list) -> list:
+    """Stable, sortable distinct — values may be dicts, which are unhashable."""
+    out: list = []
+    for v in values:
+        if v not in out:
+            out.append(v)
+    return out
 
-    Averaging agreement across different sets produces a number that describes
-    no set, and there is no caveat that repairs it — so it is refused outright
-    rather than reported with a warning.
+
+def require_one_provenance(set_ids: list[str | None],
+                           provenances: list[dict] | None = None) -> str | None:
+    """Refuse to aggregate runs that are not comparable. Returns the set id.
+
+    Agreement is only defined within one **(set_id, prompt fingerprint,
+    converter)** triple. That sentence was already in the error message while
+    only the first third was checked: two runs of different prompts, or of
+    different ingest backends, were averaged into a single stability figure
+    that describes neither. A disagreement between them is not the model being
+    unstable — it is two different systems being compared.
+
+    A category error, not a partial view, so it is refused outright rather than
+    reported with a caveat.
     """
-    distinct = sorted({s for s in set_ids}, key=lambda x: (x is None, x))
-    if len(distinct) > 1:
+    sets = _distinct(sorted(set_ids, key=lambda x: (x is None, x)))
+    if len(sets) > 1:
         raise ValueError(
             "refusing to aggregate runs from different gold sets: "
-            f"{', '.join(repr(d) for d in distinct)}. Agreement is only "
+            f"{', '.join(repr(d) for d in sets)}. Agreement is only "
             "defined within one (set_id, prompt fingerprint, converter) triple."
         )
-    return distinct[0] if distinct else None
+
+    for field, label in (("prompt_fingerprint", "prompt fingerprint"),
+                         ("converter", "ingest converter")):
+        values = [(p or {}).get(field) for p in (provenances or [])]
+        if len(_distinct(values)) > 1:
+            raise ValueError(
+                f"refusing to aggregate runs with a different {label}: "
+                f"{'; '.join(repr(v) for v in _distinct(values))}. A "
+                f"disagreement between two runs that read different text, or "
+                f"answered different prompts, is not the model being unstable."
+            )
+
+    return sets[0] if sets else None
 
 
 def agreement_report(vectors: dict[str, list[str]], runs: int,
-                     run_labels: list[str], set_ids: list[str | None]) -> dict:
-    """Both bounds, side by side, with the omissions named.
+                     run_labels: list[str], set_ids: list[str | None],
+                     provenances: list[dict] | None = None) -> dict:
+    """Two populations, side by side, with the omissions named.
 
-    Reporting only the intersection silently drops the cases one run never
-    produced; reporting only the union charges the harness's own gaps to the
-    model. Neither number is the answer on its own, so both are printed and
-    labelled as what they are.
+    **Neither is called a bound except the one that is.** The penalized figure
+    counts every case seen in any run and scores an ABSENT vote as
+    disagreement; replacing an ABSENT with any real vote can only raise the
+    modal count, so it genuinely understates stability and is a lower bound.
+
+    The complete-case figure is *not* an upper bound, and calling it one was
+    wrong. It drops cases rather than penalising them, and a dropped case whose
+    true agreement is high pulls the reported mean **down**, not up. With three
+    or more runs the dropped set can sit anywhere relative to the kept set, so
+    the complete-case figure is simply a different population — reported
+    because it answers "how stable was the model where we actually asked it",
+    and labelled as that rather than as a bound in either direction.
     """
-    set_id = require_one_set_id(set_ids)
+    set_id = require_one_provenance(set_ids, provenances)
     if len(run_labels) != runs:
         raise ValueError(
             f"{len(run_labels)} run label(s) for {runs} run(s)")
 
-    intersection_vectors = {c: v for c, v in vectors.items() if ABSENT not in v}
+    complete_vectors = {c: v for c, v in vectors.items() if ABSENT not in v}
     omissions = {
         label: sorted(c for c, v in vectors.items() if v[i] == ABSENT)
         for i, label in enumerate(run_labels)
     }
 
-    union = agreement(vectors, runs)
-    union["bound"] = "lower"
-    union["bound_note"] = (
-        "includes every case seen in any run; a case the harness never asked a "
-        "run about counts as disagreement, so this understates stability")
-    inter = agreement(intersection_vectors, runs)
-    inter["bound"] = "upper"
-    inter["bound_note"] = (
-        "only cases present in every run; excludes the harness's own gaps, so "
-        "this overstates stability")
+    penalized = agreement(vectors, runs)
+    penalized["bound"] = "lower"
+    penalized["bound_note"] = (
+        "every case seen in any run; a case the harness never asked a run about "
+        "counts as disagreement. Filling in any real vote could only raise this, "
+        "so it is a genuine lower bound on stability")
+    complete = agreement(complete_vectors, runs)
+    complete["bound"] = None
+    complete["bound_note"] = (
+        "only cases present in every run — a different population, not a bound. "
+        "The omitted cases could have agreed more or less than the kept ones, so "
+        "this can sit either side of the true figure")
 
     return {
         "set_id": set_id,
         "runs": runs,
         "run_labels": list(run_labels),
-        "union": union,
-        "intersection": inter,
+        "complete_case": complete,
+        "penalized": penalized,
         "omissions": omissions,
         "n_omitted": sum(len(v) for v in omissions.values()),
     }

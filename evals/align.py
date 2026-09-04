@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
@@ -124,6 +125,18 @@ def align(gold: dict, results, min_ratio: float = MATCH_MIN_RATIO,
           min_margin: float = MATCH_MIN_MARGIN) -> Alignment:
     cases = gold["cases"]
     by_case = {c["case_id"]: c for c in cases}
+    # a dict comprehension over claim ids silently keeps the LAST duplicate, so
+    # permuting the prediction list changed which one was graded — the one place
+    # this module's order-independence contract did not hold. Refused, not
+    # repaired: the harness cannot know which of two same-id claims was meant.
+    counts = Counter(c.id for c in results.claims)
+    if clashes := sorted(i for i, n in counts.items() if n > 1):
+        raise ValueError(
+            f"duplicate prediction id(s) in results.json: "
+            f"{', '.join(str(i) for i in clashes)}. Claim ids must be unique — "
+            f"alignment consumes each prediction once, and with a duplicate the "
+            f"input order would decide which one is graded."
+        )
     pool = {c.id: c for c in results.claims}
     a = Alignment()
 

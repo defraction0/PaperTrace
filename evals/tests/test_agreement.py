@@ -10,7 +10,7 @@ from evals.agreement import (
     agreement,
     agreement_report,
     fleiss_kappa,
-    require_one_set_id,
+    require_one_provenance,
 )
 
 
@@ -102,18 +102,22 @@ def test_fleiss_still_runs_when_nothing_is_absent():
     assert "reason" in a["fleiss"] or a["fleiss"]["value"] is not None
 
 
-# --- both bounds, and the omissions by name ---------------------------------
+# --- two populations, and the omissions by name -----------------------------
 
 
-def test_intersection_is_the_upper_bound_and_union_the_lower():
+def test_the_penalized_figure_is_a_lower_bound_and_complete_case_is_not_a_bound():
+    """Renamed from intersection/union. Only the penalized figure is a bound:
+    filling in an ABSENT vote can only raise the modal count. Dropping a case
+    can move the mean either way, so complete-case is a population, not a
+    ceiling — see `agreement_report`."""
     vectors = {"c1": ["supported", "supported"], "c2": ["partial", ABSENT]}
     r = agreement_report(vectors, runs=2, run_labels=["runA", "runB"],
                          set_ids=["demo-v1", "demo-v1"])
-    assert r["intersection"]["bound"] == "upper"
-    assert r["union"]["bound"] == "lower"
-    assert r["intersection"]["cases"] == 1
-    assert r["union"]["cases"] == 2
-    assert r["union"]["modal_agreement"] <= r["intersection"]["modal_agreement"]
+    assert r["penalized"]["bound"] == "lower"
+    assert r["complete_case"]["bound"] is None
+    assert r["complete_case"]["cases"] == 1
+    assert r["penalized"]["cases"] == 2
+    assert r["penalized"]["modal_agreement"] <= r["complete_case"]["modal_agreement"]
 
 
 def test_per_run_omissions_are_named():
@@ -128,9 +132,9 @@ def test_per_run_omissions_are_named():
 def test_two_different_set_ids_are_refused():
     """A category error, not a partial comparison."""
     with pytest.raises(ValueError) as e:
-        require_one_set_id(["demo-v1", "other-v2"])
+        require_one_provenance(["demo-v1", "other-v2"])
     assert "demo-v1" in str(e.value) and "other-v2" in str(e.value)
-    assert require_one_set_id(["demo-v1", "demo-v1"]) == "demo-v1"
+    assert require_one_provenance(["demo-v1", "demo-v1"]) == "demo-v1"
 
     with pytest.raises(ValueError):
         agreement_report({"c1": ["supported", "supported"]}, runs=2,
@@ -154,8 +158,8 @@ def test_score_only_does_not_drop_cases_missing_from_one_run(tmp_path):
     out = score_only.score_agreement([a, b], tmp_path / "out")
     result = json.loads((out / "agreement.json").read_text())
 
-    assert result["union"]["cases"] == 2
-    assert result["intersection"]["cases"] == 1
+    assert result["penalized"]["cases"] == 2
+    assert result["complete_case"]["cases"] == 1
     assert result["omissions"]["b"] == ["c2"]
     md = (out / "AGREEMENT.md").read_text()
-    assert "c2" in md and "upper" in md and "lower" in md
+    assert "c2" in md and "not a bound" in md and "lower bound" in md

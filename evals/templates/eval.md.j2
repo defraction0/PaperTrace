@@ -102,10 +102,13 @@ asserted:
 
 ### Confusion (gold ↓ / predicted →)
 
-| | supported | partial | contradicted |
-|---|---|---|---|
+{# every judgement class gets a column. `not_addressed` had a row and no
+   column, so a run that answered it against a `supported` gold had the
+   mistake counted in the arithmetic and then hidden in the picture. #}
+| gold \ predicted | supported | partial | contradicted | not_addressed |
+|---|---|---|---|---|
 {% for g, row in r.confusion.items() %}
-| **{{ g }}** | {{ row.supported }} | {{ row.partial }} | {{ row.contradicted }} |
+| **{{ g }}** | {{ row.supported }} | {{ row.partial }} | {{ row.contradicted }} | {{ row.not_addressed }} |
 {% endfor %}
 
 ## Retrieval, evidence and coverage
