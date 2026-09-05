@@ -197,7 +197,9 @@ tool restriction. Running an audit from inside a repo silently fed that repo's
 own `CLAUDE.md` into every verdict, undisclosed anywhere in the report, and the
 judge held the CLI's default toolset — Bash, Edit, WebFetch — while it is only
 ever supposed to read the prompt it is given and answer. `_ask` now runs with
-`--safe-mode`, `--tools ""` and `cwd` set to a neutral directory.
+`--safe-mode`, `--tools ""` and `cwd` set to a private, per-process scratch
+directory — not the shared, world-writable system temp root, which another
+local user could otherwise plant config into.
 
 ### Fixed — the "no case folder" hint implied a search it never ran
 

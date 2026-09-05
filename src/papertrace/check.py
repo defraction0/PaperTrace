@@ -157,6 +157,19 @@ def claude_available() -> bool:
     return shutil.which("claude") is not None
 
 
+_SCRATCH_CWD: str | None = None
+
+
+def _scratch_cwd() -> str:
+    # /tmp itself is shared and world-writable; a private 0700 directory (one per
+    # process, reused across calls) keeps another local user from planting
+    # anything the judging call would walk into
+    global _SCRATCH_CWD
+    if _SCRATCH_CWD is None:
+        _SCRATCH_CWD = tempfile.mkdtemp(prefix="papertrace-ask-")
+    return _SCRATCH_CWD
+
+
 def _ask(prompt: str, model: str | None = None) -> str:
     # judging happens wherever the user ran papertrace from — never that repo's own
     # CLAUDE.md, and never with more than the ability to read the prompt and answer
@@ -170,7 +183,7 @@ def _ask(prompt: str, model: str | None = None) -> str:
             capture_output=True,
             text=True,
             timeout=CLAUDE_TIMEOUT,
-            cwd=tempfile.gettempdir(),
+            cwd=_scratch_cwd(),
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"claude -p timed out after {CLAUDE_TIMEOUT}s") from None
