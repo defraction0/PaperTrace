@@ -255,6 +255,22 @@ def _body_before_references(clean_md: str) -> str:
     return "".join(out)
 
 
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+
+
+def _strip_table_rows(text: str) -> str:
+    """Blank out GitHub-flavoured-markdown table rows.
+
+    `clean.md` is flat text with no block-type information, so a table can only
+    be recognised by its own linearized shape (`| ... |`, one row per line \u2014 see
+    `Block` in `models.py`). A results table's own numbers are not citations: a
+    95% CI column like `[51, 77]` matches the same bracket-and-comma syntax as a
+    citation group `[7,8]`, and a live audit read a table's CI columns as
+    citations to references that did not exist at that number.
+    """
+    return "\n".join("" if _TABLE_ROW.match(line) else line for line in text.splitlines())
+
+
 def citation_labels_in_text(clean_md: str) -> set[str]:
     """Every citation label appearing in the body text (References section excluded).
 
@@ -263,9 +279,10 @@ def citation_labels_in_text(clean_md: str) -> set[str]:
     cites, and two independent readings of one fact are only evidence when they
     come from one rule. This wrapper owns the one thing that is local to
     coverage: stopping at the bibliography, so its own `[N]` markers are not
-    counted as body citations.
+    counted as body citations, and skipping table rows, whose own numbers are not
+    citations either.
     """
-    return citation_labels(_body_before_references(clean_md))
+    return citation_labels(_strip_table_rows(_body_before_references(clean_md)))
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +394,9 @@ def citation_occurrences(case_dir: Path) -> tuple[list[dict], str]:
             # the SAME rule `references_section` uses — see models.is_references_heading
             if is_references_heading(b.type, b.text or ""):
                 break
+            if b.type == "table":
+                # a table's own numbers are not citations — see _strip_table_rows
+                continue
             out += _occurrences_in(
                 b.text or "",
                 block=b.id,
@@ -390,7 +410,7 @@ def citation_occurrences(case_dir: Path) -> tuple[list[dict], str]:
         # the same cut as the label reading above: a fallback that counted
         # reference-list markers as occurrences would inflate the denominator of
         # the coverage ratio, not just the label set
-        body = _body_before_references(clean.read_text())
+        body = _strip_table_rows(_body_before_references(clean.read_text()))
         return _occurrences_in(body, block=None, page=None, section=""), "clean.md"
     return [], "none"
 

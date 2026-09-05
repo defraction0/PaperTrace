@@ -180,6 +180,20 @@ reference list, so the audit reported a gap that does not exist — in the one
 figure it computes mechanically so that it cannot. Both the label reading and
 the `clean.md` occurrence fallback now cut on the shared rule.
 
+### Fixed — a table's own numbers were read as citations
+
+`_LABEL_GROUP` matches `[N]` and `[N, M]` alike, and a results table's 95% CI
+column is written exactly that way — `[100, 100]`, `[51, 85]`. Reproduced on a
+real radiology paper: two table blocks holding CI columns supplied every
+square-bracket match in the manuscript, none from prose, and pushed the highest
+cited label the reconciler saw from the paper's real count to 100 — a confident,
+wrong numbering read for a paper whose actual in-text citation style
+(round-bracket numeric) this tool does not yet recognise at all, so the honest
+answer was "unconfirmable," not "[1]-[100]." `_body_citation_labels`,
+`citation_occurrences`, and `citation_labels_in_text` now skip table content —
+by block type where a source map is available, by each row's own GFM `| ... |`
+shape in the `clean.md` fallback, since flat text carries no block type.
+
 ### Fixed — the numbering banner and the per-claim caveat contradicted each other
 
 When the doubt could not be narrowed, the run-level disclosure rendered "every

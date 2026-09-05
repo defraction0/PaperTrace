@@ -764,6 +764,25 @@ def test_references_section_occurrences_are_excluded_structurally(tmp_path):
     assert cov["labels_in_text"] == ["4"]
 
 
+def test_table_ci_brackets_are_not_read_as_citation_occurrences(tmp_path):
+    """A results table's own numbers are not citations. `[54, 100]` in a 95% CI
+    column matches the same bracket-and-comma syntax as a citation group
+    `[7,8]`, and a live audit read a table's CI columns as citations to
+    references #54 and #100 — in both the occurrence walk (block-type aware,
+    reading `source_map.json`) and the label-level count (`labels_in_text`,
+    which reads flat `clean.md` and has no block-type information, so it must
+    recognise the table by its own GFM `| ... |` row shape instead)."""
+    case = _case_with_source_map(tmp_path, [
+        {"id": "block_0001", "page": 1, "text": "Uptake was low [4]."},
+        {"id": "block_0002", "type": "table", "page": 1,
+         "text": "| PPV (%) | 83 (5/6) [54, 100] |\n|---|---|\n"},
+    ])
+
+    cov = coverage_audit(case, [])
+    assert [o["label"] for o in cov["occurrences"]["items"]] == ["4"]
+    assert cov["labels_in_text"] == ["4"]
+
+
 def test_surplus_claims_are_recorded_without_making_anything_uncertain(tmp_path):
     """More claims citing [2] than there are places citing [2]: the extra claim
     is reported as unattributed, and does not cast doubt on the occurrence."""

@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from papertrace.models import RefEntry, citation_labels  # noqa: E402
+from papertrace.models import RefEntry, citation_labels, is_references_heading  # noqa: E402
 from papertrace.refs import _entry  # noqa: E402
 
 # --- the label rule, now shared ---------------------------------------------
@@ -41,6 +41,29 @@ def test_citation_labels_is_the_same_rule_the_coverage_audit_uses():
     assert citation_labels_in_text(body) == {"1", "2", "3", "5", "6", "7"}
     # the wrapper's only job is cutting the reference list off first
     assert citation_labels(body) == {"1", "2", "3", "5", "6", "7", "9"}
+
+
+def test_table_ci_brackets_are_not_read_as_body_citations():
+    """A table's own numbers are not citations. A radiology results table
+    reports 95% CIs as `[51, 77]` — the same bracket-and-comma syntax as a
+    citation group `[7,8]` — and a live audit read a table's `[100, 100]` and
+    `[54, 100]` CI columns as citations to references #100 and #54, inflating
+    the highest cited label from 3 (the real count) to 100 and breaking
+    `reconcile`'s numbering check on a paper with a perfectly ordinary
+    bibliography."""
+    from papertrace.cli import _body_citation_labels
+    from papertrace.models import Block, SourceMap
+
+    smap = SourceMap(doc="m.pdf", pages=1, converter="docling 2.118.1", blocks=[
+        Block("block_0001", "text", 1, (0.0, 0.0, 1.0, 1.0), [],
+              "Uptake was low [1] in prior work [2,3]."),
+        Block("block_0002", "table", 1, (0.0, 0.0, 1.0, 1.0), [],
+              "| Sensitivity (%) | 65 [51, 77] |\n|---|---|\n"),
+    ])
+
+    assert _body_citation_labels(smap, citation_labels, is_references_heading) == {
+        "1", "2", "3"
+    }
 
 
 # --- the Crossref leg --------------------------------------------------------

@@ -433,12 +433,17 @@ def _body_citation_labels(smap, citation_labels, is_references_heading) -> set[s
     `coverage_audit` counts — the two readings are only worth comparing because
     they come from one rule in `models.py`. Passed its two functions rather than
     importing them, so this stays a pure function of the map.
+
+    Table blocks are skipped: a 95% CI column like `[51, 77]` matches the same
+    bracket-and-comma syntax as a citation group `[7,8]`, and a table's own
+    numbers are never citations.
     """
     body: list[str] = []
     for b in smap.blocks:
         if is_references_heading(b.type, b.text):
             break
-        body.append(b.text)
+        if b.type != "table":
+            body.append(b.text)
     return citation_labels("\n".join(body))
 
 
