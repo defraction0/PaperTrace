@@ -267,7 +267,8 @@ def test_run_derives_one_case_folder_and_hands_it_to_every_stage(tmp_path, offli
     # on `run()`.
     monkeypatch.setattr(cli, "_ingest_pipeline", lambda **kw: seen.__setitem__("ingest", kw))
     monkeypatch.setattr(cli, "_refs_pipeline", lambda **kw: seen.__setitem__("refs", kw))
-    for name in ("scout", "check", "highlight", "report"):
+    monkeypatch.setattr(cli, "_report_pipeline", lambda **kw: seen.__setitem__("report", kw))
+    for name in ("scout", "check", "highlight"):
         monkeypatch.setattr(cli, name, (lambda n: lambda **kw: seen.__setitem__(n, kw))(name))
 
     cli.run(manuscript=pdf, case=None, provided=None, email="test@example.org", model=None,

@@ -281,12 +281,17 @@ disclosed.
 
 Output in `<case>/out/` — where `<case>` defaults to a folder named after the
 paper, beside the paper (`paper.pdf` → `./paper/`), and `-c` chooses another.
-It holds `report.md` with inline evidence images, the same
-report as a dark **editor-window** page and as a **terminal-run** page
-(`report_editor.html`, `report_terminal.html`), plus machine-readable
+It holds `report.md` with inline evidence images, plus machine-readable
 `results.json` and `scout.json`. The retrieval manifest is written one level
-up, at `<case>/refs_manifest.json`. Want shareable PNG images of the report
-looks? Add `--png` (one-time setup: `playwright install chromium`).
+up, at `<case>/refs_manifest.json`.
+
+The same report also renders as a dark **editor-window** page and as a
+**terminal-run** page, on request: `--format editor`, `--format terminal`, or
+both (`-f` for short, repeatable). They are for sharing and for screenshots, so
+they are not written unless asked for — `report.md` is the record and is always
+written. Want shareable PNG images of those looks? Add `--png`, which renders
+the HTML it needs whether or not you asked for it (one-time setup:
+`playwright install chromium`).
 
 **`--doi` is the DOI of the paper you are auditing** — not of anything it
 cites. It is optional, it defaults to the DOI printed on the paper's own first
@@ -471,7 +476,9 @@ paper.pdf ─────ingest──▶ clean.md + source_map.json       (page 
       │
       └─highlight─▶ out/evidence/claim_NN.png             (red box on the matched text)
       │
-      └─report──▶ report.md · report_editor.html/png · report_terminal.html/png
+      └─report──▶ report.md          (always)
+                    · report_editor.html/png · report_terminal.html/png
+                                                          (--format / --png)
 ```
 
 The JSON contracts are versioned in [`schemas/`](schemas/). The two skills in

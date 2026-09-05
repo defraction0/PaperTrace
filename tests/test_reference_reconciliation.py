@@ -830,7 +830,7 @@ def test_run_detects_the_doi_once_and_gives_it_to_both_stages(monkeypatch, tmp_p
     monkeypatch.setattr(cli_mod, "scout", lambda **kw: seen.__setitem__("scout", kw.get("doi")))
     monkeypatch.setattr(cli_mod, "check", lambda **kw: None)
     monkeypatch.setattr(cli_mod, "highlight", lambda **kw: None)
-    monkeypatch.setattr(cli_mod, "report", lambda **kw: None)
+    monkeypatch.setattr(cli_mod, "_report_pipeline", lambda **kw: None)
     monkeypatch.setattr(cli_mod, "_guard_case", lambda *a, **k: "hash")
     monkeypatch.setattr(cli_mod, "_open_case", lambda *a, **k: None)
 

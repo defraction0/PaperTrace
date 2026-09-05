@@ -9,6 +9,7 @@ Optional PNGs of the two HTML looks via render.html_to_png.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Sequence
 from functools import partial
 from importlib import resources
 from pathlib import Path
@@ -54,14 +55,46 @@ def _env() -> Environment:
     )
 
 
+# the looks a caller may ask for. "md" is the audit's record; the other two are
+# for sharing and for the screenshots. Published as a tuple so the CLI's help
+# text and the validation below cannot drift apart.
+FORMATS = ("md", "editor", "terminal")
+_HTML_FORMATS = ("editor", "terminal")
+
+
 def write_reports(
     results: RunResults,
     manifest: RefManifest | None,
     out_dir: Path,
-    png: bool = True,
+    png: bool = False,
     scout: ScoutResults | None = None,
+    formats: Sequence[str] = FORMATS,
 ) -> list[Path]:
-    """Write report.md + both HTML looks (+ PNGs if possible). Returns paths."""
+    """Write report.md and any requested HTML looks (+ PNGs if possible).
+
+    `formats` defaults to every look because this is the seam the disclosure-
+    parity suite drives, and that suite has to render all three or it stops
+    comparing anything. The narrower default belongs to the CLI, where the
+    user's intent is. `report.md` is written regardless of what was asked for:
+    it is the record of the audit, not one presentation of it among three.
+
+    An unrecognised name raises. Ignoring it would answer `--format pdf` with a
+    folder containing no PDF and no complaint — the same silent-downgrade shape
+    `ingest_pdf` refuses for an unknown backend.
+    """
+    if unknown := [f for f in formats if f not in FORMATS]:
+        raise ValueError(
+            f"unknown report format(s) {', '.join(map(repr, unknown))} — "
+            f"expected any of {', '.join(FORMATS)}"
+        )
+    if not formats:
+        # `report.md` is written either way, so an empty request contradicts
+        # itself. Say `("md",)` and mean it.
+        raise ValueError(f"no report format requested — expected any of {', '.join(FORMATS)}")
+    # PNG is a screenshot OF the HTML, so asking for one without the other
+    # cannot be honoured literally: it would render nothing and say nothing.
+    html = [f for f in _HTML_FORMATS if f in formats] or (list(_HTML_FORMATS) if png else [])
+
     out_dir.mkdir(parents=True, exist_ok=True)
     env = _env()
 
@@ -96,16 +129,18 @@ def write_reports(
     (out_dir / "report.md").write_text(md)
     written.append(out_dir / "report.md")
 
-    # bundle fonts next to the HTML so the pages are self-contained
+    # bundle fonts next to the HTML so the pages are self-contained — and only
+    # then: ~1 MB of typefaces beside a markdown file is litter
     assets_src = TEMPLATES / "assets"
     assets_dst = out_dir / "assets"
-    if assets_src.exists():
+    if html and assets_src.exists():
         shutil.copytree(assets_src, assets_dst, dirs_exist_ok=True)
 
-    for name in ("report_editor", "report_terminal"):
-        html = env.get_template(f"{name}.html.j2").render(**ctx)
+    for look in html:
+        name = f"report_{look}"
+        rendered = env.get_template(f"{name}.html.j2").render(**ctx)
         html_path = out_dir / f"{name}.html"
-        html_path.write_text(html)
+        html_path.write_text(rendered)
         written.append(html_path)
         if png:
             from .render import html_to_png

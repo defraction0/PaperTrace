@@ -42,7 +42,10 @@ python examples/demo/make_manuscript.py
 papertrace run examples/demo/demo_manuscript.pdf -c demo_case
 
 # then read the results:
-open demo_case/out/report.md                # or report_editor.html / report_terminal.html
+open demo_case/out/report.md
+
+# want the shareable looks too? ask for them:
+#   papertrace report -c demo_case -f editor -f terminal
 ```
 
 No reference PDFs ship with this repo — retrieving them **is** the demo.

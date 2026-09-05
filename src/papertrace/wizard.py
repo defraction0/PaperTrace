@@ -409,9 +409,14 @@ def run_wizard() -> None:
 
     from .cli import run as run_cmd
 
+    # every parameter `run` declares is named here, including the ones taking
+    # their default: `run` is a Typer command, so an omitted argument arrives as
+    # an OptionInfo sentinel rather than the default the help screen shows.
+    # `formats=None` means report.md alone — the PNG answer above already pulls
+    # in the HTML looks when it needs them, since a PNG is a shot of one.
     run_cmd(
         manuscript=paper, case=case, provided=None, email=email, model=None,
-        png=png, backend="auto", with_scout=with_scout, doi=doi,
+        png=png, backend="auto", with_scout=with_scout, doi=doi, formats=None,
     )
 
 

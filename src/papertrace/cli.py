@@ -970,20 +970,32 @@ def highlight(
     console.print(f"[bold]{done}[/bold] evidence crops written")
 
 
-@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
-def report(
-    case: Path = typer.Option(
-        None, "--case", "-c",
-        help="Case folder holding the audit (required unless ./case exists)",
-    ),
-    png: bool = typer.Option(
-        False, "--png/--no-png",
-        help="Also export PNG images of the report looks (one-time: playwright install chromium)",
-    ),
+def _report_pipeline(
+    *,
+    case: Path | None = None,
+    png: bool = False,
+    formats: list[str] | None = None,
 ) -> None:
-    """Render report.md + the editor/terminal looks from results.json."""
+    """`report`'s work, with ordinary Python defaults.
+
+    Keyword-only so `run()` and the tests calling it directly cannot silently
+    receive a Typer `OptionInfo` in place of a value — the flaw that has shipped
+    twice here already. `formats` is the parameter that made this split
+    necessary: `run()` used to call `report(case=..., png=...)`, so a new
+    option would have arrived as a truthy sentinel and rendered whatever that
+    happened to mean.
+    """
     from .models import ScoutResults
-    from .report import write_reports
+    from .report import FORMATS, write_reports
+
+    # a mistyped flag is user error, answered before the results are loaded so
+    # it cannot half-write a report folder — and with a line, not a traceback
+    if bad := [f for f in (formats or []) if f not in FORMATS]:
+        console.print(
+            f"[red]unknown --format {', '.join(bad)}[/red] — "
+            f"expected any of {', '.join(f'[cyan]{f}[/cyan]' for f in FORMATS)}"
+        )
+        raise typer.Exit(2)
 
     case = _stage_case(case)
     results = RunResults.from_json(case / "out" / "results.json")
@@ -995,9 +1007,29 @@ def report(
     # once, minutes earlier and above a wall of model-loading logs; a standalone
     # `papertrace report` never said it at all.
     console.print(_provenance_line(results.converter))
-    paths = write_reports(results, manifest, case / "out", png=png, scout=scout_res)
+    paths = write_reports(results, manifest, case / "out", png=png, scout=scout_res,
+                          formats=formats or ["md"])
     for p in paths:
         console.print(f"  [green]✓[/green] {p.relative_to(case)}")
+
+
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
+def report(
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder holding the audit (required unless ./case exists)",
+    ),
+    png: bool = typer.Option(
+        False, "--png/--no-png",
+        help="Also export PNG images of the report looks (one-time: playwright install chromium)",
+    ),
+    formats: list[str] = typer.Option(
+        None, "--format", "-f",
+        help="Extra looks to render beside report.md: editor | terminal (repeatable)",
+    ),
+) -> None:
+    """Render report.md — and the editor/terminal looks on request — from results.json."""
+    _report_pipeline(case=case, png=png, formats=formats)
 
 
 @app.command(rich_help_panel="Start here")
@@ -1028,6 +1060,10 @@ def run(
         help="DOI of the paper itself — checks the reference numbering against the "
              "publisher's deposited list, and pins the scout's literature search",
     ),
+    formats: list[str] = typer.Option(
+        None, "--format", "-f",
+        help="Extra looks to render beside report.md: editor | terminal (repeatable)",
+    ),
 ) -> None:
     """Full pipeline: ingest → refs → scout → check → highlight → report."""
     console.print(BANNER)
@@ -1044,9 +1080,10 @@ def run(
     # OptionInfo that equals none of the expected strings, and the stage takes a
     # fallback branch. Adding `--case` to `ingest` did exactly that — the backend
     # became an OptionInfo and every audit ingested as flat text while claiming
-    # layout-aware ingest. `_ingest_pipeline` below is the first stage split out
-    # of its Typer command specifically to make that mistake impossible rather
-    # than just avoided by convention — the rest are still convention-only.
+    # layout-aware ingest. `_ingest_pipeline`, `_refs_pipeline` and
+    # `_report_pipeline` below are split out of their Typer commands
+    # specifically to make that mistake impossible rather than just avoided by
+    # convention — `scout`, `check` and `highlight` are still convention-only.
     _ingest_pipeline(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
     # detected once, here, and handed to both consumers. `refs` detects for
     # itself when called alone, so forwarding the raw option left the scout
@@ -1060,7 +1097,7 @@ def run(
         scout(case=case, doi=doi, email=email)
     check(case=case, model=model)
     highlight(case=case, claim=None)
-    report(case=case, png=png)
+    _report_pipeline(case=case, png=png, formats=formats)
     # a four-minute run should not need scrolling to learn how the paper was
     # read, so the backend rides on the last line too
     smap_path = case / "ingest" / "manuscript" / "source_map.json"

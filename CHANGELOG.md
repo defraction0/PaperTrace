@@ -8,6 +8,53 @@ All notable changes to PaperTrace are documented here. The format follows
 
 0.4.1 was never released, so its entries below ship together with these.
 
+### Changed — `report.md` by default; the HTML looks on request ⚠️ **breaking**
+
+Every run wrote three report files and a ~1 MB font bundle, whether or not
+anyone wanted three. `report.md` is what almost every run is read through; the
+editor and terminal looks exist for sharing and for screenshots.
+
+- **`papertrace run` and `papertrace report` now write `report.md` alone.**
+  Add `--format editor`, `--format terminal`, or both — `-f` for short, and
+  repeatable. The fonts are copied only when an HTML look is actually written.
+- **`report.md` is always written**, whatever `--format` says. It is the record
+  of the audit, not one presentation of it among three; a request for only a
+  screenshot look must not leave the case folder without the report itself.
+- **`--png` pulls in the HTML it screenshots.** `--png --format md` cannot mean
+  "photograph a file I told you not to write", so the HTML looks are rendered
+  regardless. Honouring it literally would have produced no PNG and said
+  nothing about why.
+- **A mistyped format is refused** — `unknown --format pdf — expected any of
+  md, editor, terminal`, exit 2, checked before `results.json` is even loaded
+  so a bad flag cannot half-write a report folder. Silently ignoring it would
+  answer `--format pdf` with a folder containing no PDF and no complaint, which
+  is the same shape as the unknown-backend bug `ingest_pdf` already refuses.
+- `write_reports()` itself still defaults to every format. It is the seam the
+  disclosure-parity suite drives, and that suite has to render all three or it
+  stops comparing anything; the narrower default belongs to the CLI, where the
+  user's intent actually is.
+
+**To restore the old behaviour:** `papertrace run paper.pdf -f editor -f
+terminal`.
+
+### Fixed — a wizard-driven audit would have crashed at the report stage
+
+Found while adding `--format`, and the third appearance of a bug class this
+codebase has now met three times. `run_wizard()` calls `cli.run` as a plain
+Python function, and Typer's declared defaults are `OptionInfo` sentinels
+rather than the values `--help` displays — so the new parameter the wizard did
+not name would have arrived as a sentinel, reached `write_reports`, and raised
+on not being iterable. After every paid model call had already been made.
+
+- `report` is now split into the Typer command and `_report_pipeline()`, which
+  is keyword-only with ordinary Python defaults — the same treatment `ingest`
+  and `refs` already had, and for the same reason. `run()` calls the pipeline
+  function.
+- The wizard now names **every** parameter `run` declares, and a new test
+  asserts that against `inspect.signature(cli.run)` rather than against a list
+  of names — so the next parameter added to `run` is caught without anyone
+  remembering to come back and update the test.
+
 ### Changed — the headline no longer reads as a verdict on the whole claim
 
 `❌ CONTRADICTED` is one source's verdict. On a claim citing four references it
