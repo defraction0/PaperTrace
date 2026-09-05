@@ -1069,26 +1069,72 @@ def resolve_entry(
 
     dest = dest_dir / f"{entry.slug}.pdf"
 
+    refused: Path | None = None
     if candidates := _provided_candidates(entry, provided_dir):
-        provided = candidates[0]
-        entry.status, entry.resolver = "provided", "user"
-        entry.pdf_path = str(provided)
-        others = f" ({len(candidates)} candidates matched; picked the closest name)" \
-            if len(candidates) > 1 else ""
-        # a provided file is title-checked like a downloaded one, but a failure
-        # is DISCLOSED, not fatal: the user named this file, there is nothing to
-        # fall back to, and a scanned PDF yields no text at all
-        state, detail = _title_check(entry, provided)
-        entry.title_check = state
-        if state == TITLE_VERIFIED:
-            note = f" — identity confirmed: {detail}"
-        else:
-            # "unverified" for both remaining states, because both mean the same
-            # thing to a reader: nobody established that this file is the paper
-            note = f" — identity unverified: {detail}"
-        entry.reason = f"matched {provided.name} in your sources folder{others}{note}"
-        return entry
+        # Ranked, and now read in order rather than by taking the first: a
+        # reference whose slug carries a uniqueness suffix can match a file named
+        # after the base slug, and that file is another reference's paper.
+        chosen: tuple[Path, str, str] | None = None
+        for cand in candidates:
+            state, detail = _title_check(entry, cand)
+            # `named` is the user's own act: they wrote this reference's slug on
+            # the file. Then a failed check is DISCLOSED, not fatal — they chose
+            # it, there is nothing to fall back to, and a scanned PDF yields no
+            # text at all. A token match is not their act, so a check that says
+            # "different paper" is a reason to keep looking.
+            named = cand.stem.lower() == (entry.slug or "").lower()
+            if named or state != TITLE_MISMATCH:
+                chosen = (cand, state, detail)
+                break
+            refused = refused or cand
+        if chosen is not None:
+            provided, state, detail = chosen
+            entry.status, entry.resolver = "provided", "user"
+            entry.pdf_path = str(provided)
+            if len(candidates) == 1:
+                others = ""
+            elif provided is candidates[0]:
+                others = f" ({len(candidates)} candidates matched; picked the closest name)"
+            else:
+                # the closest-named file is positively a different paper, so the
+                # reader is told the pick was not the obvious one
+                others = (
+                    f" ({len(candidates)} candidates matched; the closest-named "
+                    "ones are other papers)"
+                )
+            entry.title_check = state
+            if state == TITLE_VERIFIED:
+                note = f" — identity confirmed: {detail}"
+            else:
+                # "unverified" for both remaining states, because both mean the
+                # same thing to a reader: nobody established that this file is
+                # the paper the reference names
+                note = f" — identity unverified: {detail}"
+            entry.reason = f"matched {provided.name} in your sources folder{others}{note}"
+            return entry
 
+    _resolve_by_retrieval(entry, dest, email, client)
+    if refused is not None and not entry.pdf_path:
+        # the chain may still have found the real paper; where it did not, the
+        # file this tool looked at and declined is named, because a gap that
+        # withholds what the tool already knows is the failure this codebase
+        # exists to avoid
+        entry.reason = (
+            f"{entry.reason}. {refused.name} in your sources folder was set aside: its "
+            "first page is a different paper, and the file is not named for this "
+            "reference, so nobody chose it for this one"
+        )
+    return entry
+
+
+def _resolve_by_retrieval(
+    entry: RefEntry, dest: Path, email: str, client: httpx.Client
+) -> RefEntry:
+    """The online chain: arXiv, then a DOI, then Unpaywall and Europe PMC.
+
+    Split out of `resolve_entry` so a provided file that was set aside can be
+    reported after the chain has run, rather than at each of its nine exits.
+    """
     try:
         if arxiv := ARXIV_RE.search(entry.raw):
             url = f"https://arxiv.org/pdf/{arxiv.group(1)}"

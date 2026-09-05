@@ -129,6 +129,25 @@ the machine running it had network. Same shape as the bug that made `ingest`'s
 backend an `OptionInfo` and read every paper as flat text while reporting
 layout-aware ingest.
 
+### Fixed — a `--provided` file could be judged as two different references
+
+`_unique_slugs` renames the second of two colliding entries to
+`smith-2019-r7`, and `_provided_candidates` drops slug tokens of three
+characters or fewer — so `r7`, the only thing telling the two apart, was
+invisible and `sources/smith-2019.pdf` matched both. Measured: entry [7] came
+back `status=provided`, `title_check=mismatch`, pointing at entry [2]'s paper,
+and its claims would have been judged against it. Worse than before slugs were
+made unique, when both entries shared a slug and were grouped into one source.
+
+"Disclosed, not fatal" still holds for a file the user *named* for a reference —
+they chose it, there is nothing to fall back to, and a scanned PDF yields no
+text to check. It does not hold for a file a token match found: nobody chose it
+for that reference, so a title check that says "different paper" is now a reason
+to keep looking. Candidates are read in rank order until one is usable, and
+where the retrieval chain then finds nothing, the reason names the file that was
+set aside and why — a gap that withholds what the tool already knows is the
+failure this project exists to avoid.
+
 ### Fixed — the coverage audit had its own idea of where the bibliography begins
 
 `coverage_audit` cut the body at `^##\s+(references|bibliography|literature)`,

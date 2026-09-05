@@ -1121,3 +1121,62 @@ def test_a_narrowed_doubt_still_taints_only_the_tail():
     m = RefManifest(manuscript="p.pdf", entries=_parsed(list(range(1, 20))),
                     numbering_verified=False, unverified_from=15)
     assert [x for x in ("1", "14", "15", "19") if m.label_is_doubtful(x)] == ["15", "19"]
+
+
+# --- a file nobody named for this reference ----------------------------------
+
+
+def _paper_pdf(path: Path, title: str, byline: str):
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), title, fontsize=14)
+    page.insert_text((72, 140), byline, fontsize=10)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_a_token_matched_provided_file_that_is_another_paper_is_not_used(tmp_path, monkeypatch):
+    """`_unique_slugs` renames the second of two colliding entries to
+    `smith-2019-r7`, and `_provided_candidates` drops slug tokens of three
+    characters or fewer — so `r7`, the only thing distinguishing them, is
+    invisible and `sources/smith-2019.pdf` matches *both*. Measured before this
+    change: entry [7] came back `status=provided`, `title_check=mismatch`,
+    `pdf_path=smith-2019.pdf` — judged against entry [2]'s paper.
+
+    "Disclosed, not fatal" is right for a file the user *named* for a reference:
+    they chose it, there is nothing to fall back to, and a scanned PDF yields no
+    text to check. It is wrong for a file a token match found, because nobody
+    chose it for this reference and the check says it is a different paper. Then
+    the honest move is to keep looking, and to say the file was set aside."""
+    import papertrace.refs as refs_mod
+    from papertrace.refs import _entry, _unique_slugs, resolve_all
+
+    monkeypatch.setattr(refs_mod, "_crossref_doi", lambda client, raw, email: None)
+    prov, dest = tmp_path / "sources", tmp_path / "resolved"
+    dest.mkdir()
+    _paper_pdf(prov / "smith-2019.pdf",
+               "Ultrasound elastography of the thyroid gland in children",
+               "Smith J, Jones B. Journal of Paediatric Radiology 2019;12:100-9.")
+
+    ents = _unique_slugs([
+        _entry("2", "Smith J, Jones B. Ultrasound elastography of the thyroid gland in "
+                    "children. J Paediatr Radiol 2019;12:100-9."),
+        _entry("7", "Smith J, Patel R. Deep learning segmentation of renal cysts on CT. "
+                    "Eur J Radiol 2019;44:220-8."),
+    ])
+    two, seven = resolve_all(ents, dest, email="t@example.org", provided_dir=prov)
+
+    # the reference the file really is: unchanged, and confirmed
+    assert (two.status, two.title_check) == ("provided", "verified")
+    assert Path(two.pdf_path).name == "smith-2019.pdf"
+
+    # the other one is not judged against it
+    assert seven.pdf_path is None, "a claim would be judged against another paper"
+    assert seven.status == "no_doi"
+    # and the file it declined is named, because the tool knows it considered one
+    assert "smith-2019.pdf" in seven.reason
+    assert "different paper" in seven.reason
