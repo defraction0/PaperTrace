@@ -24,6 +24,16 @@
             "null"
           ]
         },
+        "identity": {
+          "type": "string",
+          "description": "did anyone establish that the record found is this paper? Compared on the record's title and the paper's own. `resolved_via` cannot answer it: a DOI read off page 1 also resolves `via: doi`. Absent on scout.json written before the check; absent and \"\" mean not recorded, never confirmed.",
+          "enum": [
+            "confirmed",
+            "unverified",
+            "mismatch",
+            ""
+          ]
+        },
         "resolved_via": {
           "type": "string",
           "enum": [

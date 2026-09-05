@@ -686,10 +686,18 @@ def scout(
     if res.error:
         console.print(f"[yellow]⚠ scout incomplete: {res.error}[/yellow]")
     if res.paper_title:
+        # `via doi` stopped meaning "identified reliably" when `run` began
+        # reading the DOI off page 1, so the warning turns on the identity check
+        # rather than on which query happened to answer
+        caveat = {
+            "confirmed": "",
+            "unverified": " — identity unverified, check this is your paper",
+            "mismatch": " — NOT this paper",
+        }.get(res.paper_identity, " — wrong paper? pass --doi")
         console.print(
             f"paper: [bold]{res.paper_title[:80]}[/bold] ({res.paper_year or '?'})"
-            f" · [dim]identified via {res.resolved_via}"
-            f"{' — wrong paper? pass --doi' if res.resolved_via == 'title' else ''}[/dim]"
+            f" · [dim]identified via {res.resolved_via}, identity "
+            f"{res.paper_identity or 'not recorded'}{caveat}[/dim]"
         )
     console.print(f"[green]▸[/green] published since: [bold]{len(res.newer)}[/bold] candidates")
     for h in res.newer[:5]:

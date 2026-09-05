@@ -128,7 +128,7 @@ flagged for you to weigh.
 ## Literature scout — what the reference list doesn't know
 
 {% if scout.paper_title %}
-Paper identified as *{{ scout.paper_title }}* ({{ scout.paper_year or "year?" }}{% if scout.paper_doi %} · `{{ scout.paper_doi }}`{% endif %}) via {{ scout.resolved_via }} lookup on Europe PMC.
+Paper identified as *{{ scout.paper_title }}* ({{ scout.paper_year or "year?" }}{% if scout.paper_doi %} · `{{ scout.paper_doi }}`{% endif %}) via {{ scout.resolved_via }} lookup on Europe PMC{% if scout.paper_identity == 'confirmed' %}, and its title matches this paper{% elif scout.paper_identity == 'unverified' %} — **nobody established that this record is your paper**: there was too little title to compare, so read the two registers below with that in mind{% elif scout.paper_identity == 'mismatch' %} — **this record is not your paper**{% endif %}.
 {% endif %}
 {% if scout.error %}
 

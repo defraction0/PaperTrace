@@ -16,7 +16,14 @@ from pathlib import Path
 import httpx
 
 from . import __version__
-from .models import RefEntry, looks_like_reference
+from .models import (
+    _TITLE_MIN_MATCHES,
+    _URL_RE,
+    RefEntry,
+    _title_tokens,
+    looks_like_reference,
+    titles_match,
+)
 
 # Two user agents on purpose. The contact address is sent ONLY to the services
 # that ask for one — Unpaywall requires it, Crossref's polite pool uses it. One
@@ -398,16 +405,9 @@ def deposit_is_this_paper(manuscript_title: str, record_title: str) -> bool | No
     paper, so the count test would pass and the report would print "numbering
     confirmed" over another paper's bibliography.
     """
-    a, b = _title_tokens(manuscript_title), _title_tokens(record_title)
-    # Too few distinctive words on either side to tell — the same floor, and the
-    # same constant, that stops `_title_check` calling a thin comparison a
-    # mismatch. `paper_title` is a heuristic over the first blocks of a page, so
-    # a journal banner or an author line lands here regularly, and a confident
-    # `False` on two comparable words would discard a good deposit over the
-    # layout of a first page.
-    if min(len(a), len(b)) < _TITLE_MIN_MATCHES:
-        return None
-    return len(a & b) / min(len(a), len(b)) >= 0.5
+    # the rule itself is `models.titles_match` — `scout` asks the same question
+    # of a Europe PMC record, and neither module may import the other
+    return titles_match(manuscript_title, record_title)
 
 
 def crossref_reference_list(
@@ -814,35 +814,6 @@ def _download_pdf(client: httpx.Client, url: str, dest: Path) -> bool:
 
 # journal names and boilerplate that appear on almost any first page —
 # they must not let a wrong paper pass the title check
-_TITLE_STOPWORDS = frozenset(
-    {"commun", "nature", "science", "journal", "lancet", "article",
-     "elsevier", "springer", "wiley", "volume", "press", "https"}
-)
-
-_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
-
-
-def _title_tokens(raw: str) -> set[str]:
-    """The reference's own distinctive words — URLs removed first.
-
-    A URL is not part of a title, and a *tracking parameter* least of all:
-    `?utm_source=chatgpt.com` on a cited news page contributed `chatgpt` and
-    `source` to this set, and the wrong paper Crossref returned was an
-    editorial about ChatGPT. Path segments do the same from the other side,
-    inflating the denominator with `firstmedical`, `assuranceprogram` and
-    `publications` — words no first page will carry, so they dilute the ratio
-    the check is measured on.
-    """
-    return set(re.findall(r"[a-z]{5,}", _URL_RE.sub(" ", raw).lower())) - _TITLE_STOPWORDS
-
-
-# Four distinct words, not three. The observed false positive cleared the 0.35
-# ratio on `artificial`, `intelligence` and `medical` — three words that are the
-# subject of most papers in this field, so no stopword list can retire them
-# without rejecting correct matches. Falling below the floor yields
-# `unverifiable`, never `mismatch`: too few words to tell is not evidence of a
-# different paper, and a `mismatch` would discard a possibly-correct download.
-_TITLE_MIN_MATCHES = 4
 
 
 # the three answers the check can give. "unverifiable" used to share `None`

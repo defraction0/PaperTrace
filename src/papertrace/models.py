@@ -66,6 +66,60 @@ def _declared_title_is_usable(title: str) -> bool:
     )
 
 
+_TITLE_STOPWORDS = frozenset(
+    {"commun", "nature", "science", "journal", "lancet", "article",
+     "elsevier", "springer", "wiley", "volume", "press", "https"}
+)
+
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
+
+
+def _title_tokens(raw: str) -> set[str]:
+    """The reference's own distinctive words — URLs removed first.
+
+    A URL is not part of a title, and a *tracking parameter* least of all:
+    `?utm_source=chatgpt.com` on a cited news page contributed `chatgpt` and
+    `source` to this set, and the wrong paper Crossref returned was an
+    editorial about ChatGPT. Path segments do the same from the other side,
+    inflating the denominator with `firstmedical`, `assuranceprogram` and
+    `publications` — words no first page will carry, so they dilute the ratio
+    the check is measured on.
+    """
+    return set(re.findall(r"[a-z]{5,}", _URL_RE.sub(" ", raw).lower())) - _TITLE_STOPWORDS
+
+
+# Four distinct words, not three. The observed false positive cleared the 0.35
+# ratio on `artificial`, `intelligence` and `medical` — three words that are the
+# subject of most papers in this field, so no stopword list can retire them
+# without rejecting correct matches. Falling below the floor yields
+# `unverifiable`, never `mismatch`: too few words to tell is not evidence of a
+# different paper, and a `mismatch` would discard a possibly-correct download.
+_TITLE_MIN_MATCHES = 4
+
+
+def titles_match(a: str, b: str) -> bool | None:
+    """Do these two title strings name the same work? True, False, or None.
+
+    **None means "cannot tell"**, and it is a third answer rather than a
+    collapsed False for a measured reason: `paper_title` is a heuristic over the
+    first blocks of a page, and on a seven-paper spread the block it offers was
+    an article-type banner four times — `CLINICAL GUIDELINE`, `RESEARCH
+    ARTICLE`. Two comparable words are not evidence of a different paper, and a
+    confident False there discards a good deposit or a correct Europe PMC record.
+
+    Lives here because three readers need it and none may import another:
+    `refs` asks whether a Crossref deposit belongs to this paper, `scout` asks
+    the same of a Europe PMC record, and `refs._title_check_text` asks it of a
+    downloaded first page. The rule was `refs`-private until the second reader
+    appeared; a copy in `scout` is the defect this module's other shared rules
+    exist to prevent.
+    """
+    ta, tb = _title_tokens(a), _title_tokens(b)
+    if min(len(ta), len(tb)) < _TITLE_MIN_MATCHES:
+        return None
+    return len(ta & tb) / min(len(ta), len(tb)) >= 0.5
+
+
 def paper_title(smap) -> str:
     """Best-effort title of the paper a source map describes.
 
@@ -677,6 +731,14 @@ class ScoutResults:
     paper_doi: str = ""
     paper_year: int | None = None
     resolved_via: str = ""  # "doi" | "title" | ""
+    # Did anyone establish that the record found is this paper?
+    # "confirmed" | "unverified" | "mismatch" | "" (nothing resolved).
+    # `resolved_via` cannot answer it: `_resolve_paper` records "doi" whenever a
+    # DOI is supplied, and `run` reads the DOI off page 1, so the "wrong paper?"
+    # warning stopped firing exactly when the DOI became a guess. The provenance
+    # is not recoverable here and is the wrong question anyway — the record's own
+    # title is comparable with the paper's.
+    paper_identity: str = ""
     query: str = ""  # the keyword query used for the related search
     date: str = ""
     newer: list[ScoutHit] = field(default_factory=list)
@@ -692,6 +754,7 @@ class ScoutResults:
                 "doi": self.paper_doi,
                 "year": self.paper_year,
                 "resolved_via": self.resolved_via,
+                "identity": self.paper_identity,
             },
             "query": self.query,
             "date": self.date,
@@ -716,6 +779,9 @@ class ScoutResults:
             paper_doi=paper.get("doi", ""),
             paper_year=paper.get("year"),
             resolved_via=paper.get("resolved_via", ""),
+            # absent on scout.json written before the check existed: "" reads as
+            # not recorded, never as confirmed
+            paper_identity=paper.get("identity", ""),
             query=data.get("query", ""),
             date=data.get("date", ""),
             newer=[ScoutHit(**h) for h in data.get("newer", [])],

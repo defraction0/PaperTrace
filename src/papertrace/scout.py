@@ -25,7 +25,14 @@ from pathlib import Path
 
 import httpx
 
-from .models import RefManifest, ScoutHit, ScoutResults, SourceMap, paper_title
+from .models import (
+    RefManifest,
+    ScoutHit,
+    ScoutResults,
+    SourceMap,
+    paper_title,
+    titles_match,
+)
 from .refs import UA
 
 EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest"
@@ -241,6 +248,28 @@ def scout_case(
             res.paper_doi = paper["doi"]
             res.paper_year = paper["year"]
             res.resolved_via = paper["via"]
+
+            # Is the record this paper? `resolved_via == "doi"` used to stand in
+            # for "identified reliably", and it stopped meaning that when `run`
+            # began reading the DOI off page 1 — a funder, data-availability or
+            # erratum DOI resolves to somebody else's paper, and both registers
+            # would then describe that paper while the artifact said `doi`.
+            own_title = _title_from_case(case)
+            identity = titles_match(own_title, paper["title"])
+            res.paper_identity = (
+                "confirmed" if identity else "mismatch" if identity is False else "unverified"
+            )
+            if identity is False:
+                # The registers ARE the finding, so they are not built from a
+                # record this tool can see is not the paper. Empty-and-disclosed,
+                # like every other unreadable source here.
+                res.error = (
+                    f"the DOI {doi} resolves to \u201c{paper['title']}\u201d, which is "
+                    "not this paper — nothing was scanned, because both registers would "
+                    "have described that paper instead. Check the DOI on the paper's "
+                    "first page, or pass the right one with --doi"
+                )
+                return res
 
             self_keys = {k for k in (paper["doi"], _norm_title(paper["title"])) if k}
             seen: set[str] = set()

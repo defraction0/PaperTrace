@@ -299,10 +299,13 @@ retrieved sources — but *which* source a claim is judged against depends on th
 reference numbering, so a `--doi` that confirms the numbering can change the
 audit's answers.
 
-- **Published paper** → pass it, or let it be detected. Without it the scout
-  falls back to matching by title, and a *wrong* match is silent: the scan
-  anchors to somebody else's paper and the two registers describe that one
-  instead. The report flags `resolved_via: title`, but it does not error.
+- **Published paper** → pass it, or let it be detected. Either way the record
+  the scout finds is checked against the paper's own title: a record that is
+  some other paper stops the scan and is reported, rather than anchoring both
+  registers to it, and a comparison too thin to settle leaves the scan in place
+  with the identity disclosed as unverified. `resolved_via` says which query
+  answered — `doi` or `title` — and, since a detected DOI answers `doi` too, it
+  is not the thing to read for reliability; `identity` is.
 - **Unpublished manuscript** → there is no DOI to pass. The scout can never
   identify it, so use `--no-scout` to skip that step rather than reading an
   empty result as "nothing to find"; the guided flow does this for you. The

@@ -358,3 +358,81 @@ def test_the_same_year_register_reaches_all_three_report_formats(tmp_path):
         body = (out / name).read_text()
         assert "A neighbour from the same publication year" in body, f"missing from {name}"
         assert "same year" in body.lower(), f"unlabelled in {name}"
+
+
+# --- is the record behind the DOI this paper? --------------------------------
+#
+# `run` reads the DOI off page 1 and hands it to `scout`, and `_resolve_paper`
+# records `via="doi"` whenever a DOI is supplied — so the "wrong paper? pass
+# --doi" warning, which fires only on `via="title"`, stopped firing exactly when
+# the DOI became a guess. The provenance is not recoverable inside `scout`, and
+# it is the wrong question anyway: the answer is to check the record.
+
+
+def _other_paper_transport():
+    """Europe PMC answers the DOI query with a different paper entirely."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        q = request.url.params.get("query", "")
+        if q.startswith('DOI:"'):
+            return httpx.Response(200, json={"resultList": {"result": [{
+                "id": "77777777", "source": "MED", "doi": "10.1000/OTHER",
+                "title": "Maternal urinary fluoride and child neurobehavior at age three",
+                "pubYear": "2017",
+            }]}})
+        return httpx.Response(200, json={"resultList": {"result": []}})
+
+    return httpx.MockTransport(handler)
+
+
+def test_a_doi_resolving_to_another_paper_is_refused(tmp_path):
+    """A funder, data-availability or erratum DOI on page 1 anchors the whole
+    scan to somebody else's paper, and both registers then describe that paper.
+    The registers are the finding, so they must not be built from a record this
+    tool can see is not the paper."""
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1000/other", transport=_other_paper_transport())
+
+    assert res.paper_identity == "mismatch"
+    assert res.newer == [] and res.overlooked == [] and res.same_year == []
+    assert "not this paper" in res.error
+    assert "Maternal urinary fluoride" in res.error
+
+
+def test_a_confirmed_paper_scans_as_before(tmp_path):
+    """The check must not cost the scan its point."""
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1000/paper", transport=_mock_transport())
+
+    assert res.paper_identity == "confirmed"
+    assert res.resolved_via == "doi"
+    assert res.newer, "the registers still get built"
+
+
+def test_an_identity_too_thin_to_check_is_disclosed_not_assumed(tmp_path):
+    """Same tri-state as everywhere else: a first page whose opening block is a
+    journal banner leaves too little to compare, and that is not a mismatch."""
+    case = _case(tmp_path)
+    smap_path = case / "ingest" / "manuscript" / "source_map.json"
+    smap = SourceMap.from_json(smap_path)
+    smap.blocks[0].text = "RESEARCH ARTICLE"          # the measured real shape
+    smap.blocks[1].text = "Short prose."
+    smap.to_json(smap_path)
+
+    res = scout_case(case, doi="10.1000/paper", transport=_mock_transport())
+    assert res.paper_identity == "unverified"
+    assert res.newer, "an unknown identity does not discard a usable scan"
+
+
+def test_scout_results_round_trip_the_identity(tmp_path):
+    """New field, so: schema vocabulary plus a round trip. An older scout.json
+    loads with `""` — not recorded, never "confirmed"."""
+    import json
+
+    res = ScoutResults(paper_title="X", paper_identity="mismatch")
+    p = tmp_path / "scout.json"
+    res.to_json(p)
+    assert ScoutResults.from_json(p).paper_identity == "mismatch"
+
+    p.write_text(json.dumps({"paper": {"title": "X"}, "newer": [], "overlooked": []}))
+    assert ScoutResults.from_json(p).paper_identity == ""

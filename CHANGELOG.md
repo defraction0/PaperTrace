@@ -129,6 +129,25 @@ the machine running it had network. Same shape as the bug that made `ingest`'s
 backend an `OptionInfo` and read every paper as flat text while reporting
 layout-aware ingest.
 
+### Fixed — the scout's wrong-paper warning stopped firing when the DOI became a guess
+
+`_resolve_paper` records `via: doi` whenever a DOI is supplied, and the console
+warned "wrong paper? pass --doi" only on `via: title` — so when `run` began
+reading the DOI off page 1 and handing it down, a funder, data-availability or
+erratum DOI could anchor the whole literature scan to somebody else's paper
+*and* suppress the only signal that it had. The provenance is not recoverable
+inside `scout`, and it is the wrong question: the record's own title is
+comparable with the paper's.
+
+`ScoutResults` gains `identity` — `confirmed` / `unverified` / `mismatch`,
+additive, and `""` on an older `scout.json` means not recorded rather than
+confirmed. A mismatch stops the scan and says so instead of filling both
+registers from another paper, since the registers *are* the finding. Too little
+title to compare leaves the scan in place and discloses the unknown, the same
+tri-state used for a deposit and for a downloaded source. The title comparison
+itself moved to `models.titles_match`: three readers now need it, and a copy in
+`scout` is the defect the other shared rules in that module exist to prevent.
+
 ### Fixed — a `--provided` file could be judged as two different references
 
 `_unique_slugs` renames the second of two colliding entries to
