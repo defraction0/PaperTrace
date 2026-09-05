@@ -13,6 +13,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import unicodedata
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -157,12 +158,19 @@ def claude_available() -> bool:
 
 
 def _ask(prompt: str, model: str | None = None) -> str:
-    cmd = ["claude", "-p", "--output-format", "json"]
+    # judging happens wherever the user ran papertrace from — never that repo's own
+    # CLAUDE.md, and never with more than the ability to read the prompt and answer
+    cmd = ["claude", "-p", "--output-format", "json", "--safe-mode", "--tools", ""]
     if model:
         cmd += ["--model", model]
     try:
         proc = subprocess.run(
-            cmd, input=prompt, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=CLAUDE_TIMEOUT,
+            cwd=tempfile.gettempdir(),
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"claude -p timed out after {CLAUDE_TIMEOUT}s") from None

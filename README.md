@@ -317,7 +317,11 @@ same paper into its case is fine; pointing a *different* paper at a used
 case is refused, so two audits can never mix.
 
 Batch checking runs on headless Claude Code (`claude -p`) — it inherits your
-existing login, **no API key to configure**. It is the **only step that calls a
+existing login, **no API key to configure**. Each call runs with `--safe-mode`
+and no tool access, from a neutral working directory: the judge only ever
+reads the prompt it is given and returns a verdict, regardless of which
+project's `CLAUDE.md` or `.claude/` config happens to sit above the directory
+you ran `papertrace` from. It is the **only step that calls a
 model**; every other step is plain Python. Ingest, crops and reports are also
 **deterministic** — same input, same output. Retrieval and the scout are
 **not**: they query Crossref, Unpaywall, Europe PMC and arXiv live, so their

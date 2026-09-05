@@ -180,6 +180,15 @@ reference list, so the audit reported a gap that does not exist — in the one
 figure it computes mechanically so that it cannot. Both the label reading and
 the `clean.md` occurrence fallback now cut on the shared rule.
 
+### Fixed — the judging call ran with the wrong repo's rules and a full toolset
+
+`_ask`, the only seam that calls a model, passed no `cwd` to `claude -p` and no
+tool restriction. Running an audit from inside a repo silently fed that repo's
+own `CLAUDE.md` into every verdict, undisclosed anywhere in the report, and the
+judge held the CLI's default toolset — Bash, Edit, WebFetch — while it is only
+ever supposed to read the prompt it is given and answer. `_ask` now runs with
+`--safe-mode`, `--tools ""` and `cwd` set to a neutral directory.
+
 ### Fixed — the "no case folder" hint implied a search it never ran
 
 `check`, `highlight`, `report` and `scout` take no manuscript path, so when
