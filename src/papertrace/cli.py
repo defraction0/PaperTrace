@@ -447,21 +447,6 @@ def ingest(
     _ingest_pipeline(pdf=pdf, out=out, case=case, backend=backend)
 
 
-def _text_opt(value) -> str | None:
-    """A Typer string option as a string, or None — including when nobody passed it.
-
-    Typer's declared default is an `OptionInfo`, not the value the help screen
-    shows, and these stages are also called as plain Python functions by `run`
-    and by the tests. An `OptionInfo` is truthy, so `doi or detect_doi(...)`
-    took it for a real DOI and built a request URL out of its repr: the offline
-    test suite started making live Crossref calls, and passed, because the
-    machine running it had network. This is the same shape as the bug that made
-    `ingest`'s backend an OptionInfo and read every paper as flat text while
-    reporting layout-aware ingest.
-    """
-    return value if isinstance(value, str) and value.strip() else None
-
-
 def _body_citation_labels(smap, citation_labels, is_references_heading) -> set[str]:
     """The `[N]` markers the manuscript's body actually cites.
 
@@ -494,28 +479,25 @@ def _detected_doi(manuscript: Path) -> str | None:
     return detect_doi(manuscript)
 
 
-@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
-def refs(
-    manuscript: Path = typer.Argument(..., exists=True),
-    case: Path = typer.Option(
-        None, "--case", "-c",
-        help="Case folder (default: a folder named after the paper, beside the paper)",
-    ),
-    provided: Path = typer.Option(
-        None, "--provided",
-        help="Folder of reference PDFs you already have; files match by name "
-             "<firstauthor>-<year>.pdf (e.g. pyrros-2023.pdf)",
-    ),
-    email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
-    parse_only: bool = typer.Option(False, "--parse-only", help="List references, no network"),
-    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
-    doi: str = typer.Option(
-        None, "--doi",
-        help="DOI of the paper itself — fetches the publisher's own reference list to "
-             "check the parsed numbering against (default: the DOI printed on page 1)",
-    ),
+def _refs_pipeline(
+    *,
+    manuscript: Path,
+    case: Path | None = None,
+    provided: Path | None = None,
+    email: str | None = None,
+    parse_only: bool = False,
+    backend: str = "auto",
+    doi: str | None = None,
 ) -> None:
-    """Parse the References section, then retrieve open-access copies with an honest manifest."""
+    """Parse the References section, then retrieve open-access copies with an honest manifest.
+
+    Keyword-only and plain-default on purpose: `refs()` below is a Typer
+    command, and Typer's declared defaults are `OptionInfo` objects rather than
+    the values the help screen shows — calling it directly (as `run()` and the
+    tests do) with a shifted or omitted argument used to take that sentinel as
+    the value. This function is what they actually call; `refs()` is a thin CLI
+    adapter over it.
+    """
     from .ingest import ingest_pdf, references_span
     from .models import SourceMap, citation_labels, is_references_heading, paper_title
     from .refs import (
@@ -565,8 +547,7 @@ def refs(
     body_labels = _body_citation_labels(smap, citation_labels, is_references_heading)
     crossref_entries, absent, identity_note = None, "", ""
     if not parse_only:
-        given = _text_opt(doi)
-        doi = given or _detected_doi(manuscript)
+        doi = doi or _detected_doi(manuscript)
         with _client() as client:
             deposit = crossref_deposit(client, doi, _email(email))
         absent = deposit.absent
@@ -700,6 +681,32 @@ def refs(
     )
     console.print("[dim]not obtainable is a recorded result — those claims will be reported as"
                   " unverifiable, never guessed.[/dim]")
+
+
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
+def refs(
+    manuscript: Path = typer.Argument(..., exists=True),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder (default: a folder named after the paper, beside the paper)",
+    ),
+    provided: Path = typer.Option(
+        None, "--provided",
+        help="Folder of reference PDFs you already have; files match by name "
+             "<firstauthor>-<year>.pdf (e.g. pyrros-2023.pdf)",
+    ),
+    email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
+    parse_only: bool = typer.Option(False, "--parse-only", help="List references, no network"),
+    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+    doi: str = typer.Option(
+        None, "--doi",
+        help="DOI of the paper itself — fetches the publisher's own reference list to "
+             "check the parsed numbering against (default: the DOI printed on page 1)",
+    ),
+) -> None:
+    """Parse the References section, then retrieve open-access copies with an honest manifest."""
+    _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
+                    parse_only=parse_only, backend=backend, doi=doi)
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
@@ -1046,9 +1053,9 @@ def run(
     # guessing by title on the very runs where the paper's DOI was sitting on
     # page 1 — and a wrong title match anchors the whole scan to another paper
     # without erroring.
-    doi = _text_opt(doi) or _detected_doi(manuscript)
-    refs(manuscript=manuscript, case=case, provided=provided, email=email,
-         parse_only=False, backend=backend, doi=doi)
+    doi = doi or _detected_doi(manuscript)
+    _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
+                    parse_only=False, backend=backend, doi=doi)
     if with_scout:
         scout(case=case, doi=doi, email=email)
     check(case=case, model=model)

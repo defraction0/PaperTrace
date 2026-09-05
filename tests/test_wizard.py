@@ -367,11 +367,13 @@ def test_run_forwards_the_backend_it_was_given(tmp_path, monkeypatch):
             seen[name] = (a, kw)
         return f
 
-    # `ingest` is split into a Typer command and `_ingest_pipeline`, the plain
-    # function `run` actually calls — see cli.py's comment on `run()`. The rest
-    # are still Typer commands called directly, keyword-only by convention.
+    # `ingest` and `refs` are split into a Typer command plus a `_..._pipeline`
+    # function, the plain function `run` actually calls — see cli.py's comment
+    # on `run()`. The rest are still Typer commands called directly,
+    # keyword-only by convention.
     monkeypatch.setattr(cli, "_ingest_pipeline", spy("ingest"))
-    for stage in ("refs", "scout", "check", "highlight", "report"):
+    monkeypatch.setattr(cli, "_refs_pipeline", spy("refs"))
+    for stage in ("scout", "check", "highlight", "report"):
         monkeypatch.setattr(cli, stage, spy(stage))
     monkeypatch.setattr(cli, "_guard_case", lambda case, manuscript: None)
 

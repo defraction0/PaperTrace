@@ -548,22 +548,19 @@ def test_claim_disclosures_without_a_manifest_is_unchanged():
 # --- the CLI seam -------------------------------------------------------------
 
 
-def test_an_unpassed_doi_option_is_never_mistaken_for_a_doi():
-    """Typer's declared default is an `OptionInfo`, not the value the help
-    screen shows — and these stages are called as plain functions too. An
-    `OptionInfo` is truthy, so `doi or detect_doi(...)` took it for a real DOI
-    and built a Crossref URL out of its repr: the offline test suite began
-    making live calls and passed, because the machine had network.
+def test_refs_pipeline_doi_defaults_to_none_not_an_option_info():
+    """`refs()` used to double as the plain function `run` and the tests called
+    directly, so omitting `doi` fell through to Typer's own declared default —
+    an `OptionInfo`, not `None` — and `doi or detect_doi(...)` took it for a
+    real DOI, building a Crossref URL out of its repr. `_refs_pipeline` is what
+    `run` and the tests call now, with an ordinary Python default, so omitting
+    `doi` here is just `None` — no `_text_opt`-style guard needed.
     """
-    import typer
+    import inspect
 
-    from papertrace.cli import _text_opt
+    from papertrace.cli import _refs_pipeline
 
-    unpassed = typer.Option(None, "--doi", help="DOI of the paper itself")
-    assert _text_opt(unpassed) is None
-    assert _text_opt(None) is None
-    assert _text_opt("   ") is None
-    assert _text_opt("10.1234/real") == "10.1234/real"
+    assert inspect.signature(_refs_pipeline).parameters["doi"].default is None
 
 
 def _one_page_paper(path: Path):
@@ -825,8 +822,11 @@ def test_run_detects_the_doi_once_and_gives_it_to_both_stages(monkeypatch, tmp_p
 
     seen = {}
     monkeypatch.setattr(cli_mod, "_detected_doi", lambda m: "10.1234/detected")
-    monkeypatch.setattr(cli_mod, "ingest", lambda **kw: None)
-    monkeypatch.setattr(cli_mod, "refs", lambda **kw: seen.__setitem__("refs", kw.get("doi")))
+    # `ingest` and `refs` are split into a Typer command plus a `_..._pipeline`
+    # function, the plain function `run` actually calls — see cli.py's comment
+    # on `run()`.
+    monkeypatch.setattr(cli_mod, "_ingest_pipeline", lambda **kw: None)
+    monkeypatch.setattr(cli_mod, "_refs_pipeline", lambda **kw: seen.__setitem__("refs", kw.get("doi")))
     monkeypatch.setattr(cli_mod, "scout", lambda **kw: seen.__setitem__("scout", kw.get("doi")))
     monkeypatch.setattr(cli_mod, "check", lambda **kw: None)
     monkeypatch.setattr(cli_mod, "highlight", lambda **kw: None)

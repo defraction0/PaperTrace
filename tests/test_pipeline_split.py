@@ -37,3 +37,27 @@ def test_ingest_command_delegates_to_the_pipeline_function(tmp_path, monkeypatch
     cli.ingest(pdf=pdf, out=None, case=None, backend="pymupdf")
 
     assert seen == {"pdf": pdf, "out": None, "case": None, "backend": "pymupdf"}
+
+
+def test_refs_pipeline_rejects_a_positional_call():
+    with pytest.raises(TypeError):
+        cli._refs_pipeline(Path("whatever.pdf"))
+
+
+def test_refs_command_delegates_to_the_pipeline_function(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_pipeline(**kw):
+        seen.update(kw)
+
+    monkeypatch.setattr(cli, "_refs_pipeline", fake_pipeline)
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    cli.refs(manuscript=pdf, case=None, provided=None, email=None,
+             parse_only=False, backend="auto", doi=None)
+
+    assert seen == {
+        "manuscript": pdf, "case": None, "provided": None, "email": None,
+        "parse_only": False, "backend": "auto", "doi": None,
+    }
