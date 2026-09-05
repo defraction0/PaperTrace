@@ -1077,3 +1077,47 @@ def test_the_bibliography_confirms_the_deposit_when_the_title_cannot(tmp_path, m
     assert "8 of the 8 references" in manifest.numbering_note
     assert "another paper's bibliography would not" in manifest.numbering_note
     assert "unverified" not in manifest.numbering_note
+
+
+# --- the banner and the per-claim layer must say the same thing --------------
+
+
+def test_an_unnarrowed_doubt_taints_every_label_not_none(tmp_path):
+    """`_numbering` renders "every entry is affected" whenever the doubt could
+    not be narrowed, and `label_is_doubtful` returned False for *every* label
+    for exactly the same reason — `unverified_from is None`. So the report's
+    most severe warn-level disclosure asserted every entry was suspect while
+    marking no claim suspect, and a reader acting on one verdict saw nothing.
+
+    Two shapes land here: a manifest written before the reference list was
+    reconciled at all, and a run where the two readings agree entry for entry
+    with no arbiter to confirm either — the superscript-citation case. In both,
+    nobody established which entries are wrong, and "unknown scope" has to read
+    as "all of them" in both places or in neither."""
+    from papertrace.disclosures import _numbering
+    from papertrace.models import RefManifest
+
+    old = RefManifest(manuscript="p.pdf", entries=_parsed([1, 2, 7]))
+    assert old.numbering_verified is False and old.unverified_from is None
+
+    assert "every entry is affected" in _numbering(old).short
+    assert [x for x in ("1", "2", "7", "99") if old.label_is_doubtful(x)] == \
+        ["1", "2", "7", "99"], "the banner claims every entry and the labels claim none"
+
+
+def test_a_confirmed_numbering_still_taints_nothing():
+    """The other direction, so the fix cannot be "taint everything always"."""
+    from papertrace.models import RefManifest
+
+    ok = RefManifest(manuscript="p.pdf", entries=_parsed([1, 2]),
+                     numbering_verified=True, unverified_from=None)
+    assert [x for x in ("1", "2", "99") if ok.label_is_doubtful(x)] == []
+
+
+def test_a_narrowed_doubt_still_taints_only_the_tail():
+    """And a located divergence keeps its scope: [1]-[14] stay trustworthy."""
+    from papertrace.models import RefManifest
+
+    m = RefManifest(manuscript="p.pdf", entries=_parsed(list(range(1, 20))),
+                    numbering_verified=False, unverified_from=15)
+    assert [x for x in ("1", "14", "15", "19") if m.label_is_doubtful(x)] == ["15", "19"]

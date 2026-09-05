@@ -333,9 +333,23 @@ class RefManifest:
     unverified_from: int | None = None
 
     def label_is_doubtful(self, label: str) -> bool:
-        """Does a claim citing this label rest on a numbering nobody confirmed?"""
-        if self.numbering_verified or self.unverified_from is None:
+        """Does a claim citing this label rest on a numbering nobody confirmed?
+
+        An unconfirmed numbering with **no recorded scope** puts every label in
+        doubt, rather than none. `unverified_from is None` used to answer False
+        for every label while the run-level disclosure rendered "every entry is
+        affected" for the same reason — the report asserted that every entry was
+        suspect and marked no claim suspect, so a reader acting on a single
+        verdict was told nothing. Two shapes reach that state: a manifest
+        written before the list was reconciled at all, and two readings that
+        agree entry for entry with no arbiter to confirm either. Neither
+        establishes *which* entries are wrong, and unknown scope has to read the
+        same way in both places.
+        """
+        if self.numbering_verified:
             return False
+        if self.unverified_from is None:
+            return True
         try:
             return int(label) >= self.unverified_from
         except (TypeError, ValueError):

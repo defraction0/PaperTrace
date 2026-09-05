@@ -129,6 +129,32 @@ the machine running it had network. Same shape as the bug that made `ingest`'s
 backend an `OptionInfo` and read every paper as flat text while reporting
 layout-aware ingest.
 
+### Fixed — the coverage audit had its own idea of where the bibliography begins
+
+`coverage_audit` cut the body at `^##\s+(references|bibliography|literature)`,
+a second boundary rule beside `models.is_references_heading` — which carries a
+comment saying two readers need one rule because two is a defect this project
+already shipped. The regex needs ingest to have *typed* the block as a heading,
+and flat-text ingest guesses headings from font size, so a `References` line at
+body size reaches `clean.md` with no `##`. Reproduced on a generated paper:
+`labels_in_text` came back `['1','2','3']` where `[3]` appears only inside the
+reference list, so the audit reported a gap that does not exist — in the one
+figure it computes mechanically so that it cannot. Both the label reading and
+the `clean.md` occurrence fallback now cut on the shared rule.
+
+### Fixed — the numbering banner and the per-claim caveat contradicted each other
+
+When the doubt could not be narrowed, the run-level disclosure rendered "every
+entry is affected" while `label_is_doubtful` returned False for every label for
+the same reason — `unverified_from is None`. The report asserted that every
+entry was suspect and marked no claim suspect, so a reader acting on a single
+verdict was told nothing. An unconfirmed numbering with no recorded scope now
+puts every label in doubt. Two shapes reach that state: a manifest written
+before the list was reconciled at all, and two readings that agree entry for
+entry with no arbiter to confirm either — the superscript-citation case, which
+is about half of real papers, so those reports now carry the caveat on every
+claim rather than on none.
+
 ### Fixed — a reused source directory could hold a different paper
 
 `check` re-ingests a cited source only when `annotated.md` is missing, and the
