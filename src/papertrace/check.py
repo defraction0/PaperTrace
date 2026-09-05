@@ -229,7 +229,30 @@ def extract_claims(
 # deterministic citation-label coverage audit
 # ---------------------------------------------------------------------------
 
-_REFS_HEADING = re.compile(r"^##\s+(references|bibliography|literature)\b", re.I | re.M)
+def _body_before_references(clean_md: str) -> str:
+    """`clean_md` up to the line where the bibliography begins.
+
+    Uses `models.is_references_heading` — the rule `refs` and the occurrence
+    walk already share — instead of a second regex of its own. That regex
+    required a markdown `##`, which needs ingest to have *typed* the block as a
+    heading; flat-text ingest guesses headings from font size, so a `References`
+    line at body size reaches `clean.md` as plain text. The shared rule is built
+    for exactly that case and says True where this cut said False, and the two
+    disagreeing is how every `[N]` printed in the reference list came to be
+    counted as a body citation — reporting gaps that do not exist, in the one
+    figure the audit computes mechanically so that it cannot.
+
+    A markdown-marked line is read as a heading, so `## References and further
+    reading` cuts. A plain line must be the word and nothing else, which is what
+    keeps `References were checked by hand [1].` from swallowing the paper.
+    """
+    out: list[str] = []
+    for line in clean_md.splitlines(keepends=True):
+        marked = line.lstrip().startswith("#")
+        if is_references_heading("sectionheader" if marked else "text", line):
+            break
+        out.append(line)
+    return "".join(out)
 
 
 def citation_labels_in_text(clean_md: str) -> set[str]:
@@ -242,8 +265,7 @@ def citation_labels_in_text(clean_md: str) -> set[str]:
     coverage: stopping at the bibliography, so its own `[N]` markers are not
     counted as body citations.
     """
-    cut = _REFS_HEADING.search(clean_md)
-    return citation_labels(clean_md[: cut.start()] if cut else clean_md)
+    return citation_labels(_body_before_references(clean_md))
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +387,10 @@ def citation_occurrences(case_dir: Path) -> tuple[list[dict], str]:
 
     clean = manuscript / "clean.md"
     if clean.exists():
-        text = clean.read_text()
-        cut = _REFS_HEADING.search(text)
-        body = text[: cut.start()] if cut else text
+        # the same cut as the label reading above: a fallback that counted
+        # reference-list markers as occurrences would inflate the denominator of
+        # the coverage ratio, not just the label set
+        body = _body_before_references(clean.read_text())
         return _occurrences_in(body, block=None, page=None, section=""), "clean.md"
     return [], "none"
 

@@ -750,11 +750,18 @@ def test_references_section_occurrences_are_excluded_structurally(tmp_path):
 
     cov = coverage_audit(case, [])
     assert [o["label"] for o in cov["occurrences"]["items"]] == ["4"]
-    # and the clean.md regex genuinely cannot see it — the headings carry no `##`,
-    # which is exactly why the structural test is not a restatement of the regex
-    assert "99" in citation_labels_in_text(
+    # The two readings now agree, and that is the point of the fix rather than a
+    # restatement of it. This line used to assert the opposite — that the label
+    # reading DID see [99] — as proof that the occurrence walk's structural test
+    # was doing independent work. It was proof of a defect: the headings here
+    # carry no `##`, the label reading cut on `^##\s+references`, and so a label
+    # printed only inside the reference list was counted as a body citation and
+    # reported as an uncovered gap. Both readings cut on
+    # `models.is_references_heading` now.
+    assert "99" not in citation_labels_in_text(
         (case / "ingest" / "manuscript" / "clean.md").read_text()
     )
+    assert cov["labels_in_text"] == ["4"]
 
 
 def test_surplus_claims_are_recorded_without_making_anything_uncertain(tmp_path):
@@ -1002,3 +1009,36 @@ def test_both_readers_agree_on_where_the_bibliography_starts(tmp_path):
 
     occ, _ = citation_occurrences(tmp_path)
     assert [o["label"] for o in occ] == ["1"]
+
+
+def test_a_bibliography_heading_the_ingest_did_not_mark_still_ends_the_body():
+    """Two boundary rules, one claiming to be the other. `coverage_audit` cut the
+    body at `^##\\s+references`, which needs ingest to have emitted a markdown
+    heading — but flat-text ingest guesses headings from font size, and a
+    `References` line at body size stays body text and is written to `clean.md`
+    without `##`. `models.is_references_heading` is built for exactly that case
+    and says True; this cut said False, so every `[N]` printed in the reference
+    list was counted as a body citation and the audit reported gaps that do not
+    exist. Reproduced on a generated flat-ingest paper: labels_in_text held [3],
+    a label the body never cites.
+    """
+    body = (
+        "## A Study\n\nBody text citing [1] and [2] here.\n\n"
+        "References\n\n"
+        "[1] Alpha A. First paper. 2020. [2] Bravo B. Second. 2021. "
+        "[3] Gamma G. Never cited in body. 2022.\n"
+    )
+    assert citation_labels_in_text(body) == {"1", "2"}
+
+
+def test_a_sentence_about_references_does_not_end_the_body():
+    """The other half of the same rule, and why the plain-line test has to be
+    exact: a body sentence starting with the word must not swallow the paper."""
+    body = "References were checked by hand [1].\n\nMore body citing [2].\n"
+    assert citation_labels_in_text(body) == {"1", "2"}
+
+
+def test_a_marked_heading_with_a_suffix_still_ends_the_body():
+    """Unchanged behaviour for a heading ingest did mark: the prefix rule."""
+    body = "Body cites [1].\n\n## References and further reading\n\n[1] A. 2020. [9] B. 2021.\n"
+    assert citation_labels_in_text(body) == {"1"}
