@@ -411,6 +411,48 @@ def ingest(
         )
 
 
+def _text_opt(value) -> str | None:
+    """A Typer string option as a string, or None — including when nobody passed it.
+
+    Typer's declared default is an `OptionInfo`, not the value the help screen
+    shows, and these stages are also called as plain Python functions by `run`
+    and by the tests. An `OptionInfo` is truthy, so `doi or detect_doi(...)`
+    took it for a real DOI and built a request URL out of its repr: the offline
+    test suite started making live Crossref calls, and passed, because the
+    machine running it had network. This is the same shape as the bug that made
+    `ingest`'s backend an OptionInfo and read every paper as flat text while
+    reporting layout-aware ingest.
+    """
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _body_citation_labels(smap, citation_labels, is_references_heading) -> set[str]:
+    """The `[N]` markers the manuscript's body actually cites.
+
+    Read from the source map and stopped at the bibliography, matching what
+    `coverage_audit` counts — the two readings are only worth comparing because
+    they come from one rule in `models.py`. Passed its two functions rather than
+    importing them, so this stays a pure function of the map.
+    """
+    body: list[str] = []
+    for b in smap.blocks:
+        if is_references_heading(b.type, b.text):
+            break
+        body.append(b.text)
+    return citation_labels("\n".join(body))
+
+
+def _detected_doi(manuscript: Path) -> str | None:
+    """The DOI printed on the paper's own front matter, or None.
+
+    Imported lazily: `wizard` pulls in pymupdf and the interactive stack, and
+    `refs` should not pay for that to look up one string.
+    """
+    from .wizard import detect_doi
+
+    return detect_doi(manuscript)
+
+
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def refs(
     manuscript: Path = typer.Argument(..., exists=True),
@@ -426,11 +468,16 @@ def refs(
     email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
     parse_only: bool = typer.Option(False, "--parse-only", help="List references, no network"),
     backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+    doi: str = typer.Option(
+        None, "--doi",
+        help="DOI of the paper itself — fetches the publisher's own reference list to "
+             "check the parsed numbering against (default: the DOI printed on page 1)",
+    ),
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest."""
     from .ingest import ingest_pdf, references_span
-    from .models import SourceMap
-    from .refs import parse_references, resolve_all
+    from .models import SourceMap, citation_labels, is_references_heading
+    from .refs import _client, crossref_deposit, parse_references, reconcile, resolve_all
 
     case = _resolve_case(case, manuscript)  # named after the paper unless -c said otherwise
     # identity first — the cached source map below is a manuscript-derived
@@ -461,6 +508,41 @@ def refs(
         console.print("[red]No numbered references found — is there a References section?[/red]")
         raise typer.Exit(1)
     console.print(f"parsed [bold]{len(entries)}[/bold] numbered references")
+
+    # The manuscript's own [N] markers arbitrate. Free, offline, and the only
+    # one of the three readings that is definitionally right about what the
+    # paper cites — the parse and the deposit are both candidates measured
+    # against it. --parse-only stays offline, so it gets no second candidate.
+    body_labels = _body_citation_labels(smap, citation_labels, is_references_heading)
+    crossref_entries, absent = None, ""
+    if not parse_only:
+        doi = _text_opt(doi) or _detected_doi(manuscript)
+        with _client() as client:
+            deposit = crossref_deposit(client, doi, _email(email))
+        absent = deposit.absent
+        if deposit.unrenderable:
+            # the tool's shortfall, named as the tool's. A list this one could
+            # only half read must not be mapped onto [1]..[n] — that would drop
+            # the rest silently — but the reader is told whose limitation it is
+            absent = (
+                f"{deposit.publisher or 'the publisher'} deposited {deposit.deposited} "
+                f"references and this tool could only read {len(deposit.entries)} of "
+                "them, so the deposit was set aside rather than used to renumber the "
+                "list. The gap is this tool's, not the publisher's"
+            )
+        elif deposit.entries:
+            crossref_entries = deposit.entries
+            console.print(
+                f"crossref: [bold]{len(deposit.entries)}[/bold] references deposited by "
+                f"{deposit.publisher or 'the publisher'}"
+            )
+
+    entries, rec = reconcile(body_labels, crossref_entries, entries, crossref_absent=absent)
+    if rec.verified:
+        console.print(f"[green]✓ numbering confirmed[/green] — {rec.note}")
+    else:
+        console.print(f"[yellow]⚠ numbering unconfirmed[/yellow] — {rec.note}")
+
     if references_resumed:
         # a list interrupted by another section used to end at the interruption:
         # 9 of 15 references parsed, and the last 6 never retrieved or checked
@@ -500,6 +582,10 @@ def refs(
         entries=entries,
         manuscript_sha256=manuscript_fingerprint(manuscript),  # identity, not the name
         references_resumed=references_resumed,
+        reference_source=rec.source,
+        numbering_verified=rec.verified,
+        numbering_note=rec.note,
+        unverified_from=rec.unverified_from,
     )
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)
@@ -818,7 +904,11 @@ def run(
         True, "--scout/--no-scout",
         help="Also scan Europe PMC for newer + uncited literature",
     ),
-    doi: str = typer.Option(None, "--doi", help="DOI of the paper itself, for the scout step"),
+    doi: str = typer.Option(
+        None, "--doi",
+        help="DOI of the paper itself — checks the reference numbering against the "
+             "publisher's deposited list, and pins the scout's literature search",
+    ),
 ) -> None:
     """Full pipeline: ingest → refs → scout → check → highlight → report."""
     console.print(BANNER)
@@ -837,8 +927,14 @@ def run(
     # `ingest` did exactly that — the backend became an OptionInfo and every
     # audit ingested as flat text while claiming layout-aware ingest.
     ingest(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
+    # detected once, here, and handed to both consumers. `refs` detects for
+    # itself when called alone, so forwarding the raw option left the scout
+    # guessing by title on the very runs where the paper's DOI was sitting on
+    # page 1 — and a wrong title match anchors the whole scan to another paper
+    # without erroring.
+    doi = _text_opt(doi) or _detected_doi(manuscript)
     refs(manuscript=manuscript, case=case, provided=provided, email=email,
-         parse_only=False, backend=backend)
+         parse_only=False, backend=backend, doi=doi)
     if with_scout:
         scout(case=case, doi=doi, email=email)
     check(case=case, model=model)

@@ -90,6 +90,42 @@ def looks_like_reference(text: str) -> bool:
     return len(_REF_AUTHORS.findall(text)) >= 2
 
 
+# How a citation marker is written. The THIRD rule to live here for the reason
+# `is_references_heading` and `looks_like_reference` do: two modules need it and
+# neither may import the other. `check.py` reads these to audit coverage and
+# `refs.py` reads them to learn which references the manuscript actually cites —
+# and those two readings are only worth comparing if they are the same rule.
+_LABEL_GROUP = re.compile(r"\[(\d{1,3}(?:\s*[,–—-]\s*\d{1,3})*)\]")
+
+
+def _expand_label_group(group: str) -> set[str]:
+    labels: set[str] = set()
+    for part in re.split(r"\s*,\s*", group):
+        m = re.match(r"^(\d{1,3})\s*[–—-]\s*(\d{1,3})$", part.strip())
+        if m:
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if lo <= hi and hi - lo <= 50:
+                labels.update(str(n) for n in range(lo, hi + 1))
+        elif part.strip().isdigit():
+            labels.add(part.strip())
+    return labels
+
+
+def citation_labels(text: str) -> set[str]:
+    """Every bracketed numeric citation label in this text: `[3]`, `[7,8]`, `[11-13]`.
+
+    Bracketed numeric styles only — author-year and bare superscripts are not
+    read, here or anywhere else in the tool, and an empty set from a paper that
+    plainly cites things means the style was not recognised rather than that
+    nothing was cited. `check.citation_labels_in_text` wraps this to exclude the
+    reference list; callers that want the whole document use this directly.
+    """
+    labels: set[str] = set()
+    for m in _LABEL_GROUP.finditer(text or ""):
+        labels.update(_expand_label_group(m.group(1)))
+    return labels
+
+
 @dataclass
 class Block:
     """One layout block of a source document, with page-level provenance.
@@ -211,6 +247,29 @@ class RefManifest:
     # reader has to be able to check it, because the alternative failure is
     # silent: a list parsed short simply reports fewer references.
     references_resumed: bool = False
+    # Which reading of the reference list this manifest holds, and whether
+    # anything checked it. `parse_references` was the only stage that could not
+    # report its own failure, and the label is the join key — a numbering off by
+    # one judges every later claim against the wrong paper, silently. The
+    # defaults are the honest reading of an older manifest: the parser's list,
+    # never checked.
+    reference_source: str = "parsed"  # crossref | parsed
+    numbering_verified: bool = False
+    numbering_note: str = ""
+    # the first label from which the numbering is in doubt, or None when it is
+    # not in doubt. 1 means "from the very start" — used when there was only one
+    # candidate, because a single unchecked reading gives no evidence about
+    # *where* it went wrong
+    unverified_from: int | None = None
+
+    def label_is_doubtful(self, label: str) -> bool:
+        """Does a claim citing this label rest on a numbering nobody confirmed?"""
+        if self.numbering_verified or self.unverified_from is None:
+            return False
+        try:
+            return int(label) >= self.unverified_from
+        except (TypeError, ValueError):
+            return False
 
     @property
     def retrieved(self) -> list[RefEntry]:
@@ -225,6 +284,10 @@ class RefManifest:
             "manuscript": self.manuscript,
             "manuscript_sha256": self.manuscript_sha256,
             "references_resumed": self.references_resumed,
+            "reference_source": self.reference_source,
+            "numbering_verified": self.numbering_verified,
+            "numbering_note": self.numbering_note,
+            "unverified_from": self.unverified_from,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -245,6 +308,12 @@ class RefManifest:
             manuscript_sha256=data.get("manuscript_sha256"),
             # .get: a manifest written before this field must still load
             references_resumed=bool(data.get("references_resumed", False)),
+            # an older manifest carries the parser's list and never checked it,
+            # which is exactly what these defaults say
+            reference_source=data.get("reference_source", "parsed"),
+            numbering_verified=bool(data.get("numbering_verified", False)),
+            numbering_note=data.get("numbering_note", ""),
+            unverified_from=data.get("unverified_from"),
         )
 
 

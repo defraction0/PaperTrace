@@ -6,6 +6,96 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ## [0.4.1] — unreleased
 
+### Added — the reference list is now checked against what the paper cites
+
+`parse_references` was the only stage in the pipeline with no way to report its
+own failure. Every other stage has one — `not_retrieved`, `unchecked`, the
+anchor tri-state, `unverifiable`, coverage `uncertain` — but the reference
+parser always returned a confident list, and nothing ever compared it to
+anything. The citation label is the **join key** between a claim and the source
+it is judged against, so a list off by one does not produce a worse audit; it
+produces a confident audit of the wrong papers. One live run misnumbered 27 of
+41 references and said so nowhere.
+
+- **Three-way reconciliation.** Two independent readings of the reference list
+  are taken — the tool's parse of the printed text, and the list the publisher
+  deposited with Crossref — and the manuscript's own `[N]` markers arbitrate
+  between them. A reading is used only if it accounts for exactly the labels
+  the body cites, which under citation-order numbering is a structural test
+  rather than a heuristic: reference *N* is by definition the *N*th first-cited
+  work. `refs` gains `--doi`, defaulting to the DOI printed on page 1.
+- **Crossref is a candidate, not an oracle.** A short deposit is more dangerous
+  than a bad parse because it looks authoritative: mapped onto `[1]`, `[2]` it
+  would silently discard the rest. One record in the test spread carries 2
+  references for a paper citing about 40, and the payload cannot reveal it —
+  Crossref's `references-count` counts what was *deposited*, so it always equals
+  the array length. The body's labels are the only thing that catches it.
+- **A reference deposited as a bare DOI is kept, and a shortfall is named as
+  this tool's.** Some publishers deposit references as a DOI and nothing else;
+  those rendered to an empty string and were dropped, and the run then reported
+  that the publisher had deposited a fraction of its own list — a false
+  accusation, and a plausible-looking number in place of an admission. They are
+  now kept and named after the DOI, which is the best case for retrieval: the
+  DOI is already resolved, so the title search is skipped entirely. Where this
+  tool still cannot render part of a deposit, the deposit is set aside rather
+  than used to renumber, and the disclosure says whose limitation it is.
+  Reference numbering is read from **array order**, never from the `key` field — keys are
+  publisher-specific (`_b0005`, `_bib1`, `3400_CR1`, `bibr1-…`,
+  `R10-45-20210317`), and two schemes turned up inside a single deposit.
+- **Failure is disclosed, not fatal.** When neither reading can be confirmed the
+  audit continues, a run-level disclosure states that the numbering is
+  unconfirmed, and every claim citing a doubtful label carries the caveat beside
+  its verdict — in all three report formats. Where the two readings corroborate
+  each other the doubt starts at their first divergence, so a list that is right
+  for its first 30 entries is not tainted wholesale.
+- **Three absences read differently.** No DOI, no deposit, and Crossref
+  unreachable are three different facts asking the reader for three different
+  things, and are never collapsed into one message.
+- `RefManifest` gains `reference_source`, `numbering_verified`,
+  `numbering_note` and `unverified_from`; all additive, and an older manifest
+  still loads — as a parse whose numbering was never checked, which is what it
+  is. `scripts/reference_audit.py` reports the three counts per PDF, offline of
+  the model and free.
+
+Measured on seven papers across four publishers: all seven deposit a reference
+list, and the check catches both known parse failures (43 parsed vs 41 real;
+106 parsed vs 101 real). Three of the seven cite by **superscript numeral**,
+which flattens to indistinguishable prose when the PDF is converted to text —
+those papers have no arbiter, and are reported as unconfirmed rather than
+presented as checked.
+
+### Fixed — eleven cited sources were downloading to one file
+
+Found by a live run on a JAMA editorial while verifying the above, and worse
+than the `TypeError` that revealed it. `_slug` took the *first* token of the
+reference, stripped non-letters, and fell back to the literal `ref` when nothing
+survived. `_parse_bulleted` leaves the printed list numeral at the front of the
+reference text, so the first token was `1`, `2`, `3`… and **23 of 28 references
+slugged `ref-2024`**. The slug is also the download's filename, so all eleven
+retrieved sources wrote to one path, each overwriting the last — every claim
+citing any of them would have been judged against whichever paper downloaded
+last, with no error.
+
+- `_slug` now takes the first token that actually contains letters.
+- `_unique_slugs` guarantees no two entries in a manifest share a slug, applied
+  to both producers. A genuine collision needs no parser bug — the same first
+  author and year cited twice does it — so uniqueness is enforced rather than
+  assumed to follow from a better slug. The first entry keeps the natural slug,
+  so a `--provided` file named `<author>-<year>.pdf` still matches.
+- `_parse_bulleted` strips the leading numeral, which also kept it out of the
+  Crossref bibliographic search and the title check.
+
+### Fixed — `--parse-only` and the offline test suite reached the network
+
+`refs` is also called as a plain Python function, by `run` and by the tests, and
+Typer's declared default for an option is an `OptionInfo` object rather than the
+value the help screen shows. `OptionInfo` is truthy, so the new `doi or
+detect_doi(...)` took it for a real DOI and built a request URL out of its repr.
+The offline test suite began making live Crossref calls — and passed, because
+the machine running it had network. Same shape as the bug that made `ingest`'s
+backend an `OptionInfo` and read every paper as flat text while reporting
+layout-aware ingest.
+
 ### Fixed — the tool could invent a reference
 
 Found by the first real audit: a 43-reference Elsevier paper was reported as

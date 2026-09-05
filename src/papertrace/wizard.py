@@ -25,9 +25,9 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
 from . import config
-from .check import _LABEL_GROUP, ASK_ATTEMPTS, _expand_label_group, claude_available
+from .check import ASK_ATTEMPTS, claude_available
 from .ingest import _docling_available as docling_available
-from .models import is_references_heading
+from .models import _LABEL_GROUP, _expand_label_group, is_references_heading
 from .refs import DOI_RE
 
 console = Console()

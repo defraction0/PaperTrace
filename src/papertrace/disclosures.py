@@ -1,11 +1,11 @@
 """What a run must disclose — decided once in Python, rendered three times in Jinja.
 
 Deliberately not a shared Jinja macro. The three report formats need genuinely
-different markup, so one macro would carry format switches; `report.py` sets
-`autoescape=select_autoescape(["html"])`, so a macro shared between `.md.j2`
-and `.html.j2` is escaped differently depending on which template imported it —
-a correctness hazard on the one surface whose job is not lying; and a macro is
-testable only by rendering.
+different markup, so one macro would carry format switches; `report.py` escapes
+`.html.j2` templates and not `.md.j2` ones, so a macro shared between them is
+escaped differently depending on which template imported it — a correctness
+hazard on the one surface whose job is not lying; and a macro is testable only
+by rendering.
 
 Every `Disclosure` carries a `token`: a short literal that must appear verbatim
 in **all three** formats. Each format phrases at its own length around it, and
@@ -31,6 +31,8 @@ ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase was found on this page"
 ANCHOR_UNKNOWN_TOKEN = "anchor match not recorded"
 SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
 REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
+NUMBERING_TOKEN = "reference numbering could not be confirmed"
+CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
 
 
 @dataclass(frozen=True)
@@ -377,6 +379,65 @@ def _references_resumed(total: int) -> Disclosure:
     )
 
 
+def _numbering(manifest) -> Disclosure:
+    """Nobody established that entry [N] is the work the manuscript's [N] means.
+
+    The one disclosure that can invalidate every other finding on the page. The
+    citation label is the join key between a claim and the source it is judged
+    against, so a list off by one does not produce a *worse* audit — it produces
+    a confident audit of the wrong papers. One live run misnumbered 27 of 41
+    references and said so nowhere, because `parse_references` was the only
+    stage in the pipeline that could not report its own failure.
+    """
+    start = manifest.unverified_from
+    scope = (
+        f"Entries from [{start}] onward are affected"
+        if start and start > 1
+        else "Every entry is affected"
+    )
+    detail = manifest.numbering_note or (
+        "this manifest was written before the reference list was reconciled against "
+        "the manuscript's own citation labels, so nothing ever checked it"
+    )
+    return Disclosure(
+        key="numbering",
+        level="warn",
+        token=NUMBERING_TOKEN,
+        text=(
+            f"The {NUMBERING_TOKEN} — {detail}. {scope}. The citation label is what "
+            "joins a claim to the source it is judged against, so where the numbering "
+            "is wrong the verdict is about a different paper than the one named. "
+            "Check the retrieval manifest against the paper's own reference list."
+        ),
+        short=f"{NUMBERING_TOKEN} — {scope.lower()}",
+    )
+
+
+def _claim_numbering(claim, manifest) -> Disclosure:
+    """The run-level warning, said again where the verdict is read.
+
+    A banner at the top of a report is not where someone acting on a single
+    verdict is looking. The labels are named, because the reader's next move is
+    to check those specific references by hand.
+    """
+    doubtful = sorted(
+        (r for r in claim.refs if manifest.label_is_doubtful(r)),
+        key=lambda r: int(r),
+    )
+    labels = f"[{'], ['.join(doubtful)}]"
+    return Disclosure(
+        key="claim_numbering",
+        level="warn",
+        token=CLAIM_NUMBERING_TOKEN,
+        text=(
+            f"This claim {CLAIM_NUMBERING_TOKEN}: {labels}. The source judged here was "
+            "chosen by that label, so if the reference list is misnumbered this verdict "
+            "is about a different paper. Verify the reference before relying on it."
+        ),
+        short=f"{CLAIM_NUMBERING_TOKEN}: {labels}",
+    )
+
+
 def run_disclosures(results, manifest=None) -> list[Disclosure]:
     """Every run-level disclosure this RunResults owes its reader.
 
@@ -409,6 +470,10 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
             out.append(_source_identity(unverified, mismatched))
         if getattr(manifest, "references_resumed", False):
             out.append(_references_resumed(len(manifest.entries)))
+        # the numbering is the join key, so an unconfirmed one outranks
+        # everything above it — a reader who stops reading should have read this
+        if not getattr(manifest, "numbering_verified", False):
+            out.append(_numbering(manifest))
     return out
 
 
@@ -488,13 +553,20 @@ def judgement_disclosures(j) -> list[Disclosure]:
     return [d] if d else []
 
 
-def claim_disclosures(claim) -> list[Disclosure]:
-    """Every claim-level disclosure this ClaimResult owes its reader."""
+def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
+    """Every claim-level disclosure this ClaimResult owes its reader.
+
+    `manifest` is optional because most callers have no reason to hold one, and
+    every disclosure that does not depend on it must keep firing without it.
+    `report.py` binds it once so the templates keep their one-argument call.
+    """
     out: list[Disclosure] = []
     if claim.is_multi_source():
         out.append(_sources(claim))
     if claim.unjudged_refs:
         out.append(_unjudged(claim))
+    if manifest is not None and any(manifest.label_is_doubtful(r) for r in claim.refs):
+        out.append(_claim_numbering(claim, manifest))
     if (d := anchor_disclosure(claim)) is not None:
         out.append(d)
     return out

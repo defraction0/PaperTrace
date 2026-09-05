@@ -36,6 +36,10 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 
 > ⚠️ {{ d.text }}
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "claim_numbering" %}
+
+> ⚠️ {{ d.text }}
+{% endfor %}
 {% if c.judgements %}
 {% for j in c.judgements %}
 
@@ -97,7 +101,7 @@ Reported as such — never filled in from memory.
 - **{{ section }}** ({{ items|length }}):
 {% for c in items %}
   - {{ c.label }} · [{{ c.refs|join(', ') }}] {{ c.claim }}{% if c.note %} — *{{ c.note }}*{% endif +%}
-{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs") %}
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs", "claim_numbering") %}
     - {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
 {% endfor %}
 {% for j in c.judgements %}

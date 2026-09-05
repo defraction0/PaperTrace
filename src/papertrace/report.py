@@ -9,6 +9,7 @@ Optional PNGs of the two HTML looks via render.html_to_png.
 from __future__ import annotations
 
 import shutil
+from functools import partial
 from importlib import resources
 from pathlib import Path
 
@@ -81,7 +82,10 @@ def write_reports(
         # disclosures are decided here, once, and only styled by the templates —
         # a format cannot silently drop one without failing the parity test
         "disclosures": run_disclosures(results, manifest),
-        "claim_disclosures": claim_disclosures,
+        # bound here, not in the templates: the numbering taint is the only
+        # claim-level disclosure that needs the manifest, and three templates
+        # each threading a second argument is three chances to drop it
+        "claim_disclosures": partial(claim_disclosures, manifest=manifest),
         "anchor_state": anchor_state,
         "judgement_disclosures": judgement_disclosures,
     }

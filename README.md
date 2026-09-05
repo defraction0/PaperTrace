@@ -77,6 +77,23 @@ went uncited?**
   "never searched for" are different facts and are never merged.
 - Preserve unavailable sources as explicit gaps: a claim whose source
   couldn't be retrieved is `⊘ not retrieved` — recorded, never guessed.
+- **Check its own reference numbering before trusting it.** The citation label
+  is the join key between a claim and the source it is judged against, so a
+  list off by one produces a confident audit of the *wrong papers*. Two
+  independent readings are taken — the tool's parse of the printed list, and
+  the reference list the publisher deposited with Crossref (`refs --doi`,
+  defaulting to the DOI printed on page 1) — and the manuscript's own `[N]`
+  markers arbitrate between them. A reading is used only if it accounts for
+  exactly the labels the body cites. When neither does, the audit continues,
+  the report says the numbering is unconfirmed, and every verdict on a claim
+  citing a doubtful label carries that caveat beside it. Crossref is a second
+  reading, **not** an oracle. A deposit this tool can only partly read is set
+  aside rather than used to renumber a longer list, and the shortfall is
+  reported as the tool's own, not the publisher's. A deposit can also be
+  genuinely short — one record in this project's spread carries 2 references
+  for a paper citing about 40 — and nothing in the payload gives that away,
+  because Crossref's own count field counts what was deposited. The
+  manuscript's labels are what catch it.
 - Report every citation **occurrence** — each bracketed marker at its own place
   in the text — that no extracted claim reached, so a second sentence citing an
   already-checked reference is not silently counted as covered. It also
@@ -121,6 +138,12 @@ went uncited?**
   labels only — `[12]`, `[7,8]`, `[9-11]`. Author-year, parenthetical and
   bare-superscript styles are not audited, and the report says
   *"coverage not audited"* rather than quietly reporting zero gaps.
+  This is not a rare corner: superscript numerals lose their superscript when a
+  PDF is flattened to text, so `burnout.<sup>1</sup>` arrives as `burnout. 1`
+  and is indistinguishable from prose. Three of the seven papers in this
+  project's test spread — Wiley, AMA and one Elsevier journal — cite that way.
+  For those papers the numbering has no arbiter either, so the reference list
+  is reported as unconfirmed rather than presented as checked.
 - Read the source pages as images. In batch mode the model receives the cited
   source as extracted text with `page / block` provenance markers — the page
   picture is for you, in the evidence crop, not for the judge.
@@ -248,18 +271,31 @@ up, at `<case>/refs_manifest.json`. Want shareable PNG images of the report
 looks? Add `--png` (one-time setup: `playwright install chromium`).
 
 **`--doi` is the DOI of the paper you are auditing** — not of anything it
-cites. It is optional, and it feeds only the literature scout, which has to
-identify your paper in Europe PMC before it can look for work published since
-or work in the field you did not cite. Nothing else in the audit uses it: the
-verdicts, evidence crops and coverage figures are identical with or without.
+cites. It is optional, it defaults to the DOI printed on the paper's own first
+page, and it feeds two steps:
 
-- **Published paper** → pass it. Without it the scout falls back to matching by
-  title, and a *wrong* match is silent: the scan anchors to somebody else's
-  paper and the two registers describe that one instead. The report flags
-  `resolved_via: title`, but it does not error.
-- **Unpublished manuscript** → there is no DOI to pass, and the scout can never
-  identify it. Use `--no-scout` to skip the step rather than reading an empty
-  result as "nothing to find". The guided flow does this for you.
+- **The reference-numbering check** (`refs`, and so `run`). It fetches the
+  reference list the publisher deposited with Crossref, as a second reading to
+  measure the tool's own parse against. Without it there is only one reading,
+  and the manifest says the numbering is unconfirmed rather than implying it
+  was checked.
+- **The literature scout**, which has to identify your paper in Europe PMC
+  before it can look for work published since, or work in the field you did
+  not cite.
+
+Verdicts, evidence crops and coverage figures still come only from the
+retrieved sources — but *which* source a claim is judged against depends on the
+reference numbering, so a `--doi` that confirms the numbering can change the
+audit's answers.
+
+- **Published paper** → pass it, or let it be detected. Without it the scout
+  falls back to matching by title, and a *wrong* match is silent: the scan
+  anchors to somebody else's paper and the two registers describe that one
+  instead. The report flags `resolved_via: title`, but it does not error.
+- **Unpublished manuscript** → there is no DOI to pass. The scout can never
+  identify it, so use `--no-scout` to skip that step rather than reading an
+  empty result as "nothing to find"; the guided flow does this for you. The
+  numbering check has nothing to compare against either, and says so.
 
 **One case folder per paper.** `case` is only the default name — give each
 paper its own (`papertrace run zhang2025.pdf -c zhang2025`). Re-running the

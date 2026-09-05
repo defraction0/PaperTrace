@@ -19,12 +19,15 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from .models import (
+    _LABEL_GROUP,
     JUDGMENT_VERDICTS,
     PIPELINE_STATES,
     ClaimResult,
     RefManifest,
     SourceJudgement,
     UncitedClaim,
+    _expand_label_group,
+    citation_labels,
     is_references_heading,
 )
 
@@ -226,31 +229,21 @@ def extract_claims(
 # deterministic citation-label coverage audit
 # ---------------------------------------------------------------------------
 
-_LABEL_GROUP = re.compile(r"\[(\d{1,3}(?:\s*[,\u2013\u2014-]\s*\d{1,3})*)\]")
 _REFS_HEADING = re.compile(r"^##\s+(references|bibliography|literature)\b", re.I | re.M)
 
 
-def _expand_label_group(group: str) -> set[str]:
-    labels: set[str] = set()
-    for part in re.split(r"\s*,\s*", group):
-        m = re.match(r"^(\d{1,3})\s*[\u2013\u2014-]\s*(\d{1,3})$", part.strip())
-        if m:
-            lo, hi = int(m.group(1)), int(m.group(2))
-            if lo <= hi and hi - lo <= 50:
-                labels.update(str(n) for n in range(lo, hi + 1))
-        elif part.strip().isdigit():
-            labels.add(part.strip())
-    return labels
-
-
 def citation_labels_in_text(clean_md: str) -> set[str]:
-    """Every citation label appearing in the body text (References section excluded)."""
+    """Every citation label appearing in the body text (References section excluded).
+
+    The label rule itself lives in `models.citation_labels` \u2014 `refs.py` needs the
+    same reading to reconcile the reference list against what the manuscript
+    cites, and two independent readings of one fact are only evidence when they
+    come from one rule. This wrapper owns the one thing that is local to
+    coverage: stopping at the bibliography, so its own `[N]` markers are not
+    counted as body citations.
+    """
     cut = _REFS_HEADING.search(clean_md)
-    body = clean_md[: cut.start()] if cut else clean_md
-    labels: set[str] = set()
-    for m in _LABEL_GROUP.finditer(body):
-        labels.update(_expand_label_group(m.group(1)))
-    return labels
+    return citation_labels(clean_md[: cut.start()] if cut else clean_md)
 
 
 # ---------------------------------------------------------------------------
