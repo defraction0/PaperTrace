@@ -572,6 +572,23 @@ class ClaimResult:
             return "not_addressed"
         return "unchecked"
 
+    def headline_qualifier(self) -> str:
+        """What the headline actually ranged over, for rendering beside it.
+
+        The headline is one source's verdict. On a multi-source claim it reads
+        as a statement about the claim, and a compound sentence may legitimately
+        draw different parts from different references — so `❌ CONTRADICTED`
+        with one dissenter of four overstates by exactly the amount a reader
+        cannot see from the status line alone.
+
+        Empty when there is nothing to qualify: one source means the headline
+        *is* the claim's verdict, and no judgements means nothing was ranked, so
+        naming a comparison that never happened would be its own invention.
+        """
+        if not self.is_multi_source():
+            return ""
+        return f"most adverse of {len(self.judgements)} cited sources"
+
     def deciding_judgement(self) -> SourceJudgement | None:
         """The judgement the headline came from — whose page the crop shows."""
         want = self.headline_verdict()

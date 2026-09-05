@@ -124,7 +124,7 @@
 
 {% for c in checked %}
     <h2><span class="hx">##</span> Claim {{ c.id }}: <span class="q">“{{ c.claim }}”</span></h2>
-    <div class="status {{ c.verdict }}"><span class="lbl">Status:</span> <span class="val">{{ c.label }}</span></div>
+    <div class="status {{ c.verdict }}"><span class="lbl">Status:</span> <span class="val">{{ c.label }}</span>{% if c.headline_qualifier() %} <span class="cap">— {{ c.headline_qualifier() }}</span>{% endif %}</div>
 {% for d in claim_disclosures(c) if d.key == "sources" %}
     <p class="src-summary"><b>{{ d.text }}</b></p>
 {% endfor %}

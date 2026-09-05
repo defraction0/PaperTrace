@@ -117,8 +117,12 @@ went uncited?**
   four references gets four verdicts, four notes and four evidence crops, with a
   count beside it (*"4 cited sources checked: 2 fully support it; 1 partially
   supports it; 1 contradicts it"*). The claim's headline is the **most adverse**
-  verdict any of them gave, so one dissenting source is never averaged away.
-  A source that turns out to say nothing about the claim is `◌ does not address
+  verdict any of them gave, so one dissenting source is never averaged away —
+  and on a multi-source claim the headline says so on its own line
+  (*"❌ contradicted — most adverse of 4 cited sources"*), because a compound
+  sentence may legitimately draw different parts from different references, and
+  one citation conflicting is not the same finding as the statement being
+  wrong. A source that turns out to say nothing about the claim is `◌ does not address
   the claim` — an inapt citation, distinct from a contradiction and from a
   retrieval gap. It is deliberately **not ranked** among the three: while any
   source actually spoke to the claim, that source decides the headline, and
@@ -152,6 +156,12 @@ went uncited?**
   project's test spread — Wiley, AMA and one Elsevier journal — cite that way.
   For those papers the numbering has no arbiter either, so the reference list
   is reported as unconfirmed rather than presented as checked.
+- Count a mixed claim as mixed in the **totals**. The per-claim headline is
+  qualified and the per-source breakdown sits beside it, but the run's summary
+  counts (and `results.json`) tally each claim once, under its headline — so a
+  claim whose four sources split 2 support / 1 partial / 1 contradict appears in
+  the `contradicted` total and nowhere else. Read the totals as *"claims with at
+  least one contradicting source"*, not as *"claims that are wrong"*.
 - Read the source pages as images. In batch mode the model receives the cited
   source as extracted text with `page / block` provenance markers — the page
   picture is for you, in the evidence crop, not for the judge.

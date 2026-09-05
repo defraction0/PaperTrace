@@ -522,3 +522,51 @@ def test_a_claim_no_cited_source_addresses_says_so(tmp_path):
     # Only the new bucket is asserted verbatim; the markdown counts line is the
     # one with the number inline, so it is where that is checkable.
     assert "◌ **Does not address:** 1" in out["report.md"]
+
+
+# --- the headline is one source's verdict, never the claim's ----------------
+
+
+def test_a_multi_source_headline_names_how_many_sources_it_ranked():
+    """`❌ CONTRADICTED` on a four-source claim is one source's verdict, but it
+    reads as a statement about the claim. One dissenter of four is a finding
+    worth surfacing and worth *qualifying* — a compound sentence may draw
+    different parts from different references legitimately."""
+    claim = _four_source_claim()
+    assert claim.verdict == "contradicted"
+    assert claim.headline_qualifier() == "most adverse of 4 cited sources"
+
+
+def test_a_single_source_headline_carries_no_qualifier():
+    """With one source the headline *is* a statement about the claim, and
+    "most adverse of 1" would be noise that trains readers to skip the line."""
+    claim = ClaimResult(id=1, claim="x", location="Intro", refs=["3"],
+                        judgements=[_j("a-2022", "3", "supported", note="Yes.")])
+    claim.apply_headline()
+    assert claim.headline_qualifier() == ""
+
+
+def test_a_claim_with_no_judgements_carries_no_qualifier():
+    """`not_retrieved` ranked nothing. Claiming it was the most adverse of some
+    number of sources would invent a comparison that never happened."""
+    claim = ClaimResult(id=1, claim="x", location="Intro", refs=["3"])
+    assert claim.verdict == "not_retrieved"
+    assert claim.headline_qualifier() == ""
+
+
+def test_the_headline_qualifier_reaches_all_three_formats(tmp_path):
+    """The parity contract again: a status line qualified in the markdown but
+    not the HTML would leave the overstatement exactly where it is most often
+    read."""
+    out = _render(_four_source_claim(), tmp_path)
+    for name, text in out.items():
+        assert "most adverse of 4 cited sources" in text, f"{name} drops the qualifier"
+
+
+def test_a_single_source_claim_is_not_qualified_in_any_format(tmp_path):
+    claim = ClaimResult(id=1, claim="x", location="Intro", refs=["3"],
+                        judgements=[_j("a-2022", "3", "supported", note="Yes.")])
+    claim.apply_headline()
+    out = _render(claim, tmp_path)
+    for name, text in out.items():
+        assert "most adverse of" not in text, f"{name} qualifies a single-source claim"

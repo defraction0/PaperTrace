@@ -105,7 +105,7 @@
 {% endfor %}
       <div class="cl-meta">
         <span style="display:inline-block;width:190px"><span class="lab">status </span><span class="st {{ c.verdict }}"><span class="dot">●</span> {{ c.verdict|upper }}</span></span>
-        {% if c.source_slug %}<span class="lab">from </span><span class="from">{{ c.source_slug }}</span>
+        {% if c.headline_qualifier() %}<span class="loc">{{ c.headline_qualifier() }} · </span>{% endif %}{% if c.source_slug %}<span class="lab">from </span><span class="from">{{ c.source_slug }}</span>
         <span class="loc"> · p.{{ c.source_page }}{% if c.source_block %} · {{ c.source_block }}{% endif %}</span>{% endif %}
       </div>
 {% if c.judgements %}

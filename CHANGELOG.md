@@ -8,6 +8,36 @@ All notable changes to PaperTrace are documented here. The format follows
 
 0.4.1 was never released, so its entries below ship together with these.
 
+### Changed — the headline no longer reads as a verdict on the whole claim
+
+`❌ CONTRADICTED` is one source's verdict. On a claim citing four references it
+reads as a statement about the claim, and a compound sentence may legitimately
+draw different parts from different references — so one dissenting source of
+four overstates by exactly the amount the status line cannot show.
+
+- **A multi-source headline now names what it ranged over**: *"❌ CONTRADICTED
+  — most adverse of 4 cited sources"*, in all three report formats. The rule
+  itself is unchanged and deliberately so: the most adverse verdict is the
+  right triage signal, and one dissenter must never be averaged away. What
+  changes is that it stops being stated unqualified.
+- **Single-source claims are not qualified**, and neither is a claim with no
+  judgements. With one source the headline *is* the claim's verdict, and
+  "most adverse of 1" would be noise that teaches readers to skip the line; a
+  `not_retrieved` claim ranked nothing at all, so naming a comparison that
+  never happened would be its own small invention.
+- No new verdict value, no schema change. A `disputed`/`mixed` state was
+  considered and declined: it would have meant a `VERDICTS` entry, a schema
+  update, a gold-verdict enum change and six render sites, to express something
+  the existing per-source breakdown already shows.
+
+**The limitation this leaves, stated rather than glossed:** the run's summary
+counts and `results.json` still tally each claim once, under its headline. A
+claim splitting 2 support / 1 partial / 1 contradict appears in the
+`contradicted` total and nowhere else. That total means *"claims with at least
+one contradicting source"*, not *"claims that are wrong"*, and the README's
+does-not list now says so. Fixing the totals properly needs the per-source
+population counted separately, which is a larger change than this one.
+
 ### Decided against — two proposals declined in writing, with reasons on file
 
 A full-stack review raised seven items. Five became changes; two are declined,
