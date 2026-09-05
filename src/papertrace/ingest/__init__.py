@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..models import Block, SourceMap
+from ..models import Block, SourceMap, manuscript_fingerprint
 from .pymupdf_ import ingest_blocks_pymupdf, references_section, references_span
 
 __all__ = ["ingest_pdf", "references_section", "references_span", "available_backends"]
@@ -64,7 +64,17 @@ def ingest_pdf(pdf_path: Path, out_dir: Path, backend: str = "auto") -> SourceMa
         pages, blocks = ingest_blocks_pymupdf(pdf_path)
         converter = "pymupdf"
 
-    smap = SourceMap(doc=pdf_path.name, pages=pages, converter=converter, blocks=blocks)
+    # content identity, because `doc` is not one: a cited source is stored as
+    # `<slug>.pdf`, so every source map in a case names a different paper the
+    # same way, and a directory named after a slug was trusted to hold whatever
+    # it held
+    smap = SourceMap(
+        doc=pdf_path.name,
+        pages=pages,
+        converter=converter,
+        blocks=blocks,
+        source_sha256=manuscript_fingerprint(pdf_path),
+    )
     write_outputs(smap, out_dir)
     return smap
 

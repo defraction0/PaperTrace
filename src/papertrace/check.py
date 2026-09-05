@@ -518,6 +518,39 @@ def coverage_audit(case_dir: Path, claims: list[ClaimResult]) -> dict:
     }
 
 
+def _stale_ingest(ingest_dir: Path, pdf_path: str | None) -> bool:
+    """Was `ingest_dir` built from some other PDF than the one now at `pdf_path`?
+
+    The directory is named after the reference's slug, and a slug is not an
+    identity that holds still. Fixing a slug collision renames one of the two
+    colliding entries, and the reconciler can hand `refs` the publisher's list
+    on one run and the parsed list on the next — so re-running an existing case
+    could hand the model the directory's previous occupant and judge a claim,
+    confidently, against a different paper. `SourceMap.doc` cannot catch it:
+    every cited source is stored as `<slug>.pdf`, so it reads the same either
+    way.
+
+    An unhashed map — written before source maps recorded what they read — is
+    treated as stale. Re-ingesting is local, free and quick; trusting it is a
+    guess about which paper is in a file, and that guess is the whole thing this
+    module refuses to make.
+    """
+    if not pdf_path or not Path(pdf_path).exists():
+        return False  # nothing better to ingest; SourceProvenance reports the gap
+    smap_path = ingest_dir / "source_map.json"
+    if not smap_path.exists():
+        return True
+    try:
+        from .models import SourceMap
+
+        recorded = SourceMap.from_json(smap_path).source_sha256
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
+    from .models import manuscript_fingerprint
+
+    return recorded != manuscript_fingerprint(Path(pdf_path))
+
+
 def _slug_for_ref(manifest: RefManifest, label: str):
     return next((e for e in manifest.entries if e.num == label), None)
 
@@ -745,8 +778,8 @@ def check_claims(
             # FileNotFoundError buries the real problem. It degrades per
             # judgement instead, with a note naming the fix — see
             # SourceProvenance.read.
-            if not annotated.exists():
-                entry = next(e for e in manifest.entries if e.slug == slug)
+            entry = next(e for e in manifest.entries if e.slug == slug)
+            if not annotated.exists() or _stale_ingest(ingest_dir, entry.pdf_path):
                 from .ingest import ingest_pdf
 
                 ingest_pdf(Path(entry.pdf_path), ingest_dir, backend="pymupdf")

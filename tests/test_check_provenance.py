@@ -266,3 +266,95 @@ def test_a_verdict_whose_crop_was_written_survives(tmp_path):
     assert j.verdict == "supported"
     assert j.evidence_image and (case / "out" / j.evidence_image).exists()
     assert j.anchor_located is True
+
+
+# --- a source directory must hold the source it is named after ----------------
+#
+# `check_claims` reused `case/ingest/<slug>/annotated.md` whenever it existed,
+# keyed on the slug alone. `SourceMap.doc` is `<slug>.pdf` whichever paper's
+# bytes are inside, so nothing could tell one from another. Slugs are not
+# eternal — a collision fix renames one of two colliding entries, and the
+# reconciler can hand `refs` the Crossref list on one run and the parsed list on
+# the next — so a re-run of an existing case could judge a claim against the
+# previous occupant of that directory: a confident verdict on the wrong paper,
+# which is the one thing this codebase refuses to do.
+
+
+def _pdf_saying(path: Path, text: str) -> Path:
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), text, fontsize=12)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_the_ingest_of_a_source_records_which_file_it_read(tmp_path):
+    """Additive field, round-tripped, and absent-safe for older maps."""
+    import json as _json
+
+    import jsonschema
+
+    from papertrace.ingest import ingest_pdf
+    from papertrace.models import SourceMap, manuscript_fingerprint
+
+    pdf = _pdf_saying(tmp_path / "a.pdf", "Paper A says alpha.")
+    smap = ingest_pdf(pdf, tmp_path / "out", backend="pymupdf")
+    assert smap.source_sha256 == manuscript_fingerprint(pdf)
+
+    path = tmp_path / "out" / "source_map.json"
+    schema_path = Path(__file__).resolve().parent.parent / "schemas" / "source_map.schema.json"
+    schema = _json.loads(schema_path.read_text())
+    payload = _json.loads(path.read_text())
+    jsonschema.validate(payload, schema)
+    assert SourceMap.from_json(path).source_sha256 == smap.source_sha256
+
+    del payload["source_sha256"]  # a map written before this field
+    path.write_text(_json.dumps(payload))
+    jsonschema.validate(_json.loads(path.read_text()), schema)
+    assert SourceMap.from_json(path).source_sha256 is None
+
+
+def test_a_stale_source_directory_is_re_ingested_not_reused(tmp_path, monkeypatch):
+    """The wrong-paper route, stated as the thing that must not happen: the
+    directory holds paper B, the manifest entry points at paper A, and the
+    model must be shown A."""
+    from papertrace.check import check_claims
+    from papertrace.ingest import ingest_pdf
+    from papertrace.models import ClaimResult, RefEntry, RefManifest
+
+    case = tmp_path / "case"
+    sources = case / "sources_resolved"
+    a = _pdf_saying(sources / "smith-2020.pdf", "Paper A reports alpha in twelve patients.")
+    b = _pdf_saying(tmp_path / "b.pdf", "Paper B reports beta in nine patients.")
+
+    # the stale state: ingest/smith-2020 built from B, while the manifest's
+    # smith-2020 now points at A
+    ingest_pdf(b, case / "ingest" / "smith-2020", backend="pymupdf")
+    assert "beta" in (case / "ingest" / "smith-2020" / "annotated.md").read_text()
+
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num="5", raw="Smith J. Paper A. 2020.", status="retrieved",
+                          slug="smith-2020", pdf_path=str(a))],
+    )
+    (case / "refs_manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    manifest.to_json(case / "refs_manifest.json")
+
+    claims = [ClaimResult(id=1, claim="alpha was reported", location="Results", refs=["5"])]
+    prompts: list[str] = []
+
+    def _fake_ask(prompt, model=None):
+        prompts.append(prompt)
+        return '[{"id":1,"verdict":"not_addressed","note":"n/a"}]'
+
+    monkeypatch.setattr("papertrace.check._ask", _fake_ask)
+    check_claims(claims, manifest, case)
+
+    assert prompts, "no model call was made"
+    body = prompts[0]
+    assert "alpha" in body, "the model was not shown the paper the manifest names"
+    assert "beta" not in body, "the model was shown the previous occupant of the directory"

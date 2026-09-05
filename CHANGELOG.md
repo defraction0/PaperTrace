@@ -96,6 +96,24 @@ the machine running it had network. Same shape as the bug that made `ingest`'s
 backend an `OptionInfo` and read every paper as flat text while reporting
 layout-aware ingest.
 
+### Fixed — a reused source directory could hold a different paper
+
+`check` re-ingests a cited source only when `annotated.md` is missing, and the
+directory it reuses is named after the reference's slug. A slug is not an
+identity that holds still: fixing a slug collision renames one of the two
+colliding entries, and the reconciler can hand `refs` the publisher's list on
+one run and the parsed list on the next. Re-running an existing case could
+therefore hand the model the directory's previous occupant and judge a claim,
+confidently, against a different paper. `SourceMap.doc` could not catch it —
+every cited source is stored as `<slug>.pdf`, so it reads the same either way.
+
+Source maps now record `source_sha256`, the hash of the bytes they were built
+from, and a directory whose hash does not match the file now at `pdf_path` is
+re-ingested. An unhashed map — written before this — counts as stale:
+re-ingesting is local, free and quick, while trusting it is a guess about which
+paper is in a file. The field is additive and older maps still load, where
+absent means unknown and never "matches".
+
 ### Fixed — the tool could invent a reference
 
 Found by the first real audit: a 43-reference Elsevier paper was reported as

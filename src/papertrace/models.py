@@ -153,12 +153,19 @@ class SourceMap:
     pages: int
     converter: str = "pymupdf"  # which ingest backend produced this map
     blocks: list[Block] = field(default_factory=list)
+    # sha256 of the PDF this map was built from. `doc` cannot serve: a cited
+    # source is stored as `<slug>.pdf`, so every source map in a case says the
+    # same thing about a different paper. Without a content identity, a
+    # directory named after a slug is trusted to hold whatever it holds — and
+    # slugs are not eternal, so a re-run can read the previous occupant.
+    source_sha256: str | None = None
 
     def to_json(self, path: Path) -> None:
         payload = {
             "doc": self.doc,
             "pages": self.pages,
             "converter": self.converter,
+            "source_sha256": self.source_sha256,
             "blocks": [
                 {**asdict(b), "bbox": list(b.bbox), "text_preview": b.preview} for b in self.blocks
             ],
@@ -184,6 +191,9 @@ class SourceMap:
             pages=data["pages"],
             converter=data.get("converter", "pymupdf"),
             blocks=blocks,
+            # absent on maps written before content hashing — None means
+            # "unknown", never "matches", so a reader must re-establish it
+            source_sha256=data.get("source_sha256"),
         )
 
     def find(self, block_id: str) -> Block | None:
