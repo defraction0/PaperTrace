@@ -28,10 +28,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from papertrace.ingest import ingest_pdf, references_span  # noqa: E402
-from papertrace.models import citation_labels, is_references_heading  # noqa: E402
+from papertrace.models import (  # noqa: E402
+    citation_labels,
+    is_references_heading,
+    paper_title,
+)
 from papertrace.refs import (  # noqa: E402
     _client,
     crossref_deposit,
+    deposit_is_this_paper,
     parse_references,
     reconcile,
 )
@@ -78,8 +83,19 @@ def audit(pdf: Path, email: str, backend: str) -> dict:
     row["unrenderable"] = deposit.unrenderable
     row["absent"] = deposit.absent
 
-    candidate = None if deposit.unrenderable else (deposit.entries or None)
-    _entries, rec = reconcile(body, candidate, parsed, crossref_absent=deposit.absent)
+    # the same gate the `refs` command applies — a diagnostic that measures a
+    # different pipeline than the tool is measuring nothing
+    identity = (
+        deposit_is_this_paper(paper_title(smap), deposit.title) if deposit.entries else None
+    )
+    row["identity"] = {True: "confirmed", False: "WRONG PAPER", None: "unverified"}[identity]
+    usable = not deposit.unrenderable and identity is not False
+    candidate = (deposit.entries or None) if usable else None
+    absent = deposit.absent or (
+        f"the DOI used ({doi}) belongs to a record titled \u201c{deposit.title}\u201d, "
+        "which is not this paper" if identity is False else ""
+    )
+    _entries, rec = reconcile(body, candidate, parsed, crossref_absent=absent)
     row["chosen"] = rec.source
     row["verified"] = rec.verified
     row["note"] = rec.note
@@ -115,6 +131,7 @@ def main() -> int:
             f"body {row['body']:<16} → {row['chosen']}"
         )
         print(f"     {row['publisher'][:40]:<40} {row['converter']}"
+              f" · doi identity {row['identity']}"
               f"{' · resumed' if row['resumed'] else ''}")
         if not row["verified"]:
             print(f"     {row['note']}")

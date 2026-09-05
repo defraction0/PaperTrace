@@ -591,6 +591,111 @@ def test_refs_records_the_reconciliation_it_performed(tmp_path, monkeypatch):
     assert "no DOI for the manuscript itself" in manifest.numbering_note
 
 
+def _titled_paper(path: Path, title: str):
+    """Like `_one_page_paper`, but the first block is a real-looking title.
+
+    `paper_title` takes the first substantial block, so a fixture whose opening
+    line is `A Study` gives the identity check almost nothing to work with —
+    which is a real condition, tested separately, not the one under test here.
+    """
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), title, fontsize=16)
+    page.insert_text((72, 140), "Body text citing [1] and [2] here.", fontsize=11)
+    page.insert_text((72, 200), "References", fontsize=14)
+    page.insert_text((72, 230), "[1] Alpha A. First paper. 2020.", fontsize=11)
+    page.insert_text((72, 250), "[2] Beta B. Second paper. 2021.", fontsize=11)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def _refs_with_deposit(tmp_path, monkeypatch, deposit, title="Image registration improves "
+                       "inter-reader agreement in CT of the pancreas"):
+    """Run the `refs` stage with a stubbed deposit, and return the manifest."""
+    import papertrace.cli as cli_mod
+    import papertrace.refs as refs_mod
+    from papertrace.models import RefManifest
+
+    monkeypatch.setattr(refs_mod, "resolve_all",
+                        lambda entries, dest, email, provided_dir=None, progress=None: entries)
+    monkeypatch.setattr(refs_mod, "crossref_deposit", lambda client, doi, email: deposit)
+
+    pdf = _titled_paper(tmp_path / "paper.pdf", title)
+    cli_mod.refs(manuscript=pdf, case=tmp_path / "case", provided=None,
+                 email="t@example.org", parse_only=False, backend="pymupdf",
+                 doi="10.1234/asserted")
+    return RefManifest.from_json(tmp_path / "case" / "refs_manifest.json")
+
+
+def test_a_deposit_from_another_paper_is_not_used_to_renumber(tmp_path, monkeypatch):
+    """`deposit_is_this_paper` existed, was documented and was unit-tested — and
+    nothing called it. The DOI is scraped off page 1 or typed by hand, and a
+    companion paper, an erratum or an earlier version can carry exactly as many
+    references as the body cites, so `_covers` passes and the run prints
+    "numbering confirmed" over another paper's bibliography. Every other
+    retrieval route in this module is title-checked; the one route that can
+    replace the whole list was not."""
+    from papertrace.refs import CrossrefDeposit
+
+    manifest = _refs_with_deposit(
+        tmp_path, monkeypatch,
+        CrossrefDeposit(entries=_parsed([1, 2]), deposited=2,
+                        publisher="Fixture Publishing",
+                        title="Maternal urinary fluoride and child neurobehavior at age three"),
+    )
+
+    assert manifest.reference_source == "parsed", "another paper's list was adopted"
+    assert [e.num for e in manifest.entries] == ["1", "2"]
+    assert "Alpha A" in manifest.entries[0].raw, manifest.entries[0].raw
+    assert "10.1234/asserted" in manifest.numbering_note
+    assert "not this paper" in manifest.numbering_note
+
+
+def test_a_deposit_confirmed_as_this_paper_is_still_used(tmp_path, monkeypatch):
+    """The gate must not cost the feature its point: a matching record is used,
+    and the note says the identity was checked rather than assumed."""
+    from papertrace.refs import CrossrefDeposit
+
+    manifest = _refs_with_deposit(
+        tmp_path, monkeypatch,
+        CrossrefDeposit(entries=_parsed([1, 2]), deposited=2,
+                        publisher="Fixture Publishing",
+                        title="Image registration improves inter-reader agreement in CT "
+                              "of the pancreas"),
+    )
+
+    assert manifest.reference_source == "crossref"
+    assert manifest.numbering_verified is True
+    # "confirmed", not merely "not refused" — and distinct from the unverifiable
+    # wording, which contains the same phrase negated
+    assert "was confirmed as this paper by title" in manifest.numbering_note
+    assert "could not be confirmed" not in manifest.numbering_note
+
+
+def test_an_identity_that_cannot_be_checked_is_disclosed_not_assumed(tmp_path, monkeypatch):
+    """Tri-state, like every other title check here. A record with no title, or
+    a paper whose title the ingest could not find, is an unknown — and an
+    unknown is not a match and not a mismatch. Discarding it would throw away
+    good deposits for a thin first page; using it silently would stamp
+    "confirmed" on an identity nobody established."""
+    from papertrace.refs import CrossrefDeposit
+
+    manifest = _refs_with_deposit(
+        tmp_path, monkeypatch,
+        CrossrefDeposit(entries=_parsed([1, 2]), deposited=2,
+                        publisher="Fixture Publishing", title=""),
+    )
+
+    assert manifest.reference_source == "crossref"
+    assert manifest.numbering_verified is True
+    assert "could not be confirmed as this paper" in manifest.numbering_note
+    assert "too little title to compare" in manifest.numbering_note
+
+
 def test_parse_only_reaches_no_network_leg_at_all(tmp_path, monkeypatch):
     """`--parse-only` is documented as "List references, no network". The
     reconciler's Crossref leg must not quietly break that promise."""

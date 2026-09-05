@@ -46,6 +46,29 @@ def is_references_heading(block_type: str, text: str) -> bool:
     return bool(_REFS_HEADING_EXACT.match(text))
 
 
+def paper_title(smap) -> str:
+    """Best-effort title of the paper a source map describes.
+
+    The first substantial section header, else the first substantial text block.
+    Third rule to live here for the reason the two above it do: `scout` needs it
+    to identify the paper in Europe PMC, and `refs` needs it to check that the
+    Crossref record behind a DOI is this paper at all — and neither module may
+    import the other.
+
+    Best-effort, and treated as such by both callers: a first page whose opening
+    block is a journal banner yields a title that identifies nothing, which is
+    why the identity check it feeds has an "unverifiable" answer and does not
+    read a thin title as a mismatch.
+    """
+    for b in smap.blocks:
+        if b.type == "sectionheader" and len(b.text.strip()) >= 15:
+            return " ".join(b.text.split())[:220]
+    for b in smap.blocks:
+        if b.type == "text" and len(b.text.strip()) >= 25:
+            return " ".join(b.text.split())[:220]
+    return ""
+
+
 # What marks a line as a bibliographic reference rather than back matter.
 # Deliberately three cheap structural marks and nothing else — the question is
 # only "is this a citable work at all", not "is this a good reference".

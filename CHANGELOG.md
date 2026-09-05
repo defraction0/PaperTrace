@@ -42,6 +42,16 @@ produces a confident audit of the wrong papers. One live run misnumbered 27 of
   Reference numbering is read from **array order**, never from the `key` field — keys are
   publisher-specific (`_b0005`, `_bib1`, `3400_CR1`, `bibr1-…`,
   `R10-45-20210317`), and two schemes turned up inside a single deposit.
+- **The DOI is checked against the paper before its record is trusted.** The
+  DOI is typed by hand or read off page 1, and the deposit is the one retrieval
+  route that can replace the *entire* reference list — a companion paper, an
+  erratum or an earlier version can carry exactly as many references as the body
+  cites, so the count test passes and the run would print "numbering confirmed"
+  over another paper's bibliography. The record's title is now compared with the
+  paper's own, tri-state like every other title check here: a mismatch sets the
+  deposit aside, and too little title to compare leaves the list in use with the
+  identity disclosed as unconfirmed rather than assumed either way. The DOI used
+  and where it came from are printed and recorded.
 - **Failure is disclosed, not fatal.** When neither reading can be confirmed the
   audit continues, a run-level disclosure states that the numbering is
   unconfirmed, and every claim citing a doubtful label carries the caveat beside

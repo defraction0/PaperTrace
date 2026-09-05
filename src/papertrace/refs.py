@@ -399,7 +399,13 @@ def deposit_is_this_paper(manuscript_title: str, record_title: str) -> bool | No
     confirmed" over another paper's bibliography.
     """
     a, b = _title_tokens(manuscript_title), _title_tokens(record_title)
-    if not a or not b:
+    # Too few distinctive words on either side to tell — the same floor, and the
+    # same constant, that stops `_title_check` calling a thin comparison a
+    # mismatch. `paper_title` is a heuristic over the first blocks of a page, so
+    # a journal banner or an author line lands here regularly, and a confident
+    # `False` on two comparable words would discard a good deposit over the
+    # layout of a first page.
+    if min(len(a), len(b)) < _TITLE_MIN_MATCHES:
         return None
     return len(a & b) / min(len(a), len(b)) >= 0.5
 

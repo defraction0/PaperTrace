@@ -476,8 +476,15 @@ def refs(
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest."""
     from .ingest import ingest_pdf, references_span
-    from .models import SourceMap, citation_labels, is_references_heading
-    from .refs import _client, crossref_deposit, parse_references, reconcile, resolve_all
+    from .models import SourceMap, citation_labels, is_references_heading, paper_title
+    from .refs import (
+        _client,
+        crossref_deposit,
+        deposit_is_this_paper,
+        parse_references,
+        reconcile,
+        resolve_all,
+    )
 
     case = _resolve_case(case, manuscript)  # named after the paper unless -c said otherwise
     # identity first — the cached source map below is a manuscript-derived
@@ -514,12 +521,21 @@ def refs(
     # paper cites — the parse and the deposit are both candidates measured
     # against it. --parse-only stays offline, so it gets no second candidate.
     body_labels = _body_citation_labels(smap, citation_labels, is_references_heading)
-    crossref_entries, absent = None, ""
+    crossref_entries, absent, identity_note = None, "", ""
     if not parse_only:
-        doi = _text_opt(doi) or _detected_doi(manuscript)
+        given = _text_opt(doi)
+        doi = given or _detected_doi(manuscript)
         with _client() as client:
             deposit = crossref_deposit(client, doi, _email(email))
         absent = deposit.absent
+        # Is the record behind that DOI this paper at all? The DOI is typed by
+        # hand or scraped off page 1, and this is the one retrieval route in
+        # `refs` that can replace the *entire* reference list — every other one
+        # has been title-checked since a wrong download was judged as a source.
+        identity = (
+            deposit_is_this_paper(paper_title(smap), deposit.title)
+            if deposit.entries else None
+        )
         if deposit.unrenderable:
             # the tool's shortfall, named as the tool's. A list this one could
             # only half read must not be mapped onto [1]..[n] — that would drop
@@ -530,14 +546,41 @@ def refs(
                 "them, so the deposit was set aside rather than used to renumber the "
                 "list. The gap is this tool's, not the publisher's"
             )
+        elif identity is False:
+            absent = (
+                f"the DOI used ({doi}) belongs to a Crossref record titled "
+                f"\u201c{deposit.title}\u201d, which is not this paper, so the "
+                f"{len(deposit.entries)} references it deposited were not used to "
+                "renumber this list"
+            )
+            console.print(
+                f"[yellow]⚠ the DOI {doi} resolves to a different paper[/yellow] — "
+                f"“{deposit.title[:70]}”. Its reference list was not used."
+            )
         elif deposit.entries:
             crossref_entries = deposit.entries
+            # a verified identity is worth as much as the count match it licenses,
+            # and an unverifiable one must not be read as either
+            identity_note = (
+                f". The DOI {doi} ({'given' if given else 'read off page 1'}) was "
+                "confirmed as this paper by title"
+                if identity
+                else f". The DOI {doi} ({'given' if given else 'read off page 1'}) could "
+                     "not be confirmed as this paper — there was too little title to "
+                     "compare, so the identity behind this list is unverified"
+            )
             console.print(
                 f"crossref: [bold]{len(deposit.entries)}[/bold] references deposited by "
-                f"{deposit.publisher or 'the publisher'}"
+                f"{deposit.publisher or 'the publisher'} "
+                f"[dim](DOI {doi}, {'given' if given else 'read off page 1'}; identity "
+                f"{'confirmed' if identity else 'unverified'})[/dim]"
             )
 
     entries, rec = reconcile(body_labels, crossref_entries, entries, crossref_absent=absent)
+    if rec.source == "crossref" and identity_note:
+        # the note is what a reader of `refs_manifest.json` gets, so a list taken
+        # from a publisher's record says on whose authority it was adopted
+        rec.note += identity_note
     if rec.verified:
         console.print(f"[green]✓ numbering confirmed[/green] — {rec.note}")
     else:

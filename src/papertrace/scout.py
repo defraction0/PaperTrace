@@ -25,7 +25,7 @@ from pathlib import Path
 
 import httpx
 
-from .models import RefManifest, ScoutHit, ScoutResults, SourceMap
+from .models import RefManifest, ScoutHit, ScoutResults, SourceMap, paper_title
 from .refs import UA
 
 EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest"
@@ -184,19 +184,15 @@ def _resolve_paper(client: httpx.Client, doi: str | None, title: str) -> dict | 
 
 
 def _title_from_case(case: Path) -> str:
-    """Best-effort paper title from the ingest output — the first substantial
-    section header, else the first substantial text block. `--doi` overrides."""
+    """The paper's title from the ingest output on disk. `--doi` overrides.
+
+    The rule itself lives in `models.paper_title`, because `refs` needs the same
+    title to ask whether a Crossref record is this paper.
+    """
     smap_path = case / "ingest" / "manuscript" / "source_map.json"
     if not smap_path.exists():
         return ""
-    smap = SourceMap.from_json(smap_path)
-    for b in smap.blocks:
-        if b.type == "sectionheader" and len(b.text.strip()) >= 15:
-            return " ".join(b.text.split())[:220]
-    for b in smap.blocks:
-        if b.type == "text" and len(b.text.strip()) >= 25:
-            return " ".join(b.text.split())[:220]
-    return ""
+    return paper_title(SourceMap.from_json(smap_path))
 
 
 # ---------------------------------------------------------------------------

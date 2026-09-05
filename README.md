@@ -93,7 +93,11 @@ went uncited?**
   genuinely short — one record in this project's spread carries 2 references
   for a paper citing about 40 — and nothing in the payload gives that away,
   because Crossref's own count field counts what was deposited. The
-  manuscript's labels are what catch it.
+  manuscript's labels are what catch it. And the DOI is checked against the
+  paper before its record is trusted: a deposit whose Crossref record is titled
+  as some other paper is set aside, and where there is too little title to
+  compare, the list is used but the manifest says the identity behind it was
+  never confirmed.
 - Report every citation **occurrence** — each bracketed marker at its own place
   in the text — that no extracted claim reached, so a second sentence citing an
   already-checked reference is not silently counted as covered. It also
@@ -276,9 +280,12 @@ page, and it feeds two steps:
 
 - **The reference-numbering check** (`refs`, and so `run`). It fetches the
   reference list the publisher deposited with Crossref, as a second reading to
-  measure the tool's own parse against. Without it there is only one reading,
-  and the manifest says the numbering is unconfirmed rather than implying it
-  was checked.
+  measure the tool's own parse against. The record's own title is compared with
+  the paper's first, so a mistyped or mis-scraped DOI cannot substitute another
+  paper's bibliography; a comparison too thin to settle it leaves the list in
+  use and the identity disclosed as unconfirmed. Without a DOI there is only
+  one reading, and the manifest says the numbering is unconfirmed rather than
+  implying it was checked.
 - **The literature scout**, which has to identify your paper in Europe PMC
   before it can look for work published since, or work in the field you did
   not cite.
