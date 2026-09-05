@@ -37,7 +37,12 @@
             "type": "integer"
           },
           "claim": {
-            "type": "string"
+            "type": "string",
+            "description": "The claim tightly paraphrased \u2014 what a report headline reads well."
+          },
+          "quote": {
+            "type": "string",
+            "description": "The manuscript's own sentence carrying the claim, verbatim. This is what the judge rules on: a paraphrase can drop the population, the interval or the hedging that decides whether a source supports the statement. Empty string when extraction returned no quote \u2014 never back-filled from `claim`, and absent entirely in files written before 0.5.0."
           },
           "location": {
             "type": "string"
@@ -157,6 +162,10 @@
           },
           "claim": {
             "type": "string"
+          },
+          "quote": {
+            "type": "string",
+            "description": "The manuscript's own sentence, verbatim \u2014 the wording the reviewer has to judge. Empty when extraction returned no quote; absent before 0.5.0."
           },
           "location": {
             "type": "string"

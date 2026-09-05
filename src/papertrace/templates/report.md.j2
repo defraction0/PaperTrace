@@ -30,9 +30,22 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
    block tag, which merged this line into the Location line below it #}
 **Status:** {{ c.label }}{{ " — *%s*" % c.headline_qualifier() if c.headline_qualifier() else "" }}
 **Location:** {{ c.location }}{% if c.refs %} · cites [{{ c.refs|join(', ') }}]{% endif %}
+{% if c.quote %}
+{# two blank lines, not one: trim_blocks eats the newline after each block tag,
+   and a blockquote wants a blank line ahead of it rather than relying on a
+   renderer letting it interrupt the paragraph above. trim_blocks eats the
+   newline after this comment too, so there are two blanks below, not one #}
+
+
+> {{ c.quote }}
+{% endif %}
 {% for d in claim_disclosures(c) if d.key == "sources" %}
 
 > **{{ d.text }}**
+{% endfor %}
+{% for d in claim_disclosures(c) if d.key == "no_quote" %}
+
+> ⚠️ {{ d.text }}
 {% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
 
@@ -122,7 +135,7 @@ Statements that would normally carry a reference but don't. Not verified —
 flagged for you to weigh.
 
 {% for u in r.uncited %}
-- **[U{{ u.id }}]** {{ u.claim }}{% if u.location %} *({{ u.location }})*{% endif %}
+- **[U{{ u.id }}]** {{ u.quote or u.claim }}{% if u.location %} *({{ u.location }})*{% endif %}
 {% endfor %}
 {% endif %}
 {% if scout and (scout.newer or scout.overlooked or scout.same_year or scout.error) %}

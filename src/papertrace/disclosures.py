@@ -17,6 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# the one place the judgement vocabulary is defined — a local copy of the four
+# names here would be a second vocabulary to keep in step
+from .models import JUDGMENT_VERDICTS
+
 # Tokens are the contract. Changing one is a change to all three templates, and
 # tests/test_disclosure_parity.py is what says so out loud.
 TRUNCATION_TOKEN = "text past the cut was never read"
@@ -33,6 +37,10 @@ SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
 REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
 NUMBERING_TOKEN = "reference numbering could not be confirmed"
 CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
+# no apostrophe, and no `&`, `<` or `>`: a token is asserted as a literal in the
+# HTML formats too, and autoescape would rewrite it there but not in markdown —
+# so the parity test would fail on a difference the reader never sees
+NO_QUOTE_TOKEN = "judged on a paraphrase, not the sentence in the paper"
 
 
 @dataclass(frozen=True)
@@ -41,6 +49,8 @@ class Disclosure:
 
     key: str  # truncation | converter | coverage | coverage_caveat
     #          | coverage_attribution | sources | unjudged_refs | anchor
+    #          | no_quote | claim_numbering | numbering | references_resumed
+    #          | source_identity
     level: str  # info | warn
     token: str  # SHORT literal that must appear verbatim in ALL THREE formats
     text: str  # full sentence for markdown / editor
@@ -553,6 +563,29 @@ def judgement_disclosures(j) -> list[Disclosure]:
     return [d] if d else []
 
 
+def _no_quote(claim) -> Disclosure:
+    """This verdict was reached without the manuscript's own sentence.
+
+    Extraction is asked for a verbatim quote every time, so an empty one means
+    the model did not return it — and the judgement then rests on a paraphrase
+    that may already have dropped the population, the interval or the hedging
+    the verdict turns on. Weaker evidence, said so rather than left to be
+    inferred from a missing blockquote: "no quote" and "quote identical to the
+    paraphrase" look the same on the page otherwise.
+    """
+    return Disclosure(
+        key="no_quote",
+        level="warn",
+        token=NO_QUOTE_TOKEN,
+        text=(
+            f"{NO_QUOTE_TOKEN} — extraction returned no verbatim sentence for this "
+            "claim, so the source was checked against the short paraphrase above. "
+            "Any scope, interval or hedging the paraphrase dropped was not judged."
+        ),
+        short=NO_QUOTE_TOKEN,
+    )
+
+
 def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
     """Every claim-level disclosure this ClaimResult owes its reader.
 
@@ -565,6 +598,11 @@ def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
         out.append(_sources(claim))
     if claim.unjudged_refs:
         out.append(_unjudged(claim))
+    # only where a judgement actually happened: nothing read an unretrieved
+    # source, so the quote changed nothing there and the notice would land on
+    # every row of the gap register until readers stopped seeing it
+    if not claim.quote and claim.verdict in JUDGMENT_VERDICTS:
+        out.append(_no_quote(claim))
     if manifest is not None and any(manifest.label_is_doubtful(r) for r in claim.refs):
         out.append(_claim_numbering(claim, manifest))
     if (d := anchor_disclosure(claim)) is not None:

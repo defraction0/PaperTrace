@@ -97,14 +97,19 @@ standard-of-care statements). Exclude the manuscript's own results and
 methods descriptions of what the authors themselves did.
 
 Rules for both:
-- claim: the statement, tightly paraphrased, ≤160 chars.
+- quote: the manuscript's own sentence carrying the claim, copied VERBATIM,
+  ≤500 chars. Copy it exactly as written — do not tidy, shorten or rephrase it,
+  and keep the numbers, units, intervals and hedging words as they appear. If
+  the claim spans two sentences, quote both. Strip nothing except the citation
+  marker itself. This is the text that will be checked against the source.
+- claim: the same statement tightly paraphrased for a headline, ≤300 chars.
 - location: manuscript section (e.g. "Introduction ¶2", "Methods", "Table 2").
 - cited claims also carry refs: citation labels as strings, e.g. ["3"] or ["7","8"].
 - Number each list from 1 in reading order.
 
 Answer with ONLY a JSON object, no prose, no code fences:
-{"cited":[{"id":1,"claim":"...","location":"...","refs":["1"]}],
- "uncited":[{"id":1,"claim":"...","location":"..."}]}
+{"cited":[{"id":1,"quote":"...","claim":"...","location":"...","refs":["1"]}],
+ "uncited":[{"id":1,"quote":"...","claim":"...","location":"..."}]}
 
 MANUSCRIPT:
 """
@@ -118,6 +123,14 @@ text is the only evidence — never use outside knowledge of the paper.
 A claim may cite several sources. You are shown ONE of them. Judge only what
 THIS source does or does not say, and do not speculate about the others: each
 is judged in its own call and the results are combined afterwards.
+
+Each claim carries `quote`, the manuscript's own sentence, and `claim`, a short
+paraphrase of it. **Judge the quote.** It holds the population, the effect
+size, the interval and the hedging that decide whether the source supports the
+statement; the paraphrase is a label and may have dropped any of them. Where
+the two differ, the quote is the claim. A claim with an empty `quote` is all
+there is for it — judge the paraphrase, and let the missing scope count against
+"supported" rather than for it.
 
 For each claim output:
 - verdict: "supported" (source states it), "partial" (kernel true but scope,
@@ -230,6 +243,10 @@ def extract_claims(
         ClaimResult(
             id=int(c["id"]),
             claim=str(c["claim"]),
+            # `.get`, and NOT falling back to `claim`: a missing quote means the
+            # model did not give one, and copying the paraphrase in would put
+            # the compression back while looking like it had been removed
+            quote=str(c.get("quote", "")),
             location=str(c.get("location", "")),
             refs=[str(r) for r in c.get("refs", [])],
         )
@@ -239,6 +256,7 @@ def extract_claims(
         UncitedClaim(
             id=int(u["id"]),
             claim=str(u["claim"]),
+            quote=str(u.get("quote", "")),
             location=str(u.get("location", "")),
         )
         for u in data.get("uncited", [])
@@ -452,10 +470,16 @@ def _attribute_label(occs: list[dict], claims: list[ClaimResult]) -> tuple[dict,
 
     One occurrence is the whole answer: a claim citing the label reached the
     only place the label appears. With several, the claim's `location` narrows
-    the field and text similarity decides, assigned globally best-first. The
-    extraction prompt returns a tight ≤160-char paraphrase, so the absolute
-    ratio is weak evidence — **the margin is the decisive test**, since the
-    question is only *which* occurrence.
+    the field and text similarity decides, assigned globally best-first.
+
+    The ratio is taken on the claim's verbatim `quote` where extraction
+    returned one, so it compares a manuscript sentence with a manuscript
+    sentence rather than a paraphrase with a sentence. **The margin is still
+    the decisive test** — the question is only *which* occurrence, and a claim
+    with no quote still falls back to the paraphrase, where the absolute ratio
+    is as weak as it always was. Both thresholds are therefore left exactly
+    where they were: the evidence under them improved, and retuning them in the
+    same change would confound the two.
 
     Reading-order zipping (claim 1 → occurrence 1, and so on) is deliberately
     NOT used. `EXTRACT_PROMPT` does ask for reading order, which makes it
@@ -473,7 +497,7 @@ def _attribute_label(occs: list[dict], claims: list[ClaimResult]) -> tuple[dict,
     edges: list[tuple[float, int, str]] = []
     for c in claims:
         narrowed = [o for o in occs if _location_matches(c.location, o["section"])] or occs
-        want = _normalize_for_match(c.claim)
+        want = _normalize_for_match(c.quote or c.claim)
         for o in narrowed:
             edges.append((_ratio(want, _normalize_for_match(o["sentence"])), c.id, o["id"]))
     edges.sort(key=lambda t: (-t[0], t[1], t[2]))
@@ -847,8 +871,14 @@ def check_claims(
                 from .ingest import ingest_pdf
 
                 ingest_pdf(Path(entry.pdf_path), ingest_dir, backend="pymupdf")
+            # the quote goes with the paraphrase, not instead of it: the judge
+            # is told to rule on the quote, and the paraphrase stays so a claim
+            # whose extraction returned no quote is still judgeable
             claims_json = json.dumps(
-                [{"id": c.id, "claim": c.claim, "location": c.location} for c in group]
+                [
+                    {"id": c.id, "quote": c.quote, "claim": c.claim, "location": c.location}
+                    for c in group
+                ]
             )
             prompt = (
                 CHECK_PROMPT.replace("<<CLAIMS>>", claims_json)

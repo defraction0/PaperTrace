@@ -100,7 +100,11 @@ def test_every_claim_disclosure_appears_in_all_three_formats(tmp_path, anchor_lo
     rendered = _render(results, tmp_path)
 
     fired = claim_disclosures(claim)
-    assert {d.key for d in fired} == {"unjudged_refs", "anchor"}
+    # `no_quote` belongs here: the fixture claim carries no verbatim quote, so
+    # a verdict on it rests on the paraphrase and the reader is owed that in
+    # every format. Pinning the set is what makes a newly added disclosure
+    # arrive in this loop instead of quietly missing one template.
+    assert {d.key for d in fired} == {"unjudged_refs", "anchor", "no_quote"}
     for d in fired:
         for name, body in rendered.items():
             assert d.token in body, f"{d.key}: token {d.token!r} missing from {name}"

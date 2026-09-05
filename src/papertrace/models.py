@@ -518,8 +518,12 @@ _ADVERSITY = {"supported": 1, "partial": 2, "contradicted": 3}
 @dataclass
 class ClaimResult:
     id: int
-    claim: str  # the claim, quoted or tightly paraphrased
-    location: str  # where in the manuscript, e.g. "Methods §2"
+    claim: str  # the claim, tightly paraphrased — what a headline reads well
+    # the manuscript's own sentence, verbatim. Empty when the model did not
+    # return one: never back-filled from `claim`, which would reinstate exactly
+    # the compression the quote exists to remove
+    quote: str = ""
+    location: str = ""  # where in the manuscript, e.g. "Methods §2"
     refs: list[str] = field(default_factory=list)  # citation labels, e.g. ["14"]
     verdict: str = "not_retrieved"  # one of VERDICTS
     note: str = ""  # one/two-sentence finding
@@ -632,6 +636,7 @@ class UncitedClaim:
 
     id: int
     claim: str
+    quote: str = ""  # the manuscript's own sentence — what the reviewer judges
     location: str = ""
 
 

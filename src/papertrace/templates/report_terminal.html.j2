@@ -37,6 +37,7 @@
   .cl-meta .st{font-weight:700;}
   .cl-meta .from{color:var(--blue);}
   .cl-meta .loc{color:var(--dim);}
+  .cl-meta .it{color:#adbac7;line-height:1.5;}
   .st.supported{color:var(--green);} .st.partial{color:var(--amber);} .st.contradicted{color:var(--red);}
   .dot{font-size:12px;vertical-align:1px;}
   .imgwrap{border:1px solid var(--edge);border-radius:4px;overflow:hidden;width:600px;background:#fff;position:relative;margin:2px 0 2px;}
@@ -101,6 +102,10 @@
 {% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "no_quote" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
+{% if c.quote %}      <div class="cl-meta"><span class="lab">quote </span><span class="it">{{ c.quote }}</span></div>
+{% endif %}
 {% for d in claim_disclosures(c) if d.key == "claim_numbering" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
       <div class="cl-meta">
@@ -166,7 +171,7 @@
     <div class="nr-head"><span class="amber">▲</span> assertions without citation <span class="c">({{ r.uncited|length }}) — your judgement required</span></div>
     <div class="nr-sub">would normally carry a reference but don't — not verified, flagged for you to weigh.</div>
 {% for u in r.uncited %}
-    <div class="nrrow"><span class="sec">[U{{ u.id }}]</span><span class="n"></span><span class="it">{{ u.claim }}{% if u.location %} <span class="s">·</span> {{ u.location }}{% endif %}</span></div>
+    <div class="nrrow"><span class="sec">[U{{ u.id }}]</span><span class="n"></span><span class="it">{{ u.quote or u.claim }}{% if u.location %} <span class="s">·</span> {{ u.location }}{% endif %}</span></div>
 {% endfor %}
     <div style="height:14px"></div>
 {% endif %}

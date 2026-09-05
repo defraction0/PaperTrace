@@ -58,6 +58,7 @@
   figure{margin:2px 0 0;}
   .crop{display:block;max-width:600px;max-height:230px;border:1px solid var(--edge);border-radius:3px;background:#fff;}
   figcaption{font-family:"Mono",monospace;font-size:11px;color:var(--dim);margin-top:5px;}
+  .mquote{font-size:13.5px;color:#c8c8c8;margin:0 0 11px;padding:7px 0 7px 14px;border-left:3px solid #4a4a4a;line-height:1.55;max-width:850px;font-style:italic;}
   .cap{font-size:13px;color:var(--muted);margin:9px 0 0;padding-left:14px;border-left:3px solid var(--edge);line-height:1.5;max-width:850px;}
   .cap b{color:#d0d0d0;}
   .gap-intro{font-size:13.5px;color:var(--muted);margin:5px 0 12px;line-height:1.5;}
@@ -125,8 +126,14 @@
 {% for c in checked %}
     <h2><span class="hx">##</span> Claim {{ c.id }}: <span class="q">“{{ c.claim }}”</span></h2>
     <div class="status {{ c.verdict }}"><span class="lbl">Status:</span> <span class="val">{{ c.label }}</span>{% if c.headline_qualifier() %} <span class="cap">— {{ c.headline_qualifier() }}</span>{% endif %}</div>
+{% if c.quote %}
+    <blockquote class="mquote">{{ c.quote }}</blockquote>
+{% endif %}
 {% for d in claim_disclosures(c) if d.key == "sources" %}
     <p class="src-summary"><b>{{ d.text }}</b></p>
+{% endfor %}
+{% for d in claim_disclosures(c) if d.key == "no_quote" %}
+    <p class="cap">⚠️ {{ d.text }}</p>
 {% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
     <p class="cap"><span style="color:var(--amber)">⚠ {{ d.text }}</span></p>
@@ -180,7 +187,7 @@
     <p class="gap-intro">Statements that would normally carry a reference but don't. Not verified — flagged for you to weigh.</p>
     <ul class="src">
 {% for u in r.uncited %}
-      <li><b>[U{{ u.id }}]</b> {{ u.claim }}{% if u.location %} <code>{{ u.location }}</code>{% endif %}</li>
+      <li><b>[U{{ u.id }}]</b> {{ u.quote or u.claim }}{% if u.location %} <code>{{ u.location }}</code>{% endif %}</li>
 {% endfor %}
     </ul>
 {% endif %}

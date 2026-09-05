@@ -58,6 +58,15 @@ went uncited?**
   distinctive words on the retrieved first page; a first page that is **empty
   or unreadable** (scanned, image-only) **passes** — unverifiable is not the
   same as wrong, so a scanned source is checked rather than silently discarded.
+- Judge the manuscript's **own sentence**, not a summary of it. Extraction
+  returns the verbatim sentence carrying each citation alongside a short
+  paraphrase, and the verbatim sentence is what the source is checked against —
+  because the population, the effect size, the confidence interval and the
+  hedging are exactly what decide whether a citation supports a statement, and
+  they are the first things a summary loses. The quote appears in the report
+  above each verdict, so you can see what was actually judged. Where extraction
+  returns no quote the paraphrase is judged instead, and the report shows that
+  is what happened.
 - Attempt to extract **every** citation-backed claim, then judge each against
   the text of its cited source. Every `supported`, `partial` or `contradicted`
   verdict carries a page **and** the source block it rests on, both checked

@@ -8,6 +8,49 @@ All notable changes to PaperTrace are documented here. The format follows
 
 0.4.1 was never released, so its entries below ship together with these.
 
+### Changed — the judge reads the paper's own sentence, not a summary of it
+
+`EXTRACT_PROMPT` asked for each claim "tightly paraphrased, ≤160 chars", and
+`CHECK_PROMPT` was handed `{id, claim, location}`. So the population, the
+effect size, the confidence interval and the hedging — the things that actually
+decide whether a citation supports a statement — had to survive a compression
+the judge could not undo. *"Mortality fell by 12% in the subgroup over 65 (HR
+0.88, 95% CI 0.79-0.98)"* and *"mortality fell by 12%"* are different claims,
+and only one of them is checkable.
+
+- **Extraction returns a verbatim `quote`** — the manuscript's own sentence,
+  ≤500 chars — alongside the paraphrase, whose cap rises to 300. The paraphrase
+  stays because it is what a report headline reads well; the quote is what gets
+  judged, and `CHECK_PROMPT` says so explicitly.
+- **The quote appears in the report** above each verdict, in all three formats,
+  so what was judged is visible rather than taken on trust.
+- **A claim judged without one says so.** An empty quote means the model did
+  not return a sentence, so the verdict rests on the paraphrase — weaker
+  evidence, and now a warn-level disclosure in every format rather than
+  something a reader has to infer from a missing blockquote. It fires only
+  where a judgement actually happened: nothing read an unretrieved source, so
+  the notice would otherwise land on every row of the gap register.
+- **The quote is never back-filled from the paraphrase.** That would reinstate
+  the exact compression this change removes while looking like it had been
+  fixed.
+- **Coverage attribution got more reliable for free.** `_attribute_label` now
+  takes its similarity ratio on the quote where there is one, comparing a
+  manuscript sentence against a manuscript sentence instead of a paraphrase
+  against a sentence. `OCCURRENCE_MIN_RATIO` and `OCCURRENCE_MIN_MARGIN` are
+  deliberately left where they were: the evidence under them improved, and
+  retuning them in the same change would confound the two.
+- `results.json` gains `quote` on both cited claims and the uncited register;
+  `schemas/results.schema.json` is updated and `from_json` still loads a 0.4.x
+  file, where the field is simply absent.
+
+**One consequence for `evals/`:** `prompt_fingerprint()` is a content hash of
+the prompts, so this invalidates comparison against any pre-0.5.0 run.
+`agreement.py` already refuses to compare runs that do not share the
+`(set_id, prompt fingerprint, converter)` triple — that is the correct
+behaviour, not a regression. And per ADR 0001 there is no benchmark to
+compare against anyway: **this change is unmeasured.** It removes a known
+information loss; that is not the same as evidence that verdicts improved.
+
 ### Changed — `report.md` by default; the HTML looks on request ⚠️ **breaking**
 
 Every run wrote three report files and a ~1 MB font bundle, whether or not
