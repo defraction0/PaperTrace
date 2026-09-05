@@ -376,17 +376,22 @@ def init(
         console.print(f"  [dim]hand this folder to every step: [cyan]-c {case}[/cyan][/dim]")
 
 
-@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
-def ingest(
-    pdf: Path = typer.Argument(..., exists=True, help="PDF to convert"),
-    out: Path = typer.Option(None, "--out", "-o", help="Output dir (default <case>/ingest/<stem>)"),
-    case: Path = typer.Option(
-        None, "--case", "-c",
-        help="Case folder; writes <case>/ingest/<stem>. Ignored when --out is given",
-    ),
-    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+def _ingest_pipeline(
+    *,
+    pdf: Path,
+    out: Path | None = None,
+    case: Path | None = None,
+    backend: str = "auto",
 ) -> None:
-    """PDF → clean.md + annotated.md + source_map.json (page + bbox provenance)."""
+    """PDF → clean.md + annotated.md + source_map.json (page + bbox provenance).
+
+    Keyword-only and plain-default on purpose: `ingest()` below is a Typer
+    command, and Typer's declared defaults are `OptionInfo` objects rather than
+    the values the help screen shows — calling it directly (as `run()` and the
+    tests do) with a shifted or missing argument used to take that sentinel as
+    the value. This function is what they actually call; `ingest()` is a thin
+    CLI adapter over it.
+    """
     from .ingest import ingest_pdf
 
     # -c means the same thing here as in every other subcommand; `papertrace
@@ -426,6 +431,20 @@ def ingest(
             "  [yellow]⚠ flat-text ingest — tables are linearized and figures "
             f"invisible. {why}[/yellow]"
         )
+
+
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
+def ingest(
+    pdf: Path = typer.Argument(..., exists=True, help="PDF to convert"),
+    out: Path = typer.Option(None, "--out", "-o", help="Output dir (default <case>/ingest/<stem>)"),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder; writes <case>/ingest/<stem>. Ignored when --out is given",
+    ),
+    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+) -> None:
+    """PDF → clean.md + annotated.md + source_map.json (page + bbox provenance)."""
+    _ingest_pipeline(pdf=pdf, out=out, case=case, backend=backend)
 
 
 def _text_opt(value) -> str | None:
@@ -1011,15 +1030,17 @@ def run(
     case = _resolve_case(case, manuscript)
     _guard_case(case, manuscript)  # one case folder per paper — never mix two audits
     _open_case(case)
-    # KEYWORDS ONLY, deliberately. These stages are Typer commands called as
-    # plain functions, and Typer's declared defaults are OptionInfo objects
-    # rather than the values they display. A positional call therefore breaks
-    # silently the moment any stage gains a parameter: the arguments shift, the
-    # shifted-in default is an OptionInfo that equals none of the expected
-    # strings, and the stage takes a fallback branch. Adding `--case` to
-    # `ingest` did exactly that — the backend became an OptionInfo and every
-    # audit ingested as flat text while claiming layout-aware ingest.
-    ingest(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
+    # KEYWORDS ONLY, deliberately, for every stage below still called through its
+    # Typer command. Typer's declared defaults are OptionInfo objects rather than
+    # the values they display, so a positional call breaks silently the moment a
+    # stage gains a parameter: the arguments shift, the shifted-in default is an
+    # OptionInfo that equals none of the expected strings, and the stage takes a
+    # fallback branch. Adding `--case` to `ingest` did exactly that — the backend
+    # became an OptionInfo and every audit ingested as flat text while claiming
+    # layout-aware ingest. `_ingest_pipeline` below is the first stage split out
+    # of its Typer command specifically to make that mistake impossible rather
+    # than just avoided by convention — the rest are still convention-only.
+    _ingest_pipeline(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
     # detected once, here, and handed to both consumers. `refs` detects for
     # itself when called alone, so forwarding the raw option left the scout
     # guessing by title on the very runs where the paper's DOI was sitting on

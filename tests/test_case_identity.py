@@ -262,7 +262,10 @@ def test_run_derives_one_case_folder_and_hands_it_to_every_stage(tmp_path, offli
     monkeypatch.chdir(tmp_path)
     pdf = _paper(tmp_path / "papers" / "zeta.pdf", "ZETA", "10.1000/zeta")
     seen: dict[str, dict] = {}
-    for name in ("ingest", "refs", "scout", "check", "highlight", "report"):
+    # `ingest` is split into a Typer command and `_ingest_pipeline`, the plain
+    # function `run` actually calls — see cli.py's comment on `run()`.
+    monkeypatch.setattr(cli, "_ingest_pipeline", lambda **kw: seen.__setitem__("ingest", kw))
+    for name in ("refs", "scout", "check", "highlight", "report"):
         monkeypatch.setattr(cli, name, (lambda n: lambda **kw: seen.__setitem__(n, kw))(name))
 
     cli.run(manuscript=pdf, case=None, provided=None, email="test@example.org", model=None,
@@ -305,7 +308,7 @@ def test_ingest_refuses_to_overwrite_another_papers_manuscript_slot(tmp_path, of
              parse_only=False, backend="pymupdf")
 
     with pytest.raises(typer.Exit):
-        cli.ingest(pdf=new_pdf, out=None, case=case, backend="pymupdf")
+        cli._ingest_pipeline(pdf=new_pdf, out=None, case=case, backend="pymupdf")
 
     smap = json.loads((case / "ingest" / "manuscript" / "source_map.json").read_text())
     body = " ".join(b.get("text", "") for b in smap["blocks"])
@@ -323,7 +326,7 @@ def test_ingest_of_a_cited_source_into_the_same_case_is_untouched(tmp_path, offl
 
     cli.refs(manuscript=paper, case=case, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
-    cli.ingest(pdf=source, out=None, case=case, backend="pymupdf")
+    cli._ingest_pipeline(pdf=source, out=None, case=case, backend="pymupdf")
 
     assert (case / "ingest" / "smith-2020" / "source_map.json").exists()
 
