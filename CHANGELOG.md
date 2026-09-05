@@ -180,6 +180,15 @@ reference list, so the audit reported a gap that does not exist — in the one
 figure it computes mechanically so that it cannot. Both the label reading and
 the `clean.md` occurrence fallback now cut on the shared rule.
 
+### Fixed — the "no case folder" hint implied a search it never ran
+
+`check`, `highlight`, `report` and `scout` take no manuscript path, so when
+`-c` is omitted and no case folder is found, the hint had nothing to look
+beside and only ever checked the current working directory — but it said "no
+case folder found here," which reads as an exhaustive search. Reworded to "no
+case folder found in the current directory," naming the one thing that was
+actually checked.
+
 ### Fixed — a table's own numbers were read as citations
 
 `_LABEL_GROUP` matches `[N]` and `[N, M]` alike, and a results table's 95% CI

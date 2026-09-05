@@ -109,6 +109,22 @@ def test_report_says_cited_sources_are_read_as_flat_text(tmp_path):
     assert "flat" in out.lower()
 
 
+def test_no_case_hint_does_not_claim_a_search_it_never_ran(tmp_path, monkeypatch):
+    """A staged command takes no manuscript path, so `_stage_case`'s hint has
+    nothing to look beside — it only ever checks the current working
+    directory. "no case folder found here" reads as if a broader search came
+    up empty; it must say what was actually checked instead."""
+    from typer.testing import CliRunner
+
+    from papertrace.cli import app
+
+    monkeypatch.chdir(tmp_path)
+    res = CliRunner().invoke(app, ["report"])
+    assert res.exit_code == 2
+    out = " ".join(res.output.split())
+    assert "current directory" in out.lower()
+
+
 # --- the noise, silenced at the only seam that works ----------------------
 
 

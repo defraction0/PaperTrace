@@ -113,7 +113,8 @@ def _stage_case(case: Path | None) -> Path:
     hint = (
         "  audits in this folder: " + ", ".join(f"[cyan]-c {n}[/cyan]" for n in found[:8])
         if found
-        else "  no case folder found here — `papertrace run <paper.pdf>` makes one."
+        else "  no case folder found in the current directory — "
+        "`papertrace run <paper.pdf>` makes one."
     )
     console.print(f"[red]which audit? this step needs [bold]-c <case folder>[/bold].[/red]\n{hint}")
     raise typer.Exit(2)
