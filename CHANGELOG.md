@@ -4,6 +4,52 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.5.0] — unreleased
+
+0.4.1 was never released, so its entries below ship together with these.
+
+### Decided against — two proposals declined in writing, with reasons on file
+
+A full-stack review raised seven items. Five became changes; two are declined,
+and `docs/adr/` now exists to record why so that a future review does not
+re-derive them. Choosing not to build something is user-visible scope, which
+is why it is here and not only in a commit message.
+
+- **No gold benchmark, and therefore still no accuracy figure**
+  ([ADR 0001](docs/adr/0001-no-gold-benchmark.md)). The evaluation harness is
+  not the thing that was missing: `evals/` already holds ten modules, 22 metric
+  functions, a JSON-schema'd gold contract and twelve CI-green test modules,
+  and `evals/PROPOSAL.md` already specifies the ≥40-case paired set down to its
+  acceptance criteria. What is missing is data, and one precondition for it —
+  `evals/DESIGN.md` requires ≥ 2 labellers who did not write the prompts.
+  There is one maintainer, who wrote them. Building the set self-labelled would
+  produce a number the harness itself prints a conflict-of-interest caveat
+  against, and a number nobody may cite is worse than no number, because the
+  number gets cited. `evals/PROPOSAL.md` is kept, with its status updated: it
+  is the plan if that precondition ever changes.
+
+  The consequence is stated rather than glossed: the other changes in this
+  release **ship unmeasured**. They remove mechanisms that could only degrade
+  judgment quality; that is not the same as evidence it improved, and the two
+  are not blurred anywhere in this file or the README.
+
+- **No GROBID** ([ADR 0002](docs/adr/0002-no-grobid.md)). The reference
+  parsing and reconciliation really is ~707 contiguous lines of `refs.py`, but
+  only ~261 of those are *parsing* a specialist parser would displace. The
+  other ~470 — the Crossref deposit, corroboration and `reconcile` — exist
+  because any reading of a reference list can be wrong and the tool must be
+  able to say so, and they survive a parser swap: a parser cannot certify
+  itself. Against that, GROBID wants Java, Docker and 2–4 GB of memory, and
+  its own citation-context linking is 0.76–0.91 F1 — a probabilistic gain for
+  a disqualifying deployment cost in a `pip install` tool. Not benchmarking it
+  is part of the decision: a benchmark is only worth running if a favourable
+  result would change the outcome. The roadmap item is removed rather than left
+  implying a plan that does not exist.
+
+  Superscript-citation support, which shares this surface and would fix three
+  of seven papers with unconfirmed numbering, is unaffected and remains the
+  higher-value work here.
+
 ## [0.4.1] — unreleased
 
 ### Added — the reference list is now checked against what the paper cites

@@ -565,7 +565,6 @@ generated: `python scripts/make_logo.py`. Changes are tracked in
 - [ ] MCP server — drive PaperTrace as a tool from any MCP-capable client
 - [ ] DOCX ingest
 - [ ] Revision (R1) mode polish
-- [ ] GROBID-grade reference parsing
 - [ ] Figure-vs-text consistency pass (batch)
 - [ ] PyPI release
 - [ ] Journal review packs — may be added in the future
