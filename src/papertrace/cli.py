@@ -346,8 +346,19 @@ def start() -> None:
 
 
 @app.command(rich_help_panel="Utilities")
-def init(case: Path = typer.Argument(Path("case"), help="Case folder to create")) -> None:
+def init(
+    case: Path = typer.Argument(None, help="Case folder to create (default: ./case)"),
+    manuscript: Path = typer.Option(
+        None, "--for", exists=True,
+        help="Name the folder the way `run`/`refs` would for this paper, so a plain "
+        "follow-up run finds it on its own instead of leaving ./case/ orphaned",
+    ),
+) -> None:
     """Create a case folder skeleton (gitignored by design — keep manuscripts local)."""
+    # an explicit folder name always wins; --for only fills in what an
+    # unnamed default would otherwise have to guess
+    if case is None:
+        case = default_case(manuscript) if manuscript else Path("case")
     _open_case(case)
     for sub in ("sources", "form", "ingest", "out/evidence"):
         (case / sub).mkdir(parents=True, exist_ok=True)
@@ -355,9 +366,14 @@ def init(case: Path = typer.Argument(Path("case"), help="Case folder to create")
     console.print(f"case folder ready: [cyan]{case}/[/cyan]")
     console.print("  put reference PDFs you already have into [cyan]sources/[/cyan]")
     console.print("  put your questions or form-field screenshots into [cyan]form/[/cyan]")
-    # `run` and `refs` name their own folder after the paper, so a hand-made one
-    # is only used if it is passed - saying so here beats orphaned sources/
-    console.print(f"  [dim]hand this folder to every step: [cyan]-c {case}[/cyan][/dim]")
+    if manuscript:
+        console.print(
+            f"  [dim]papertrace run {manuscript} will find this folder automatically[/dim]"
+        )
+    else:
+        # `run` and `refs` name their own folder after the paper, so a hand-made
+        # one is only used if it is passed - saying so here beats orphaned sources/
+        console.print(f"  [dim]hand this folder to every step: [cyan]-c {case}[/cyan][/dim]")
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")

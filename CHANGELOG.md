@@ -180,6 +180,16 @@ reference list, so the audit reported a gap that does not exist — in the one
 figure it computes mechanically so that it cannot. Both the label reading and
 the `clean.md` occurrence fallback now cut on the shared rule.
 
+### Added — `init --for <paper>` names the case folder the way `run` would
+
+`init` then `run paper.pdf` used to orphan `case/sources/`: `run`/`refs` name
+their own folder after the paper, so a hand-made `./case/` is only reused if
+`-c case` is remembered every time. `init --for paper.pdf` now names the
+folder exactly as `default_case` would, so a plain follow-up
+`papertrace run paper.pdf` finds it automatically. An explicit folder name
+still wins over `--for`; omitting `--for` keeps the previous `./case/`
+default and its `-c` reminder.
+
 ### Fixed — the judging call ran with the wrong repo's rules and a full toolset
 
 `_ask`, the only seam that calls a model, passed no `cwd` to `claude -p` and no
