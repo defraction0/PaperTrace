@@ -423,6 +423,57 @@ def crossref_reference_list(
     return deposit.entries or None
 
 
+# Two readings of one bibliography are a fingerprint of the paper they belong
+# to. Measured on the 41-reference audit: 38 of 41 deposited works appear
+# somewhere in the printed list (93%), against 0 of 41 for a different paper —
+# a separation wide enough that the threshold is not a tuning parameter.
+_CORROBORATION_RATIO = 0.5
+# Below this, agreement is a coincidence a short comment piece can produce.
+_CORROBORATION_MIN = 5
+
+
+@dataclass(frozen=True)
+class Corroboration:
+    """Whether two readings of a reference list describe the same paper's work.
+
+    `refutes` is always False, and that asymmetry is the point: agreement is
+    evidence of identity, disagreement is *not* evidence of difference. Two
+    lists that disagree may be one paper read badly — which is the case this
+    whole module exists for — so a low overlap leaves the identity unconfirmed
+    rather than calling the record another paper.
+    """
+
+    found: int = 0
+    total: int = 0
+    confirms: bool = False
+    too_few: bool = False
+    refutes: bool = False  # never true; named so the asymmetry is readable
+
+
+def deposit_corroborates(deposit: list[RefEntry], parsed: list[RefEntry]) -> Corroboration:
+    """Do these two readings of a reference list name the same works?
+
+    Set membership, not position. Positionally the audited paper scores 34%
+    against its own deposit, because its parse is misnumbered from [15] on —
+    and the numbering is exactly the thing in question, so it cannot be an input
+    to the identity test.
+
+    This is the identity check for a paper whose title cannot be read: an
+    article-type banner where the title should be, no metadata, and a converter
+    that offers nothing better.
+    """
+    if len(deposit) < _CORROBORATION_MIN or len(parsed) < _CORROBORATION_MIN:
+        return Corroboration(total=len(deposit), too_few=True)
+    # Counted whole, with no early exit once the threshold is settled: `found`
+    # is printed to the reader as "N of M", and a comparison that stopped
+    # counting would report a lower bound as if it were the number. The cost is
+    # quadratic and measured: 6 ms at 41 references, 39 ms at 100, 0.9 s at 500
+    # — against a run that makes paid model calls.
+    found = sum(1 for d in deposit if any(_same_work(d, p) for p in parsed))
+    return Corroboration(found=found, total=len(deposit),
+                         confirms=found / len(deposit) >= _CORROBORATION_RATIO)
+
+
 # ---------------------------------------------------------------------------
 # reconciliation — the body's labels arbitrate between two candidate readings
 # ---------------------------------------------------------------------------

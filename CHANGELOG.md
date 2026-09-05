@@ -52,6 +52,29 @@ produces a confident audit of the wrong papers. One live run misnumbered 27 of
   deposit aside, and too little title to compare leaves the list in use with the
   identity disclosed as unconfirmed rather than assumed either way. The DOI used
   and where it came from are printed and recorded.
+- **The paper's title comes from the paper, not from its layout.** Source maps
+  record `declared_title`, the title the PDF states in its own metadata.
+  Measured on the seven-paper spread, the first heading is the article-type
+  banner whenever the layout heuristic was wrong — `CLINICAL GUIDELINE`,
+  `RESEARCH ARTICLE`, `Journal Pre-proofs`, `Editorial` — while the metadata
+  carried the exact title for six of the seven. Docling does not help here: on
+  the seventh it emits no `title` item at all. A declaration that is not
+  title-shaped (too few words, a producer's filename, a `Microsoft Word -`
+  prefix) is passed over for the layout, because an author's PDF declares the
+  name of the file it was exported from, and this tool's main case is an
+  author's PDF. `scout` uses the same title to identify the paper, so its
+  Europe PMC lookup stops searching for "RESEARCH ARTICLE".
+- **A paper's bibliography identifies it when its title cannot.** Where the
+  title comparison is unverifiable, the deposit is checked against the reference
+  list printed in the paper: 38 of 41 deposited works appear in the printed list
+  for the audited paper, against 0 of 41 for a different paper's list. Compared
+  as a set, never positionally — the same pair scores 34% in order, because that
+  paper's parse is the misnumbered one this feature exists to catch, so the
+  numbering cannot be an input to the identity test. The asymmetry is
+  deliberate: agreement is evidence of identity, disagreement is not evidence of
+  difference, since two lists that disagree may be one paper read badly. Across
+  the spread this settles all seven papers — six by title, one by bibliography,
+  where before it settled three.
 - **Failure is disclosed, not fatal.** When neither reading can be confirmed the
   audit continues, a run-level disclosure states that the numbering is
   unconfirmed, and every claim citing a doubtful label carries the caveat beside

@@ -95,9 +95,13 @@ went uncited?**
   because Crossref's own count field counts what was deposited. The
   manuscript's labels are what catch it. And the DOI is checked against the
   paper before its record is trusted: a deposit whose Crossref record is titled
-  as some other paper is set aside, and where there is too little title to
-  compare, the list is used but the manifest says the identity behind it was
-  never confirmed.
+  as some other paper is set aside. The paper's title is taken from the PDF's
+  own metadata where it states one, since the largest heading on a first page
+  is often the article-type banner rather than the title. Where the titles
+  cannot be compared, the paper's own bibliography settles it — the works the
+  publisher deposited are looked for in the reference list printed in the
+  paper — and where neither can, the list is used and the manifest says the
+  identity behind it was never confirmed.
 - Report every citation **occurrence** — each bracketed marker at its own place
   in the text — that no extracted claim reached, so a second sentence citing an
   already-checked reference is not silently counted as covered. It also

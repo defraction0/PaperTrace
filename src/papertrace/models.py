@@ -46,20 +46,48 @@ def is_references_heading(block_type: str, text: str) -> bool:
     return bool(_REFS_HEADING_EXACT.match(text))
 
 
+# What a PDF declares as its title but is not one. Three bounded rules, each
+# from an observed shape, not a list that grows with every journal:
+# a banner or placeholder (too few words), a producer's filename, and a
+# producer's prefix. `Microsoft Word - Manuscript revised final clean.docx` is
+# the shape that matters — a Word-produced manuscript is this tool's main case,
+# and four confident words describing no paper would let the identity check
+# report a mismatch and discard a good deposit.
+_TITLE_FILE_SUFFIX = re.compile(r"\.(docx?|tex|dvi|indd|pdf|rtf|odt|pages)$", re.I)
+_TITLE_PRODUCER = re.compile(r"^\s*microsoft\s+(word|powerpoint)\s*-", re.I)
+
+
+def _declared_title_is_usable(title: str) -> bool:
+    title = (title or "").strip()
+    return (
+        len(title.split()) >= 3
+        and not _TITLE_FILE_SUFFIX.search(title)
+        and not _TITLE_PRODUCER.match(title)
+    )
+
+
 def paper_title(smap) -> str:
     """Best-effort title of the paper a source map describes.
 
-    The first substantial section header, else the first substantial text block.
-    Third rule to live here for the reason the two above it do: `scout` needs it
-    to identify the paper in Europe PMC, and `refs` needs it to check that the
-    Crossref record behind a DOI is this paper at all — and neither module may
-    import the other.
+    What the PDF declares about itself first, then the layout: the first
+    substantial section header, else the first substantial text block. Third
+    rule to live here for the reason the two above it do — `scout` needs it to
+    identify the paper in Europe PMC and `refs` needs it to check that the
+    Crossref record behind a DOI is this paper, and neither module may import
+    the other.
 
-    Best-effort, and treated as such by both callers: a first page whose opening
-    block is a journal banner yields a title that identifies nothing, which is
-    why the identity check it feeds has an "unverifiable" answer and does not
-    read a thin title as a mismatch.
+    The declaration comes first because the layout is measurably worse at this:
+    on a seven-paper spread the first heading was the article-type banner every
+    time it was wrong, and a banner identifies nothing. It is not trusted
+    blindly either — an author's PDF declares its Word filename — so a
+    declaration that is not title-shaped is passed over for the layout.
+
+    Still best-effort, and treated as such by both callers: this is why the
+    identity check it feeds has an "unverifiable" answer and never reads a thin
+    title as a mismatch.
     """
+    if _declared_title_is_usable(getattr(smap, "declared_title", "")):
+        return " ".join(smap.declared_title.split())[:220]
     for b in smap.blocks:
         if b.type == "sectionheader" and len(b.text.strip()) >= 15:
             return " ".join(b.text.split())[:220]
@@ -182,6 +210,13 @@ class SourceMap:
     # directory named after a slug is trusted to hold whatever it holds — and
     # slugs are not eternal, so a re-run can read the previous occupant.
     source_sha256: str | None = None
+    # the title the PDF declares about itself (XMP / Info dictionary), verbatim
+    # and unjudged. Publishers populate it and the layout does not: measured on
+    # seven papers, the first heading is the article-type banner — `CLINICAL
+    # GUIDELINE`, `RESEARCH ARTICLE`, `Journal Pre-proofs`, `Editorial` — while
+    # the metadata carried the exact title for six of the seven. Recording it
+    # raw is provenance; deciding whether it is usable is `paper_title`'s job.
+    declared_title: str = ""
 
     def to_json(self, path: Path) -> None:
         payload = {
@@ -189,6 +224,7 @@ class SourceMap:
             "pages": self.pages,
             "converter": self.converter,
             "source_sha256": self.source_sha256,
+            "declared_title": self.declared_title,
             "blocks": [
                 {**asdict(b), "bbox": list(b.bbox), "text_preview": b.preview} for b in self.blocks
             ],
@@ -217,6 +253,7 @@ class SourceMap:
             # absent on maps written before content hashing — None means
             # "unknown", never "matches", so a reader must re-establish it
             source_sha256=data.get("source_sha256"),
+            declared_title=data.get("declared_title", ""),
         )
 
     def find(self, block_id: str) -> Block | None:

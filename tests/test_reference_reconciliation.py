@@ -887,3 +887,193 @@ def test_a_deposits_author_initials_do_not_become_the_slug():
         entries = crossref_reference_list(client, "10.1/paper", "t@example.org")
 
     assert [e.slug for e in entries] == ["huang-2020", "abbott-2016", "foy-2019"]
+
+
+# --- the paper's own title, as the PDF declares it ---------------------------
+#
+# Measured on seven papers, four publishers: the block heuristic returns the
+# article-type banner, not the title — `CLINICAL GUIDELINE` (Wiley),
+# `RESEARCH ARTICLE` (Springer), `Journal Pre-proofs` (Elsevier), `Editorial`
+# (AMA). The PDF's own metadata carries the exact title for six of the seven.
+# Docling does not help: on the seventh it emits no `title` item at all and
+# labels the real title `section_header`, behind the banner.
+
+
+def _pdf_with_metadata_title(path: Path, title: str, first_block: str = "CLINICAL GUIDELINE"):
+    import pymupdf
+
+    doc = pymupdf.open()
+    doc.set_metadata({"title": title})
+    page = doc.new_page()
+    page.insert_text((72, 100), first_block, fontsize=16)
+    page.insert_text((72, 140), "Body text long enough to be a candidate title block.", fontsize=11)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_ingest_records_the_title_the_pdf_declares(tmp_path):
+    """Recorded verbatim at ingest, for both backends, because it is provenance:
+    what the document says about itself. Whether it is *usable* is a separate
+    question, answered by `paper_title`."""
+    from papertrace.ingest import ingest_pdf
+
+    pdf = _pdf_with_metadata_title(tmp_path / "p.pdf", "A Real Article Title About Pancreas CT")
+    smap = ingest_pdf(pdf, tmp_path / "out", backend="pymupdf")
+    assert smap.declared_title == "A Real Article Title About Pancreas CT"
+
+    from papertrace.models import SourceMap
+
+    assert SourceMap.from_json(tmp_path / "out" / "source_map.json").declared_title == \
+        "A Real Article Title About Pancreas CT"
+
+
+def test_a_source_map_without_a_declared_title_still_loads(tmp_path):
+    """Additive, like every other field added here: an older map opens, and the
+    absence reads as "not recorded" rather than as an empty title."""
+    import json
+
+    from papertrace.models import SourceMap
+
+    p = tmp_path / "old.json"
+    p.write_text(json.dumps({"doc": "p.pdf", "pages": 1, "converter": "pymupdf", "blocks": []}))
+    assert SourceMap.from_json(p).declared_title == ""
+
+
+def test_paper_title_prefers_what_the_pdf_declares_over_the_first_block(tmp_path):
+    """The whole point: `CLINICAL GUIDELINE` is what the layout offers and it
+    identifies nothing."""
+    from papertrace.ingest import ingest_pdf
+    from papertrace.models import paper_title
+
+    pdf = _pdf_with_metadata_title(tmp_path / "p.pdf",
+                                   "Gaussian mixture modelling of intramuscular fat")
+    smap = ingest_pdf(pdf, tmp_path / "out", backend="pymupdf")
+    assert paper_title(smap) == "Gaussian mixture modelling of intramuscular fat"
+
+
+def test_a_producer_artifact_is_not_a_title(tmp_path):
+    """What a Word-produced manuscript declares — this tool's main case. Reading
+    `Microsoft Word - Manuscript revised clean.docx` as the paper's title would
+    hand the identity check four confident words that describe no paper, and a
+    confident mismatch discards a good deposit."""
+    from papertrace.ingest import ingest_pdf
+    from papertrace.models import paper_title
+
+    for junk in ("Microsoft Word - Manuscript revised final clean.docx",
+                 "manuscript_revised_final_clean.docx", "untitled", ""):
+        pdf = _pdf_with_metadata_title(tmp_path / "p.pdf", junk,
+                                       first_block="Body block that is long enough to serve")
+        smap = ingest_pdf(pdf, tmp_path / "out", backend="pymupdf")
+        assert paper_title(smap) == "Body block that is long enough to serve", junk
+
+
+# --- the bibliography as a fingerprint ---------------------------------------
+#
+# Measured on the 41-reference audit: 38 of 41 deposited works appear somewhere
+# in the printed list (93%), and 0 of 41 appear in a different paper's list.
+# Compared as a set, not positionally — the same pair scores 34% in order,
+# because that paper's parse is the misnumbered one this feature exists to
+# catch, and order is precisely what is in question.
+
+
+def test_two_readings_of_one_bibliography_confirm_the_paper(tmp_path):
+    """Identity without a title at all. This has to survive misnumbering, or it
+    would only work on the papers that never needed it."""
+    from papertrace.refs import deposit_corroborates
+
+    deposit = _parsed(list(range(1, 21)))
+    shuffled = [_entry(str(i), e.raw) for i, e in enumerate(reversed(deposit), 1)]
+
+    c = deposit_corroborates(deposit, shuffled)
+    assert c.confirms is True
+    assert (c.found, c.total) == (20, 20)
+
+
+def test_another_papers_bibliography_does_not_confirm_but_does_not_refute(tmp_path):
+    """Asymmetric on purpose: agreement is evidence of identity, disagreement is
+    not evidence of difference — two lists that disagree may be one paper read
+    badly, which is this module's whole subject. So a low overlap says "no
+    evidence", and the caller leaves the identity unconfirmed rather than
+    calling the record another paper."""
+    from papertrace.refs import deposit_corroborates
+
+    c = deposit_corroborates(_parsed(list(range(1, 21))), _parsed(list(range(40, 60))))
+    assert c.confirms is False
+    assert c.found == 0
+    assert c.refutes is False, "a bad parse must not be reported as a wrong paper"
+
+
+def test_a_short_list_agreeing_proves_nothing():
+    """Three references matching is a coincidence a two-page comment can produce."""
+    from papertrace.refs import deposit_corroborates
+
+    c = deposit_corroborates(_parsed([1, 2, 3]), _parsed([1, 2, 3]))
+    assert c.confirms is False
+    assert c.too_few is True
+
+
+def test_an_unverifiable_title_falls_back_to_the_bibliography(tmp_path, monkeypatch):
+    """The AMA-shaped paper: no metadata title, and docling offers only
+    `Editorial`. The deposit is still checkable — against the list printed in
+    the paper itself."""
+    from papertrace.refs import CrossrefDeposit
+
+    manifest = _refs_with_deposit(
+        tmp_path, monkeypatch,
+        CrossrefDeposit(entries=_parsed([1, 2]), deposited=2,
+                        publisher="Fixture Publishing", title=""),
+        title="Editorial",
+    )
+    # two entries is below the floor, so the bibliography cannot settle it either
+    assert "could not be confirmed as this paper" in manifest.numbering_note
+
+
+def _paper_with_n_refs(path: Path, title: str, n: int):
+    """A paper citing [1]..[n], whose printed list holds the same works
+    `_parsed` builds — so a deposit of those works corroborates it."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    doc.set_metadata({"title": title})
+    page = doc.new_page()
+    page.insert_text((72, 60), title, fontsize=16)
+    cites = " ".join(f"[{i}]" for i in range(1, n + 1))
+    page.insert_text((72, 90), f"Body text citing {cites} here.", fontsize=9)
+    page.insert_text((72, 120), "References", fontsize=14)
+    for i in range(1, n + 1):
+        page.insert_text((72, 140 + i * 14), f"[{i}] {_ref_text(i)}", fontsize=7)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_the_bibliography_confirms_the_deposit_when_the_title_cannot(tmp_path, monkeypatch):
+    """The AMA shape with a real reference list: `Editorial` where the title
+    should be, no usable metadata — and the deposit still checked, against the
+    list printed in the paper itself. Without this the gate is inert on the
+    papers whose titles are unreadable, which measurement put at four of seven."""
+    import papertrace.cli as cli_mod
+    import papertrace.refs as refs_mod
+    from papertrace.models import RefManifest
+    from papertrace.refs import CrossrefDeposit
+
+    monkeypatch.setattr(refs_mod, "resolve_all",
+                        lambda entries, dest, email, provided_dir=None, progress=None: entries)
+    monkeypatch.setattr(refs_mod, "crossref_deposit", lambda client, doi, email: CrossrefDeposit(
+        entries=_parsed(list(range(1, 9))), deposited=8,
+        publisher="Fixture Publishing", title="",  # the record offers no title either
+    ))
+
+    pdf = _paper_with_n_refs(tmp_path / "paper.pdf", "Editorial", 8)
+    cli_mod.refs(manuscript=pdf, case=tmp_path / "case", provided=None,
+                 email="t@example.org", parse_only=False, backend="pymupdf",
+                 doi="10.1234/asserted")
+
+    manifest = RefManifest.from_json(tmp_path / "case" / "refs_manifest.json")
+    assert manifest.reference_source == "crossref"
+    assert "8 of the 8 references" in manifest.numbering_note
+    assert "another paper's bibliography would not" in manifest.numbering_note
+    assert "unverified" not in manifest.numbering_note

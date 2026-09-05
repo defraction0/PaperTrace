@@ -21,6 +21,24 @@ from ..models import Block, SourceMap, is_references_heading, looks_like_referen
 _HEADING_MAX_LEN = 120
 
 
+def declared_title(pdf_path: Path) -> str:
+    """The title the PDF declares in its own metadata, verbatim, or "".
+
+    Read here because this module owns the pymupdf import, and read for *both*
+    backends because it is a property of the file rather than of the converter:
+    docling does not expose it, and on the one paper of seven whose metadata is
+    empty docling emitted no `title` item either.
+
+    Never raises: a metadata dictionary this tool cannot read is one more
+    unknown, and the caller already has a fallback for it.
+    """
+    try:
+        with fitz.open(pdf_path) as doc:
+            return " ".join(((doc.metadata or {}).get("title") or "").split())
+    except Exception:  # noqa: BLE001 — an unreadable title is not a failed ingest
+        return ""
+
+
 def _block_text(raw: dict) -> tuple[str, float]:
     """Join a PyMuPDF text block; return (text, max font size)."""
     parts: list[str] = []

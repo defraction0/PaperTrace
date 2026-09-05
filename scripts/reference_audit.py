@@ -36,6 +36,7 @@ from papertrace.models import (  # noqa: E402
 from papertrace.refs import (  # noqa: E402
     _client,
     crossref_deposit,
+    deposit_corroborates,
     deposit_is_this_paper,
     parse_references,
     reconcile,
@@ -88,7 +89,17 @@ def audit(pdf: Path, email: str, backend: str) -> dict:
     identity = (
         deposit_is_this_paper(paper_title(smap), deposit.title) if deposit.entries else None
     )
-    row["identity"] = {True: "confirmed", False: "WRONG PAPER", None: "unverified"}[identity]
+    corroboration = (
+        deposit_corroborates(deposit.entries, parsed)
+        if identity is None and deposit.entries else None
+    )
+    row["identity"] = (
+        "confirmed" if identity
+        else "WRONG PAPER" if identity is False
+        else f"confirmed by bibliography ({corroboration.found}/{corroboration.total})"
+        if corroboration and corroboration.confirms
+        else "unverified"
+    )
     usable = not deposit.unrenderable and identity is not False
     candidate = (deposit.entries or None) if usable else None
     absent = deposit.absent or (

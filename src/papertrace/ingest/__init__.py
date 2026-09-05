@@ -19,7 +19,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..models import Block, SourceMap, manuscript_fingerprint
-from .pymupdf_ import ingest_blocks_pymupdf, references_section, references_span
+from .pymupdf_ import (
+    declared_title,
+    ingest_blocks_pymupdf,
+    references_section,
+    references_span,
+)
 
 __all__ = ["ingest_pdf", "references_section", "references_span", "available_backends"]
 
@@ -74,6 +79,9 @@ def ingest_pdf(pdf_path: Path, out_dir: Path, backend: str = "auto") -> SourceMa
         converter=converter,
         blocks=blocks,
         source_sha256=manuscript_fingerprint(pdf_path),
+        # what the file says its title is — the layout's first heading is the
+        # article-type banner often enough that it cannot be the first choice
+        declared_title=declared_title(pdf_path),
     )
     write_outputs(smap, out_dir)
     return smap

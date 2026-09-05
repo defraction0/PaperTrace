@@ -69,6 +69,10 @@
       "type": "string",
       "description": "ingest backend that produced this map, e.g. 'pymupdf' or 'docling 2.x'"
     },
+    "declared_title": {
+      "type": "string",
+      "description": "the title the PDF declares in its own metadata (XMP / Info dictionary), verbatim and unjudged. Absent on maps written before it was recorded; empty means the file declares none, never that the paper has none. Whether it is title-shaped is decided by models.paper_title, not here."
+    },
     "source_sha256": {
       "type": [
         "string",

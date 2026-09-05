@@ -480,6 +480,7 @@ def refs(
     from .refs import (
         _client,
         crossref_deposit,
+        deposit_corroborates,
         deposit_is_this_paper,
         parse_references,
         reconcile,
@@ -559,21 +560,40 @@ def refs(
             )
         elif deposit.entries:
             crossref_entries = deposit.entries
+            # A title this tool cannot read is common — an article-type banner
+            # where the title should be, and no metadata behind it. The paper's
+            # own bibliography settles it instead: two readings of one reference
+            # list agree about the works, and no other paper's list does.
+            corroboration = (
+                deposit_corroborates(deposit.entries, entries) if identity is None else None
+            )
             # a verified identity is worth as much as the count match it licenses,
             # and an unverifiable one must not be read as either
-            identity_note = (
-                f". The DOI {doi} ({'given' if given else 'read off page 1'}) was "
-                "confirmed as this paper by title"
-                if identity
-                else f". The DOI {doi} ({'given' if given else 'read off page 1'}) could "
-                     "not be confirmed as this paper — there was too little title to "
-                     "compare, so the identity behind this list is unverified"
-            )
+            if identity:
+                identity_note = f". The DOI {doi} was confirmed as this paper by title"
+            elif corroboration and corroboration.confirms:
+                identity_note = (
+                    f". The paper's title could not be compared with the record's, but "
+                    f"{corroboration.found} of the {corroboration.total} references the "
+                    "DOI's record deposited appear in the list printed in this paper, "
+                    "which another paper's bibliography would not"
+                )
+            else:
+                identity_note = (
+                    f". The DOI {doi} could not be confirmed as this paper — too little "
+                    "title to compare, and "
+                    + ("too few references to compare either"
+                       if corroboration and corroboration.too_few
+                       else f"only {corroboration.found} of the {corroboration.total} "
+                            "references it deposited appear in this paper's own list"
+                            if corroboration else "no deposit to compare")
+                    + ", so the identity behind this list is unverified"
+                )
             console.print(
                 f"crossref: [bold]{len(deposit.entries)}[/bold] references deposited by "
                 f"{deposit.publisher or 'the publisher'} "
-                f"[dim](DOI {doi}, {'given' if given else 'read off page 1'}; identity "
-                f"{'confirmed' if identity else 'unverified'})[/dim]"
+                f"[dim](DOI {doi}; identity "
+                f"{'confirmed by title' if identity else 'confirmed by bibliography' if corroboration and corroboration.confirms else 'unverified'})[/dim]"
             )
 
     entries, rec = reconcile(body_labels, crossref_entries, entries, crossref_absent=absent)
