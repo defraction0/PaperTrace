@@ -128,7 +128,7 @@
 {% for j in c.judgements %}
       <div class="cl-meta">
         <span style="display:inline-block;width:190px"><span class="lab">{% if j.kind == "article" %}[{{ j.ref }}] {% else %}[+] {% endif %}</span><span class="st {{ j.verdict }}"><span class="dot">●</span> {{ j.verdict|upper }}</span></span>
-        <span class="from">{{ j.source_slug }}</span><span class="loc"> · {{ j.origin }}</span>{% if j.source_page %}<span class="loc"> · p.{{ j.source_page }}</span>{% endif %}
+        <span class="from">{{ j.source_slug }}</span>{% if j.kind != "article" %}<span class="loc"> · {{ j.origin }}</span>{% endif %}{% if j.source_page %}<span class="loc"> · p.{{ j.source_page }}</span>{% endif %}
       </div>
 {% if j.note %}
       <div class="note"><span class="a">└─</span> {{ j.note }}</div>
@@ -195,7 +195,7 @@
     <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
 {% for j in c.judgements %}
-    <div class="nrrow"><span class="sec"></span><span class="n">{% if j.kind == "article" %}[{{ j.ref }}]{% else %}[+]{% endif %}</span><span class="it dim">{{ j.source_slug }} <span class="s">·</span> {{ j.origin }} <span class="s">·</span> {{ j.verdict }}{% if j.source_page %} <span class="s">·</span> p.{{ j.source_page }}{% endif %}{% if j.note %} <span class="s">·</span> {{ j.note }}{% endif %}</span></div>
+    <div class="nrrow"><span class="sec"></span><span class="n">{% if j.kind == "article" %}[{{ j.ref }}]{% else %}[+]{% endif %}</span><span class="it dim">{{ j.source_slug }} {% if j.kind != "article" %}<span class="s">·</span> {{ j.origin }} {% endif %}<span class="s">·</span> {{ j.verdict }}{% if j.source_page %} <span class="s">·</span> p.{{ j.source_page }}{% endif %}{% if j.note %} <span class="s">·</span> {{ j.note }}{% endif %}</span></div>
 {% for d in judgement_disclosures(j) %}
     <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
