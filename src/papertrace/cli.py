@@ -856,12 +856,10 @@ def _check_pipeline(
     # converter above says nothing about them, and until this was carried the
     # markdown and HTML reports said nothing about them either.
     source_converters: dict[str, str] = {}
-    for e in manifest.entries:
-        if not e.slug:
-            continue
-        sp = case / "ingest" / e.slug / "source_map.json"
-        if sp.exists() and e.slug not in source_converters:
-            source_converters[e.slug] = SourceMap.from_json(sp).converter
+    for doc in manifest.documents():
+        sp = case / "ingest" / doc.slug / "source_map.json"
+        if sp.exists() and doc.slug not in source_converters:
+            source_converters[doc.slug] = SourceMap.from_json(sp).converter
 
     from .check import last_model
 
@@ -967,11 +965,14 @@ def highlight(
         for a in c.judgements or [c]:
             img = crop_for_anchor(a, c.id, case / "sources_resolved", case / "ingest", out_dir)
             if img is None and a.source_slug:
-                # sources provided by the user live elsewhere — try the manifest path
+                # sources provided by the user live elsewhere — try the manifest
+                # path. `document()` and not a scan of `entries`: a supplement is
+                # never in `entries`, so scanning them left every supplement
+                # verdict with no crop and no reason given.
                 manifest = RefManifest.from_json(case / "refs_manifest.json")
-                entry = next((e for e in manifest.entries if e.slug == a.source_slug), None)
-                if entry and entry.pdf_path:
-                    src = Path(entry.pdf_path)
+                doc = manifest.document(a.source_slug)
+                if doc and doc.pdf_path:
+                    src = Path(doc.pdf_path)
                     tmp = case / "sources_resolved" / f"{a.source_slug}.pdf"
                     if src.exists() and not tmp.exists():
                         tmp.parent.mkdir(parents=True, exist_ok=True)

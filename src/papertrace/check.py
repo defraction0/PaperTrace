@@ -890,13 +890,15 @@ def check_claims(
             # FileNotFoundError buries the real problem. It degrades per
             # judgement instead, with a note naming the fix — see
             # SourceProvenance.read.
-            entry = next(e for e in manifest.entries if e.slug == slug)
+            doc = manifest.document(slug)
+            if doc is None:  # pragma: no cover - every judged slug names a document
+                raise KeyError(f"no document named {slug!r} in the manifest")
             if not annotated.exists() or _stale_ingest(
-                ingest_dir, entry.pdf_path, backend=backend
+                ingest_dir, doc.pdf_path, backend=backend
             ):
                 from .ingest import ingest_pdf
 
-                ingest_pdf(Path(entry.pdf_path), ingest_dir, backend=backend)
+                ingest_pdf(Path(doc.pdf_path), ingest_dir, backend=backend)
             # the quote goes with the paraphrase, not instead of it: the judge
             # is told to rule on the quote, and the paraphrase stays so a claim
             # whose extraction returned no quote is still judgeable

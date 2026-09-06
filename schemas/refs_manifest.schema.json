@@ -102,6 +102,27 @@
               null
             ],
             "description": "Whether anyone established that the retrieved or provided file is the paper the reference names. 'unverifiable' (e.g. a scanned first page) is not 'verified' and must never be reported as a match."
+          },
+          "supplements": {
+            "type": "array",
+            "description": "Supplementary files the user supplied for this reference, each judged as its own document. Only ever non-empty when the reference itself is available: a supplement with no article behind it is set aside rather than allowed to stand in for the cited source. Absent on manifests written before 0.6.0, where it means none were supplied. Note that no supplement carries a title_check — a supplement's own title does not match its parent's, so the identity check that guards every article cannot apply, and these are attached on a filename match alone.",
+            "items": {
+              "type": "object",
+              "required": [
+                "slug",
+                "pdf_path"
+              ],
+              "properties": {
+                "slug": {
+                  "type": "string",
+                  "description": "The id this document is read, ingested and cropped under: ingest/<slug>/ and sources_resolved/<slug>.pdf. Derived from the file stem and never from an ordinal position in the folder, so removing one file cannot silently re-point another document's stored verdicts."
+                },
+                "pdf_path": {
+                  "type": "string",
+                  "description": "Local path to the supplementary PDF, as supplied by the user."
+                }
+              }
+            }
           }
         }
       }
@@ -132,6 +153,27 @@
       ],
       "minimum": 1,
       "description": "The first citation label from which the numbering is in doubt, or null when it is not in doubt. 1 means 'from the very start', which is what a single unchecked reading warrants: one candidate gives no evidence about where it went wrong."
+    },
+    "manuscript_supplements": {
+      "type": "array",
+      "description": "Supplementary material belonging to the AUDITED paper, supplied with --supplement. Deliberately not an entry in `entries`: it answers for no citation label, so putting it there would inflate the reference total and let a claim citing a number be handed the paper's own appendix. Absent on manifests written before 0.6.0.",
+      "items": {
+        "type": "object",
+        "required": [
+          "slug",
+          "pdf_path"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "The id this document is read, ingested and cropped under, derived from the file stem."
+          },
+          "pdf_path": {
+            "type": "string",
+            "description": "Local path to the supplementary PDF, as supplied by the user."
+          }
+        }
+      }
     }
   }
 }

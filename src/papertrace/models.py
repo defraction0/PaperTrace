@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -334,6 +334,54 @@ def manuscript_fingerprint(path: Path) -> str:
     return h.hexdigest()
 
 
+# What a judgeable file *is*, as distinct from which reference it answers for.
+# `article` is the cited work itself; `supplement` accompanies one; the audited
+# paper's own supplementary material is neither — it answers for no citation
+# label at all, which is why it cannot just be a `supplement` with an empty ref.
+DOCUMENT_KINDS = ("article", "supplement", "own_supplement")
+
+
+@dataclass
+class Supplement:
+    """One supplementary file the user handed over, and the slug it is read as.
+
+    The slug is derived from the FILE STEM, never from an ordinal position in
+    the folder. `-suppl1`/`-suppl2` assigned in sorted order is the same defect
+    CLAUDE.md rejects for citation occurrences: remove one file and every id
+    after it silently shifts, so a re-run points last run's verdicts and
+    evidence crops at a different PDF.
+
+    There is no `title_check`. Every article this tool accepts is checked
+    against the reference that names it; a supplement's own title does not
+    match its parent's, so that check cannot apply and is not faked. A
+    supplement is attached on a filename match alone — the weakest provenance
+    anything here carries — and the report says so rather than letting it pass
+    as an equal of a verified source.
+    """
+
+    slug: str
+    pdf_path: str
+
+
+@dataclass(frozen=True)
+class Document:
+    """One file a claim can be judged against, with the reference it answers for.
+
+    The join key everything downstream already uses is the *slug*:
+    `ingest/<slug>/`, `sources_resolved/<slug>.pdf`, `SourceJudgement.source_slug`
+    and `RunResults.source_converters` all key off it. Four call sites used to
+    hand-roll `next(e for e in manifest.entries if e.slug == slug)`, which can
+    only ever find an article. Resolving through here instead means none of them
+    has to learn that supplements exist.
+    """
+
+    slug: str
+    pdf_path: str | None
+    ref_num: str  # the citation label this document answers for; "" for the paper's own
+    kind: str  # one of DOCUMENT_KINDS
+    parent_slug: str | None  # the article this accompanies, or None
+
+
 @dataclass
 class RefEntry:
     num: str  # citation label as used in the manuscript, e.g. "14"
@@ -355,6 +403,30 @@ class RefEntry:
     # A single nullable "did the check fail" flag conflated the first two, so a
     # scanned PDF read as a successful match.
     title_check: str | None = None
+    # supplementary files the user supplied for THIS reference. Only ever
+    # non-empty when the reference itself is available: a supplement with no
+    # article behind it is set aside, because judging a claim against an
+    # appendix while calling it the cited source is the laundering this
+    # codebase exists to prevent.
+    supplements: list[Supplement] = field(default_factory=list)
+
+
+def _ref_entry_from(d: dict) -> RefEntry:
+    """One manifest entry, hydrated — the counterpart of `_claim_from` below.
+
+    Two things a bare `RefEntry(**d)` got wrong. It handed `supplements` back as
+    a list of plain dicts, because nothing in this manifest was a nested
+    dataclass until now and `asdict` flattens on the way out. And it raised
+    `TypeError` on any key it did not declare, so a manifest written by a NEWER
+    papertrace killed an older one outright instead of ignoring what it could
+    not use — the opposite of how every other reader here defaults forward.
+    """
+    known = {f.name for f in fields(RefEntry)}
+    kwargs = {k: v for k, v in d.items() if k in known and k != "supplements"}
+    return RefEntry(
+        **kwargs,
+        supplements=[Supplement(**s) for s in d.get("supplements", [])],
+    )
 
 
 @dataclass
@@ -385,6 +457,44 @@ class RefManifest:
     # candidate, because a single unchecked reading gives no evidence about
     # *where* it went wrong
     unverified_from: int | None = None
+    # the AUDITED paper's own supplementary material. Not a RefEntry: it answers
+    # for no citation label, and putting it in `entries` would inflate
+    # `refs_total` and let `_slug_for_ref` hand it to a claim citing a number.
+    manuscript_supplements: list[Supplement] = field(default_factory=list)
+
+    def document(self, slug: str) -> Document | None:
+        """The judgeable file this slug names, article or supplement, or None."""
+        for e in self.entries:
+            if e.slug == slug:
+                return Document(slug, e.pdf_path, e.num, "article", None)
+            for s in e.supplements:
+                if s.slug == slug:
+                    return Document(slug, s.pdf_path, e.num, "supplement", e.slug)
+        for s in self.manuscript_supplements:
+            if s.slug == slug:
+                return Document(slug, s.pdf_path, "", "own_supplement", None)
+        return None
+
+    def documents(self) -> list[Document]:
+        """Every judgeable file, once, in reading order.
+
+        A caller walking `entries` sees only articles — which is how the reports
+        came to disclose how each *source* was read while saying nothing at all
+        about the supplements judged beside them.
+        """
+        out: list[Document] = []
+        for e in self.entries:
+            if e.slug:
+                out.append(Document(e.slug, e.pdf_path, e.num, "article", None))
+            out += [
+                Document(s.slug, s.pdf_path, e.num, "supplement", e.slug)
+                for s in e.supplements
+            ]
+        out += [
+            Document(s.slug, s.pdf_path, "", "own_supplement", None)
+            for s in self.manuscript_supplements
+        ]
+        return out
 
     def label_is_doubtful(self, label: str) -> bool:
         """Does a claim citing this label rest on a numbering nobody confirmed?
@@ -434,6 +544,7 @@ class RefManifest:
                 },
             },
             "entries": [asdict(e) for e in self.entries],
+            "manuscript_supplements": [asdict(s) for s in self.manuscript_supplements],
         }
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
 
@@ -442,7 +553,10 @@ class RefManifest:
         data = json.loads(path.read_text())
         return cls(
             manuscript=data["manuscript"],
-            entries=[RefEntry(**e) for e in data["entries"]],
+            entries=[_ref_entry_from(e) for e in data["entries"]],
+            manuscript_supplements=[
+                Supplement(**s) for s in data.get("manuscript_supplements", [])
+            ],
             manuscript_sha256=data.get("manuscript_sha256"),
             # .get: a manifest written before this field must still load
             references_resumed=bool(data.get("references_resumed", False)),
