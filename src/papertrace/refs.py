@@ -1010,6 +1010,26 @@ def attach_supplements(entry: RefEntry, provided_dir: Path | None, taken: set[st
         entry.supplements.append(Supplement(slug=slug, pdf_path=str(pdf)))
 
 
+def manuscript_supplements(paths: list[Path], taken: set[str]) -> list[Supplement]:
+    """The audited paper's own supplementary files, as documents.
+
+    Named explicitly with `--supplement` rather than discovered by filename:
+    the sources folder is matched against *reference* slugs, and the paper under
+    audit has none to match, so there is nothing for the convention to key on.
+
+    Shares `taken` with the reference supplements for the reason they share it
+    with each other — a slug is a folder under `ingest/` and a file under
+    `sources_resolved/`, so the paper's appendix colliding with a cited source
+    means one silently reading the other's pages.
+    """
+    out = []
+    for p in paths:
+        slug = _free_slug(_stem_slug(p), taken)
+        taken.add(slug)
+        out.append(Supplement(slug=slug, pdf_path=str(p)))
+    return out
+
+
 def orphaned_supplements(
     entries: list[RefEntry], provided_dir: Path | None
 ) -> list[tuple[Path, str]]:
@@ -1295,12 +1315,16 @@ def resolve_all(
     email: str,
     provided_dir: Path | None = None,
     progress: ProgressCb | None = None,
+    taken: set[str] | None = None,
 ) -> list[RefEntry]:
     dest_dir.mkdir(parents=True, exist_ok=True)
     # one registry for the whole run, seeded with the article slugs `_unique_slugs`
     # already fixed at parse time — supplements are only discovered here, so they
     # cannot go through it and must not be allowed to shadow an article's folder.
-    taken = {e.slug for e in entries if e.slug}
+    # The caller may pass its own so the AUDITED paper's supplements, which are
+    # named on the command line rather than found here, share the same namespace.
+    taken = set() if taken is None else taken
+    taken |= {e.slug for e in entries if e.slug}
     with _client() as client:
         for entry in entries:
             resolve_entry(entry, dest_dir, email, client, provided_dir)

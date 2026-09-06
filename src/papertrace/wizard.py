@@ -418,6 +418,7 @@ def run_wizard() -> None:
     run_cmd(
         manuscript=paper, case=case, provided=None, email=email, model=None,
         png=png, backend="auto", with_scout=with_scout, doi=doi, formats=None,
+        supplement=None,
     )
 
 

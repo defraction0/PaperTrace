@@ -589,7 +589,7 @@ def test_refs_records_the_reconciliation_it_performed(tmp_path, monkeypatch):
     from papertrace.refs import CROSSREF_NO_DOI, CrossrefDeposit
 
     monkeypatch.setattr(refs_mod, "resolve_all",
-                        lambda entries, dest, email, provided_dir=None, progress=None: entries)
+                        lambda entries, dest, email, provided_dir=None, progress=None, taken=None: entries)
     seen = {}
 
     def _no_deposit(client, doi, email):
@@ -600,7 +600,8 @@ def test_refs_records_the_reconciliation_it_performed(tmp_path, monkeypatch):
 
     pdf = _one_page_paper(tmp_path / "paper.pdf")
     cli_mod.refs(manuscript=pdf, case=tmp_path / "case", provided=None,
-                 email="t@example.org", parse_only=False, backend="pymupdf", doi=None)
+                 email="t@example.org", parse_only=False, backend="pymupdf", doi=None,
+                 supplement=None)
 
     assert seen["doi"] is None, "an unpublished manuscript has no DOI to look up"
     manifest = RefManifest.from_json(tmp_path / "case" / "refs_manifest.json")
@@ -641,13 +642,13 @@ def _refs_with_deposit(tmp_path, monkeypatch, deposit, title="Image registration
     from papertrace.models import RefManifest
 
     monkeypatch.setattr(refs_mod, "resolve_all",
-                        lambda entries, dest, email, provided_dir=None, progress=None: entries)
+                        lambda entries, dest, email, provided_dir=None, progress=None, taken=None: entries)
     monkeypatch.setattr(refs_mod, "crossref_deposit", lambda client, doi, email: deposit)
 
     pdf = _titled_paper(tmp_path / "paper.pdf", title)
     cli_mod.refs(manuscript=pdf, case=tmp_path / "case", provided=None,
                  email="t@example.org", parse_only=False, backend="pymupdf",
-                 doi="10.1234/asserted")
+                 doi="10.1234/asserted", supplement=None)
     return RefManifest.from_json(tmp_path / "case" / "refs_manifest.json")
 
 
@@ -730,7 +731,8 @@ def test_parse_only_reaches_no_network_leg_at_all(tmp_path, monkeypatch):
 
     pdf = _one_page_paper(tmp_path / "paper.pdf")
     cli_mod.refs(manuscript=pdf, case=tmp_path / "case", provided=None,
-                 email="t@example.org", parse_only=True, backend="pymupdf", doi=None)
+                 email="t@example.org", parse_only=True, backend="pymupdf", doi=None,
+                 supplement=None)
 
 
 # --- one slug, one source file ------------------------------------------------
@@ -1084,7 +1086,7 @@ def test_the_bibliography_confirms_the_deposit_when_the_title_cannot(tmp_path, m
     from papertrace.refs import CrossrefDeposit
 
     monkeypatch.setattr(refs_mod, "resolve_all",
-                        lambda entries, dest, email, provided_dir=None, progress=None: entries)
+                        lambda entries, dest, email, provided_dir=None, progress=None, taken=None: entries)
     monkeypatch.setattr(refs_mod, "crossref_deposit", lambda client, doi, email: CrossrefDeposit(
         entries=_parsed(list(range(1, 9))), deposited=8,
         publisher="Fixture Publishing", title="",  # the record offers no title either
@@ -1093,7 +1095,7 @@ def test_the_bibliography_confirms_the_deposit_when_the_title_cannot(tmp_path, m
     pdf = _paper_with_n_refs(tmp_path / "paper.pdf", "Editorial", 8)
     cli_mod.refs(manuscript=pdf, case=tmp_path / "case", provided=None,
                  email="t@example.org", parse_only=False, backend="pymupdf",
-                 doi="10.1234/asserted")
+                 doi="10.1234/asserted", supplement=None)
 
     manifest = RefManifest.from_json(tmp_path / "case" / "refs_manifest.json")
     assert manifest.reference_source == "crossref"

@@ -51,7 +51,7 @@ def offline(monkeypatch):
     import papertrace.refs as refs_mod
 
     monkeypatch.setattr(refs_mod, "resolve_all",
-                        lambda entries, dest, email, provided_dir=None, progress=None: entries)
+                        lambda entries, dest, email, provided_dir=None, progress=None, taken=None: entries)
     monkeypatch.setenv("PAPERTRACE_EMAIL", "test@example.org")
 
 

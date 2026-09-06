@@ -277,3 +277,78 @@ def test_the_supplement_markers_still_do_not_eat_a_real_author(tmp_path):
     e = _available(slug="si-mohamed-2021")
     attach_supplements(e, d, taken={e.slug})
     assert e.supplements == []
+
+
+# --- --supplement, for the audited paper's own -----------------------------
+
+
+def test_manuscript_supplements_take_stem_slugs_in_the_order_given(tmp_path):
+    from papertrace.refs import manuscript_supplements
+
+    a, b = tmp_path / "paper SI.pdf", tmp_path / "paper-appendix.pdf"
+    for p in (a, b):
+        p.write_bytes(PDF)
+
+    got = manuscript_supplements([a, b], taken=set())
+    assert [s.slug for s in got] == ["paper-si", "paper-appendix"]
+    assert [s.pdf_path for s in got] == [str(a), str(b)]
+
+
+def test_a_manuscript_supplement_cannot_shadow_a_reference(tmp_path):
+    """Both are read as `ingest/<slug>/` and cropped from
+    `sources_resolved/<slug>.pdf`, so a shared slug is a shared folder — the
+    paper's own appendix overwriting a cited source's ingest."""
+    from papertrace.refs import manuscript_supplements
+
+    p = tmp_path / "chen-2021.pdf"
+    p.write_bytes(PDF)
+    got = manuscript_supplements([p], taken={"chen-2021"})
+    assert [s.slug for s in got] == ["chen-2021-2"]
+
+
+def test_the_refs_command_passes_supplements_to_the_pipeline(tmp_path, monkeypatch):
+    from papertrace import cli
+
+    seen = {}
+    monkeypatch.setattr(cli, "_refs_pipeline", lambda **kw: seen.update(kw))
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(PDF)
+    si = tmp_path / "p-si.pdf"
+    si.write_bytes(PDF)
+
+    cli.refs(manuscript=pdf, case=None, provided=None, email=None, parse_only=False,
+             backend="pymupdf", doi=None, supplement=[si])
+
+    assert seen["supplement"] == [si]
+
+
+def test_run_forwards_supplements_to_refs(tmp_path, monkeypatch):
+    """`run` calls the pipeline functions directly, so a parameter it forgets to
+    name is simply dropped — the audit would run without the supplement and say
+    nothing about it."""
+    import inspect
+
+    from papertrace import cli
+
+    seen = {}
+    monkeypatch.setattr(cli, "_ingest_pipeline", lambda **kw: None)
+    monkeypatch.setattr(cli, "_refs_pipeline", lambda **kw: seen.update(kw))
+    monkeypatch.setattr(cli, "scout", lambda **kw: None)
+    monkeypatch.setattr(cli, "_check_pipeline", lambda **kw: None)
+    monkeypatch.setattr(cli, "highlight", lambda **kw: None)
+    monkeypatch.setattr(cli, "_report_pipeline", lambda **kw: None)
+    monkeypatch.setattr(cli, "_email", lambda v: "e@example.com")
+    monkeypatch.setattr(cli, "_detected_doi", lambda m: None)
+
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(PDF)
+    si = tmp_path / "p-si.pdf"
+    si.write_bytes(PDF)
+
+    cli.run(manuscript=pdf, case=tmp_path / "c", provided=None, email="e@example.com",
+            model=None, png=False, backend="pymupdf", with_scout=False, doi=None,
+            formats=None, supplement=[si])
+
+    assert seen["supplement"] == [si]
+    # and the flag really is declared on `run`, not silently swallowed by **kw
+    assert "supplement" in inspect.signature(cli.run).parameters

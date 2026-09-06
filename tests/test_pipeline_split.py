@@ -55,11 +55,11 @@ def test_refs_command_delegates_to_the_pipeline_function(tmp_path, monkeypatch):
     pdf.write_bytes(b"%PDF-1.4\n")
 
     cli.refs(manuscript=pdf, case=None, provided=None, email=None,
-             parse_only=False, backend="auto", doi=None)
+             parse_only=False, backend="auto", doi=None, supplement=None)
 
     assert seen == {
         "manuscript": pdf, "case": None, "provided": None, "email": None,
-        "parse_only": False, "backend": "auto", "doi": None,
+        "parse_only": False, "backend": "auto", "doi": None, "supplement": None,
     }
 
 

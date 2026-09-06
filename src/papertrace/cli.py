@@ -509,6 +509,7 @@ def _refs_pipeline(
     parse_only: bool = False,
     backend: str = "auto",
     doi: str | None = None,
+    supplement: list[Path] | None = None,
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest.
 
@@ -526,6 +527,7 @@ def _refs_pipeline(
         crossref_deposit,
         deposit_corroborates,
         deposit_is_this_paper,
+        manuscript_supplements,
         orphaned_supplements,
         parse_references,
         reconcile,
@@ -689,7 +691,15 @@ def _refs_pipeline(
                 f"[dim]{names} — judged as separate documents[/dim]"
             )
 
-    resolve_all(entries, dest, _email(email), provided_dir=provided, progress=tick)
+    # the paper's own supplements claim their slugs FIRST, then `resolve_all`
+    # works around them: one namespace, because both end up as `ingest/<slug>/`
+    # and `sources_resolved/<slug>.pdf`
+    taken: set[str] = {e.slug for e in entries if e.slug}
+    own = manuscript_supplements(list(supplement or []), taken)
+    for s in own:
+        console.print(f"  [cyan]+[/cyan] {Path(s.pdf_path).name} → this paper's own supplement")
+
+    resolve_all(entries, dest, _email(email), provided_dir=provided, progress=tick, taken=taken)
 
     # a file the user deliberately put in the folder that then did nothing is the
     # quietest possible failure — they would go on believing it had been read
@@ -699,6 +709,7 @@ def _refs_pipeline(
     manifest = RefManifest(
         manuscript=manuscript.name,
         entries=entries,
+        manuscript_supplements=own,
         manuscript_sha256=manuscript_fingerprint(manuscript),  # identity, not the name
         references_resumed=references_resumed,
         reference_source=rec.source,
@@ -737,10 +748,16 @@ def refs(
         help="DOI of the paper itself — fetches the publisher's own reference list to "
              "check the parsed numbering against (default: the DOI printed on page 1)",
     ),
+    supplement: list[Path] = typer.Option(
+        None, "--supplement", exists=True,
+        help="Supplementary material for THIS paper (repeatable). A cited work's "
+             "supplement needs no flag — drop it in the sources folder named after "
+             "the reference, e.g. pyrros-2023-supplement.pdf",
+    ),
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest."""
     _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
-                    parse_only=parse_only, backend=backend, doi=doi)
+                    parse_only=parse_only, backend=backend, doi=doi, supplement=supplement)
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
@@ -1129,6 +1146,12 @@ def run(
         None, "--format", "-f",
         help="Extra looks to render beside report.md: editor | terminal (repeatable)",
     ),
+    supplement: list[Path] = typer.Option(
+        None, "--supplement", exists=True,
+        help="Supplementary material for THIS paper (repeatable). A cited work's "
+             "supplement needs no flag — drop it in the sources folder named after "
+             "the reference, e.g. pyrros-2023-supplement.pdf",
+    ),
 ) -> None:
     """Full pipeline: ingest → refs → scout → check → highlight → report."""
     console.print(BANNER)
@@ -1159,7 +1182,7 @@ def run(
     # without erroring.
     doi = doi or _detected_doi(manuscript)
     _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
-                    parse_only=False, backend=backend, doi=doi)
+                    parse_only=False, backend=backend, doi=doi, supplement=supplement)
     if with_scout:
         scout(case=case, doi=doi, email=email)
     _check_pipeline(case=case, model=model, backend=backend)
