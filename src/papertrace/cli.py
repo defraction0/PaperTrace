@@ -526,6 +526,7 @@ def _refs_pipeline(
         crossref_deposit,
         deposit_corroborates,
         deposit_is_this_paper,
+        orphaned_supplements,
         parse_references,
         reconcile,
         resolve_all,
@@ -680,8 +681,20 @@ def _refs_pipeline(
         mark = STATUS_MARK.get(e.status, "?")
         via = f" via {e.resolver}" if e.resolver else ""
         console.print(f"  {mark} [{e.num:>3}] {e.status:<10}{via:<16} {e.reason}")
+        if e.supplements:
+            n = len(e.supplements)
+            names = ", ".join(s.slug for s in e.supplements)
+            console.print(
+                f"        [cyan]+ {n} supplement{'' if n == 1 else 's'}[/cyan] "
+                f"[dim]{names} — judged as separate documents[/dim]"
+            )
 
     resolve_all(entries, dest, _email(email), provided_dir=provided, progress=tick)
+
+    # a file the user deliberately put in the folder that then did nothing is the
+    # quietest possible failure — they would go on believing it had been read
+    for pdf, why in orphaned_supplements(entries, provided):
+        console.print(f"  [yellow]⚠ {pdf.name} set aside — {why}[/yellow]")
 
     manifest = RefManifest(
         manuscript=manuscript.name,

@@ -158,3 +158,122 @@ def test_a_slug_is_never_shared_between_a_supplement_and_an_article():
     m = _manifest()
     slugs = [d.slug for d in m.documents()]
     assert len(slugs) == len(set(slugs)), slugs
+# --- refs: attaching, and refusing to attach -------------------------------
+
+PDF = b"%PDF-1.4 fake"
+
+
+def _folder(tmp_path: Path, *names: str) -> Path:
+    d = tmp_path / "mine"
+    d.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (d / n).write_bytes(PDF)
+    return d
+
+
+def _available(slug: str = "littlejohns-2020", num: str = "3") -> RefEntry:
+    return RefEntry(num=num, raw=f"{slug} et al.", slug=slug, status="provided",
+                    pdf_path=f"/tmp/mine/{slug}.pdf")
+
+
+def test_several_supplements_attach_to_one_available_reference(tmp_path):
+    from papertrace.refs import attach_supplements
+
+    d = _folder(tmp_path, "littlejohns-2020.pdf", "littlejohns-2020-supplement.pdf",
+                "littlejohns-2020-appendix-b.pdf")
+    e = _available()
+    attach_supplements(e, d, taken={e.slug})
+
+    assert [s.slug for s in e.supplements] == [
+        "littlejohns-2020-appendix-b", "littlejohns-2020-supplement",
+    ]
+    assert all(Path(s.pdf_path).exists() for s in e.supplements)
+
+
+def test_the_article_itself_is_never_attached_as_its_own_supplement(tmp_path):
+    from papertrace.refs import attach_supplements
+
+    d = _folder(tmp_path, "littlejohns-2020.pdf", "littlejohns-2020-supplement.pdf")
+    e = _available()
+    attach_supplements(e, d, taken={e.slug})
+    assert [Path(s.pdf_path).name for s in e.supplements] == [
+        "littlejohns-2020-supplement.pdf"
+    ]
+
+
+def test_a_supplement_does_not_attach_to_a_reference_nobody_could_obtain(tmp_path):
+    """The user's rule, and the one that keeps
+    `test_a_supplement_alone_is_not_the_article` true: supplementary material
+    with no article behind it is judged against nothing at all."""
+    from papertrace.refs import attach_supplements
+
+    d = _folder(tmp_path, "littlejohns-2020-appendix.pdf")
+    e = RefEntry(num="3", raw="Littlejohns", slug="littlejohns-2020", status="paywalled")
+    attach_supplements(e, d, taken={e.slug})
+    assert e.supplements == []
+
+
+def test_an_orphan_supplement_is_named_with_the_reason_it_was_set_aside(tmp_path):
+    """Silently ignoring a file the user deliberately supplied is the failure
+    mode this codebase exists to avoid — they would never learn it did nothing."""
+    from papertrace.refs import attach_supplements, orphaned_supplements
+
+    d = _folder(tmp_path, "littlejohns-2020-appendix.pdf", "unrelated-supplement.pdf")
+    paywalled = RefEntry(num="3", raw="Littlejohns", slug="littlejohns-2020",
+                         status="paywalled")
+    attach_supplements(paywalled, d, taken={paywalled.slug})
+
+    orphans = dict(orphaned_supplements([paywalled], d))
+    assert set(orphans) == {d / "littlejohns-2020-appendix.pdf", d / "unrelated-supplement.pdf"}
+    assert "[3]" in orphans[d / "littlejohns-2020-appendix.pdf"]
+    assert "no reference" in orphans[d / "unrelated-supplement.pdf"]
+
+
+def test_an_attached_supplement_is_not_also_reported_as_an_orphan(tmp_path):
+    from papertrace.refs import attach_supplements, orphaned_supplements
+
+    d = _folder(tmp_path, "littlejohns-2020.pdf", "littlejohns-2020-supplement.pdf")
+    e = _available()
+    attach_supplements(e, d, taken={e.slug})
+    assert orphaned_supplements([e], d) == []
+
+
+def test_a_supplement_slug_survives_a_sibling_being_removed(tmp_path):
+    """Ordinal slugs (-suppl1/-suppl2) would renumber here, and a stored verdict
+    would then point at a different PDF. Stem slugs are content-addressed."""
+    from papertrace.refs import attach_supplements
+
+    d = _folder(tmp_path, "littlejohns-2020-appendix-a.pdf",
+                "littlejohns-2020-appendix-b.pdf")
+    first = _available()
+    attach_supplements(first, d, taken={first.slug})
+    before = {s.slug for s in first.supplements}
+
+    (d / "littlejohns-2020-appendix-a.pdf").unlink()
+    second = _available()
+    attach_supplements(second, d, taken={second.slug})
+
+    assert [s.slug for s in second.supplements] == ["littlejohns-2020-appendix-b"]
+    assert "littlejohns-2020-appendix-b" in before
+
+
+def test_a_supplement_never_takes_a_slug_an_article_already_has(tmp_path):
+    from papertrace.refs import attach_supplements
+
+    d = _folder(tmp_path, "littlejohns-2020-supplement.pdf")
+    e = _available()
+    # a different reference already resolved to exactly this stem
+    attach_supplements(e, d, taken={e.slug, "littlejohns-2020-supplement"})
+    assert [s.slug for s in e.supplements] == ["littlejohns-2020-supplement-2"]
+
+
+def test_the_supplement_markers_still_do_not_eat_a_real_author(tmp_path):
+    """`si-mohamed-2021` is a real slug from a real audit. The attach path uses
+    the same marker list as the exclude path, so a mistake there would now go
+    the other way: the article itself judged as its own supplement."""
+    from papertrace.refs import attach_supplements
+
+    d = _folder(tmp_path, "si-mohamed-2021.pdf")
+    e = _available(slug="si-mohamed-2021")
+    attach_supplements(e, d, taken={e.slug})
+    assert e.supplements == []

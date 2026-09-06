@@ -20,6 +20,7 @@ from .models import (
     _TITLE_MIN_MATCHES,
     _URL_RE,
     RefEntry,
+    Supplement,
     _title_tokens,
     looks_like_reference,
     titles_match,
@@ -903,12 +904,33 @@ _SUPPLEMENT_RE = re.compile(
 )
 
 
+def _named_for(entry: RefEntry, provided_dir: Path | None) -> list[Path]:
+    """Every file in the folder whose name contains all of the reference's tokens.
+
+    The one place the match rule lives. Token containment stays loose on purpose
+    — real filenames carry author lists and titles, and `tests/test_refs.py`
+    pins that. It is shared because the article scan and the supplement scan are
+    the *same* question asked with `_SUPPLEMENT_RE` inverted, and a second copy
+    of the rule is how they would drift into disagreeing about which reference a
+    file belongs to — which would attach an appendix to the wrong paper.
+    """
+    if not provided_dir or not provided_dir.is_dir():
+        return []
+    tokens = [t for t in (entry.slug or "").lower().split("-") if len(t) > 3]
+    if not tokens:
+        return []
+    return [
+        pdf
+        for pdf in sorted(provided_dir.glob("*.pdf"))
+        if all(t in pdf.name.lower() for t in tokens)
+    ]
+
+
 def _provided_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Path]:
     """Every file in the folder that could be this reference, best first.
 
-    Token containment stays loose on purpose — real filenames carry author lists
-    and titles, and `tests/test_refs.py` pins that. What is tightened is the
-    choice among the matches:
+    What is tightened, relative to the shared match above, is the choice among
+    the matches:
 
     * an exact `<slug>.pdf` wins outright;
     * otherwise the shortest stem, tie-broken by name. Shortest means fewest
@@ -919,21 +941,103 @@ def _provided_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Pat
     Supplements are excluded rather than ranked last. Judging a claim against an
     appendix while calling it the cited source is the laundering this codebase
     exists to prevent, and returning nothing lets the online chain try for the
-    real article instead.
+    real article instead. They are not discarded any more, though —
+    `_supplement_candidates` picks up exactly what this drops.
+    """
+    slug = (entry.slug or "").lower()
+    matches = [p for p in _named_for(entry, provided_dir) if not _SUPPLEMENT_RE.search(p.stem)]
+    return sorted(matches, key=lambda p: (p.stem.lower() != slug, len(p.stem), p.name))
+
+
+def _supplement_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Path]:
+    """The inverse of `_provided_candidates`: this reference's supplements.
+
+    No ranking and no best-of-one. Every supplement a user supplies is a
+    document they are asking to have read, and choosing between them would put
+    one of them silently out of the audit.
+    """
+    return [p for p in _named_for(entry, provided_dir) if _SUPPLEMENT_RE.search(p.stem)]
+
+
+_SLUG_UNSAFE = re.compile(r"[^a-z0-9]+")
+
+
+def _stem_slug(path: Path) -> str:
+    """The document id a supplementary file is read under.
+
+    Derived from the file STEM, never from an ordinal position in the folder.
+    `-suppl1`/`-suppl2` numbered in sorted order is the defect CLAUDE.md rejects
+    for citation occurrences — remove one file and every id after it shifts, so
+    a re-run points the previous run's stored verdicts and evidence crops at a
+    different PDF, with nothing to notice.
+    """
+    return _SLUG_UNSAFE.sub("-", path.stem.lower()).strip("-") or "supplement"
+
+
+def _free_slug(base: str, taken: set[str]) -> str:
+    """`base`, or the first `-N` variant nobody has claimed.
+
+    Slugs are the identity of a document everywhere downstream — `ingest/<slug>/`,
+    `sources_resolved/<slug>.pdf`, every judgement and every crop — so two
+    documents sharing one means a verdict shown against the wrong paper.
+    `_unique_slugs` cannot do this job: it runs at parse time, and supplements
+    are not discovered until resolution.
+    """
+    slug, n = base, 2
+    while slug in taken:
+        slug, n = f"{base}-{n}", n + 1
+    return slug
+
+
+def attach_supplements(entry: RefEntry, provided_dir: Path | None, taken: set[str]) -> None:
+    """Attach this reference's supplementary files, in place.
+
+    **Only to an available reference.** A supplement whose article could not be
+    obtained is left for `orphaned_supplements` to report: judging a claim
+    against an appendix while nothing establishes what the article itself says
+    is the laundering `_provided_candidates` already refuses, and attaching here
+    would reintroduce it through the back door.
+
+    `taken` is read and written — the caller owns one set for the whole run, so
+    a supplement cannot collide with an article slug or with another
+    supplement's.
+    """
+    if entry.status not in ("retrieved", "provided"):
+        return
+    for pdf in _supplement_candidates(entry, provided_dir):
+        slug = _free_slug(_stem_slug(pdf), taken)
+        taken.add(slug)
+        entry.supplements.append(Supplement(slug=slug, pdf_path=str(pdf)))
+
+
+def orphaned_supplements(
+    entries: list[RefEntry], provided_dir: Path | None
+) -> list[tuple[Path, str]]:
+    """Supplement files that attached to nothing, each with why.
+
+    A file the user deliberately put in the folder and that then did nothing is
+    the quietest possible failure: they would go on believing the appendix had
+    been read. Reported by name, with the two reasons distinguished — the
+    article is missing, or the filename matches no reference at all — because
+    the fixes are different.
     """
     if not provided_dir or not provided_dir.is_dir():
         return []
-    slug = (entry.slug or "").lower()
-    tokens = [t for t in slug.split("-") if len(t) > 3]
-    if not tokens:
-        return []
-    matches = [
-        pdf
-        for pdf in sorted(provided_dir.glob("*.pdf"))
-        if all(t in pdf.name.lower() for t in tokens)
-        and not _SUPPLEMENT_RE.search(pdf.stem)
-    ]
-    return sorted(matches, key=lambda p: (p.stem.lower() != slug, len(p.stem), p.name))
+    attached = {Path(s.pdf_path) for e in entries for s in e.supplements}
+    unavailable: dict[Path, str] = {}
+    for e in entries:
+        if e.status in ("retrieved", "provided"):
+            continue
+        for pdf in _supplement_candidates(e, provided_dir):
+            unavailable.setdefault(
+                pdf, f"[{e.num}] is not available ({e.status}), so nothing can be judged against it"
+            )
+    out = []
+    for pdf in sorted(provided_dir.glob("*.pdf")):
+        if not _SUPPLEMENT_RE.search(pdf.stem) or pdf in attached:
+            continue
+        out.append((pdf, unavailable.get(pdf, "matches no reference in this paper")))
+    return out
 
 
 def _match_provided(entry: RefEntry, provided_dir: Path | None) -> Path | None:
@@ -1193,9 +1297,16 @@ def resolve_all(
     progress: ProgressCb | None = None,
 ) -> list[RefEntry]:
     dest_dir.mkdir(parents=True, exist_ok=True)
+    # one registry for the whole run, seeded with the article slugs `_unique_slugs`
+    # already fixed at parse time — supplements are only discovered here, so they
+    # cannot go through it and must not be allowed to shadow an article's folder.
+    taken = {e.slug for e in entries if e.slug}
     with _client() as client:
         for entry in entries:
             resolve_entry(entry, dest_dir, email, client, provided_dir)
+            # after resolution, never before: whether a supplement may attach at
+            # all depends on the status `resolve_entry` just decided
+            attach_supplements(entry, provided_dir, taken)
             if progress:
                 progress(entry)
     return entries
