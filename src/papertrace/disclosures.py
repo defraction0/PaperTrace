@@ -45,10 +45,11 @@ CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
 # so the parity test would fail on a difference the reader never sees
 NO_QUOTE_TOKEN = "judged on a paraphrase, not the sentence in the paper"
 SOURCE_FIDELITY_TOKEN = "cited sources read as flat text"
-# a general statement, deliberately: the token is asserted verbatim in all three
-# formats, so it has to stay true whether the supplements were matched by name
-# (cited side) or handed over by the user (this paper) — only the first is a guess
-SUPPLEMENT_IDENTITY_TOKEN = "supplements carry no identity check"
+# Neutral on purpose. The token is asserted verbatim in all three formats, so it
+# must stay true whether every supplement was checked, none was, or some were —
+# "carry no identity check" was true when nothing could be verified and became a
+# falsehood about the checked ones the moment some could.
+SUPPLEMENT_IDENTITY_TOKEN = "how each supplement was attached"
 SUPPLEMENT_COVERAGE_TOKEN = "citations inside a supplement are not counted"
 SUPPLEMENT_HEADLINE_TOKEN = "this verdict rests on supplementary material"
 
@@ -487,63 +488,52 @@ def _source_fidelity(flat: list[str], total: int) -> Disclosure:
     )
 
 
-def _supplement_slugs(results) -> tuple[list[str], list[str]]:
-    """The supplementary documents some verdict rested on: (cited, this paper).
+def _supplement_verification(results) -> tuple[list[str], list[str]]:
+    """Supplementary documents read, split into (checked, taken on the filename)."""
+    seen: dict[str, bool] = {}
+    for c in results.claims:
+        for j in c.judgements:
+            if j.kind in ("supplement", "own_supplement"):
+                seen[j.source_slug] = seen.get(j.source_slug, False) or j.verified
+    return sorted(s for s, v in seen.items() if v), sorted(s for s, v in seen.items() if not v)
 
-    Taken from the judgements and not from the manifest, because what a reader
-    is owed a caveat about is what was actually *read* — a supplement supplied
-    for a reference no claim cites was never opened and warrants no warning.
 
-    Split, because the two were obtained differently and only one of them was
-    guessed at. Describing a file the user pointed `--supplement` straight at as
-    "matched by filename" misstates which part is uncertain.
+def _supplement_identity(checked: list[str], named: list[str]) -> Disclosure:
+    """Which supplements were established to belong to their work, and which were not.
+
+    An article is always checked against the reference that names it. A
+    supplement can be checked only when its own title or DOI names the work it
+    accompanies — often it does, and the publisher forms usually say
+    "Supplementary Information for <title>" outright. When it does not, the file
+    was attached because its NAME carried the reference's tokens, and nothing
+    read it. Those are different provenances and the report states which.
     """
-    cited = {j.source_slug for c in results.claims for j in c.judgements
-             if j.kind == "supplement"}
-    own = {j.source_slug for c in results.claims for j in c.judgements
-           if j.kind == "own_supplement"}
-    return sorted(cited), sorted(own)
-
-
-def _supplement_identity(cited: list[str], own: list[str]) -> Disclosure:
-    """Supplements carry the thinnest provenance in a PaperTrace report.
-
-    Every article this tool accepts is checked against the reference that names
-    it, and one that fails is set aside. A supplement cannot go through that
-    check — its own title is not its parent's — so the check is skipped rather
-    than faked, and the weakness is stated instead.
-    """
-    slugs = cited + own
-    n = len(slugs)
-    why = []
-    if cited:
-        why.append(
-            f"{len(cited)} accompanying a cited work "
-            f"({', '.join(f'`{s}`' for s in cited)}) "
-            "— matched to that reference by filename. A supplement carries its own title "
-            "and not the title of the article it accompanies, so the identity check that "
-            "guards every cited source cannot be applied to one, and nothing establishes "
-            "that each file belongs to the reference it was attached to."
+    n = len(checked) + len(named)
+    parts = []
+    if checked:
+        parts.append(
+            f"{len(checked)} by {'its' if len(checked) == 1 else 'their'} own title or DOI "
+            f"naming that work ({', '.join(f'`{s}`' for s in checked)})"
         )
-    if own:
-        why.append(
-            f"{len(own)} belonging to this paper ({', '.join(f'`{s}`' for s in own)}) "
-            "— named on the command line, so which file was meant is not in doubt, but "
-            "nothing checks that what it contains is what the paper points at."
+    if named:
+        parts.append(
+            f"{len(named)} by filename alone, which nothing checked "
+            f"({', '.join(f'`{s}`' for s in named)}) — a supplement carries its own "
+            "title and not the title of the article it accompanies, so the identity "
+            "check that guards every cited source cannot be applied to one"
         )
     return Disclosure(
         key="supplement_identity",
-        level="warn",
-        # the token has to appear whichever branches fired, so it is stated once
-        # up front rather than only inside the cited-side sentence
+        # only a guess warrants a warning; a checked attachment is information
+        level="warn" if named else "info",
         token=SUPPLEMENT_IDENTITY_TOKEN,
         text=(
-            f"{n} supplementary {'document was' if n == 1 else 'documents were'} read, and "
-            f"{SUPPLEMENT_IDENTITY_TOKEN} — nothing confirmed which work each belongs to. "
-            + " ".join(why)
+            f"{n} supplementary {'document was' if n == 1 else 'documents were'} read. "
+            f"This is {SUPPLEMENT_IDENTITY_TOKEN}: " + "; ".join(parts) + "."
         ),
-        short=f"{n} {SUPPLEMENT_IDENTITY_TOKEN}",
-        rows=tuple(slugs),
+        short=f"{n} supplementary read · {SUPPLEMENT_IDENTITY_TOKEN}: "
+              f"{len(checked)} checked, {len(named)} by filename",
+        rows=tuple(checked + named),
     )
 
 
@@ -602,10 +592,10 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
         flat = sorted(s for s, c in recorded.items() if c.split()[0] == "pymupdf")
         if flat:
             out.append(_source_fidelity(flat, len(recorded)))
-    cited_sup, own_sup = _supplement_slugs(results)
-    supplements = cited_sup + own_sup
+    checked_sup, named_sup = _supplement_verification(results)
+    supplements = checked_sup + named_sup
     if supplements:
-        out.append(_supplement_identity(cited_sup, own_sup))
+        out.append(_supplement_identity(checked_sup, named_sup))
     coverage = results.coverage or {}
     if coverage:
         # occurrences without labels means clean.md was missing while the source

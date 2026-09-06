@@ -620,6 +620,10 @@ class SourceJudgement:
     # `run_disclosures` takes the manifest optionally, so a reader with only
     # `results.json` must still be able to tell an appendix from an article.
     kind: str = "article"
+    # for a supplement: did anything establish it belongs to the work it was
+    # attached to? Carried here for the reason `kind` is — the reader of a
+    # results.json alone has no manifest to consult.
+    verified: bool = False
     verdict: str = "unchecked"  # one of VERDICTS
     note: str = ""
     source_page: int | None = None

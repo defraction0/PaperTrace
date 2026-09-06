@@ -497,3 +497,107 @@ def test_a_normal_surname_is_untouched_by_the_rule(tmp_path):
                  slug="littlejohns-2020", status="provided", pdf_path="/tmp/x.pdf")
     attach_supplements(e, d, taken={e.slug})
     assert [s.pdf_path for s in e.supplements] == [str(sup)]
+
+
+# --- the report tells the two apart ----------------------------------------
+
+
+def test_check_carries_the_verification_onto_the_judgement(tmp_path, monkeypatch):
+    """The templates get `results` alone and run_disclosures takes the manifest
+    optionally, so a reader holding only results.json must still be able to see
+    which supplements were checked."""
+    import json as _json
+
+    from papertrace import check as check_mod
+    from papertrace.models import Block, ClaimResult, RefManifest, SourceMap, Supplement
+
+    for slug in ("pyrros-2023", "sup-verified", "sup-named"):
+        d = tmp_path / "ingest" / slug
+        d.mkdir(parents=True)
+        (d / "annotated.md").write_text(f"<!-- block_0001, page 1 -->\nText of {slug}.\n")
+        SourceMap(doc=f"{slug}.pdf", pages=1, blocks=[
+            Block("block_0001", "text", 1, (0.0, 0.0, 9.0, 9.0), [], f"Text of {slug}.")
+        ]).to_json(d / "source_map.json")
+
+    manifest = RefManifest(manuscript="m.pdf", entries=[
+        RefEntry(num="1", raw=PYRROS, status="retrieved", slug="pyrros-2023",
+                 pdf_path="pyrros-2023.pdf", supplements=[
+                     Supplement("sup-verified", "a.pdf", verified=True),
+                     Supplement("sup-named", "b.pdf")])])
+    claim = ClaimResult(id=1, claim="c", location="M", refs=["1"])
+    monkeypatch.setattr(check_mod, "_ask", lambda p, m=None: _json.dumps(
+        [{"id": 1, "verdict": "not_addressed", "note": "n"}]))
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    assert {j.source_slug: j.verified for j in claim.judgements} == {
+        "pyrros-2023": False, "sup-verified": True, "sup-named": False,
+    }
+
+
+def _supplement_results(verified_flags):
+    from papertrace.models import ClaimResult, RunResults, SourceJudgement
+
+    js = [SourceJudgement("pyrros-2023", "1", kind="article", verdict="supported",
+                          source_page=1, source_block="block_0001")]
+    js += [SourceJudgement(f"sup-{i}", "1", kind="supplement", verdict="not_addressed",
+                           verified=v) for i, v in enumerate(verified_flags)]
+    c = ClaimResult(id=1, claim="c", location="M", refs=["1"], judgements=js)
+    c.apply_headline()
+    return RunResults(manuscript="m.pdf", claims=[c])
+
+
+def test_the_disclosure_splits_checked_from_unchecked(tmp_path):
+    from papertrace.disclosures import run_disclosures
+    from papertrace.report import write_reports
+
+    results = _supplement_results([True, True, False])
+    d = next(x for x in run_disclosures(results) if x.key == "supplement_identity")
+    assert "2" in d.text and "1" in d.text
+    assert d.level == "warn"  # one of them is still a guess
+
+    write_reports(results, None, tmp_path, png=False)
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        assert d.token in (tmp_path / name).read_text(), name
+
+
+def test_all_verified_stops_the_report_claiming_nothing_was_checked(tmp_path):
+    """0.6.0 said supplements carry no identity check. That was true of every
+    supplement then and is now true only of some — saying it of a file whose
+    own title named its parent is simply false."""
+    from papertrace.disclosures import run_disclosures
+
+    d = next(x for x in run_disclosures(_supplement_results([True, True]))
+             if x.key == "supplement_identity")
+    assert d.level == "info"
+    assert "no identity check" not in d.text.lower()
+
+
+def test_the_results_schema_declares_the_supplement_verification(tmp_path):
+    import json
+
+    import jsonschema
+
+    def _root():
+        for x in [Path(__file__).resolve(), *Path(__file__).resolve().parents]:
+            if (x / "pyproject.toml").exists():
+                return x
+        raise RuntimeError("no pyproject.toml")
+
+    from papertrace.models import RunResults
+
+    results = _supplement_results([True, False])
+    path = tmp_path / "results.json"
+    results.to_json(path)
+    schema = json.loads((_root() / "schemas" / "results.schema.json").read_text())
+    jsonschema.validate(json.loads(path.read_text()), schema)
+
+    j = schema["properties"]["claims"]["items"]["properties"]["judgements"]["items"]
+    assert "verified" in j["properties"], "the supplement verification is undeclared"
+
+    payload = json.loads(path.read_text())
+    for x in payload["claims"][0]["judgements"]:
+        del x["verified"]
+    path.write_text(json.dumps(payload))
+    assert [x.verified for x in RunResults.from_json(path).claims[0].judgements] == [
+        False, False, False
+    ]

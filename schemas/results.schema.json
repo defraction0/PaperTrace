@@ -118,6 +118,10 @@
                   "type": "string",
                   "description": "The citation label this source answers for, e.g. \"3\". A supplement answers for the label its parent article carries; the audited paper's own supplement answers for none and carries \"\"."
                 },
+                "verified": {
+                  "type": "boolean",
+                  "description": "For a supplement: did anything establish that it belongs to the work it was attached to? True when the file's own title or DOI named that work; false when it was attached because its filename carried the reference's tokens and nothing read it. Always false for an article, whose identity is recorded in the manifest's title_check instead. Absent on files written before 0.6.0, meaning false."
+                },
                 "kind": {
                   "enum": ["article", "supplement", "own_supplement"],
                   "description": "Which document this verdict was read from: the cited article, supplementary material accompanying it, or supplementary material belonging to the audited paper itself. Absent on files written before 0.6.0, where every judgement was an article. A reader holding only results.json needs this to tell a verdict resting on an appendix from one resting on the paper of record — and note that a supplement is attached by filename with NO identity check, so its provenance is weaker than an article's."

@@ -931,7 +931,8 @@ def check_claims(
                     continue
                 seen_slugs.add(s.slug)
                 c.judgements.append(
-                    SourceJudgement(source_slug=s.slug, ref=r, kind="supplement")
+                    SourceJudgement(source_slug=s.slug, ref=r, kind="supplement",
+                                    verified=s.verified)
                 )
                 by_slug.setdefault(s.slug, []).append(c)
         # the paper's own supplements answer for no citation label, so `ref` is
