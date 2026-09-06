@@ -18,8 +18,24 @@ with `refs_manifest.json` and per-source ingests under `case/ingest/<slug>/`.
      forbidden move. Your training knowledge of a paper is NOT evidence; only
      the PDF on disk is.
 
+   **A reference may carry `supplements`.** Each is a separate document with
+   its own slug, and each is judged **separately** — one verdict, one anchor,
+   one crop apiece, exactly as two co-cited references would be. Do not merge
+   an appendix's evidence into the article's verdict. The claim's headline is
+   the most adverse across all of them.
+
+   The manuscript's own supplementary material is in `manuscript_supplements`,
+   and answers for no citation label. A claim pointing at *this paper's*
+   "Table S3" is judged against those; with none supplied the verdict is
+   `not_retrieved`, never a guess from the main text.
+
+   **A supplement's identity is unverified.** Articles are title-checked
+   against the reference that names them; a supplement cannot be, so it is
+   attached on its filename alone. Say so when a verdict rests on one.
+
 2. **Ingest on demand.** If `case/ingest/<slug>/` doesn't exist yet:
    `papertrace ingest <pdf> -o case/ingest/<slug>`
+   Supplements use their own slug, so they get their own folder.
 
 3. **Read for the claim.** Search the source's `clean.md` for the claim's
    subject (numbers, named methods, populations). Read the matching blocks in

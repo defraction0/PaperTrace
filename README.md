@@ -149,10 +149,28 @@ went uncited?**
   that was nonetheless read as flat text is named by slug in all three reports
   — a verdict resting on a linearized table is weaker than one resting on the
   table (see *Tables and figures are evidence too*).
+- Read **supplementary material** you supply, as its own document. A cited
+  reference may carry several — dropped in the sources folder named after the
+  reference — and the audited paper's own are named with `--supplement`. Each
+  gets its own model call, verdict, page anchor and evidence crop, and a claim's
+  headline is the most adverse across all of them, so a contradiction that lives
+  only in an appendix is still reported. A supplement never stands in for the
+  article: one whose article could not be obtained is named and set aside.
 - Keep the human responsible for interpretation — it prepares evidence and
   drafts; the conclusions are yours.
 
 **PaperTrace does not**
+
+- Verify that a supplement belongs to the work it was attached to. A
+  supplement's own title is not its parent's, so the identity check that guards
+  every cited source cannot be applied to one, and it is not faked. A
+  cited work's supplement is attached on its **filename** alone; the audited
+  paper's are whatever you passed to `--supplement`. That is the thinnest
+  provenance anything here carries, and all three reports say so.
+- Count a citation that appears **only inside a supplement**. The coverage audit
+  reads the manuscript, so a reference cited nowhere but in supplementary
+  material is absent from the labels rather than reported as uncovered. Stated
+  in the report whenever supplements were read.
 
 - Bypass paywalls — what it can't get legally, it reports as not obtainable.
 - Treat model memory as evidence — verdicts come only from retrieved or
@@ -304,13 +322,40 @@ a reference. Files must contain the reference's author and year (`pyrros-2023`
 matches `pyrros-2023.pdf` and `pyrros-et-al-2023-chest-radiographs.pdf`), and
 where several match, an exact `<author>-<year>.pdf` wins, else the shortest
 name. A filename that reads as supplemental material — `supplement`, `appendix`,
-`supporting information`, `ESM`, `online only` — is **not** used as the source,
-and if it is the only match the reference is left to the online resolver
-instead: a supplement is not the paper it accompanies. Rename it to the plain
+`supporting information`, `ESM`, `online only` — is **not** used as the source:
+a supplement is not the paper it accompanies. Rename it to the plain
 `<author>-<year>.pdf` if you do mean it to stand in. Provided files are
 title-checked like downloaded ones, but a mismatch is recorded in the manifest
 rather than refused — you named the file, so it is used and the doubt is
 disclosed.
+
+**Supplementary material is read, as its own document.** Drop
+`pyrros-2023-supplement.pdf` beside `pyrros-2023.pdf` in the same folder and it
+is judged separately: its own model call, its own verdict, its own page anchor
+and evidence crop. Several per reference is fine. A claim citing `[14]` is read
+against every document `[14]` has, and the claim's headline is the most adverse
+of them — so a contradiction that lives only in Table S2 is still reported.
+
+Two rules hold that together. A supplement **only attaches to a reference that
+was actually obtained**; one whose article is missing is named in the ticker and
+set aside, because there is nothing to judge it as part of. And a supplement is
+**never title-checked** — its own title is not its parent's, so the identity
+check that guards every cited source cannot apply to one. It is attached on the
+strength of its filename alone, which makes it the thinnest provenance anything
+here carries, and all three reports say so.
+
+For the paper under audit, name its supplements explicitly — the folder is
+matched against *reference* slugs and the paper being audited has none:
+
+```bash
+papertrace run paper.pdf --provided ./my_pdfs \
+    --supplement paper_si.pdf --supplement paper_appendix.pdf
+```
+
+A claim that points at the paper's own `Table S3` or `eFigure 2` is then read
+against those. With nothing supplied, such a claim is `not retrieved` and names
+the flag — the paper said where its evidence was and nobody opened it, which is
+a gap rather than an assertion made without a citation.
 
 Output in `<case>/out/` — where `<case>` defaults to a folder named after the
 paper, beside the paper (`paper.pdf` → `./paper/`), and `-c` chooses another.

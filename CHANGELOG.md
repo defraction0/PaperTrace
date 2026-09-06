@@ -4,6 +4,66 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.6.0] — unreleased
+
+### Added — supplementary material, read as its own document
+
+A subgroup table in Supplementary Table S2, a sensitivity analysis in Appendix
+B, a protocol in an ESM: real papers put the decisive evidence outside the
+article, and a user holding that file had no way to hand it over. Worse,
+`refs.py` recognised supplement filenames **only in order to discard them**,
+because judging a claim against an appendix while calling it the cited source
+is the laundering this tool exists to prevent.
+
+The organising idea is that **a judgement target is a document, not a
+reference**. Multi-source checking already judged one claim against N documents
+— one model call each, per-document verdicts and crops, most-adverse headline,
+`not_addressed` unranked so a silent document taints nothing. A supplement
+enters as one more document, which is why this needs no new verdict, no new
+headline rule and no change to `coverage/3`.
+
+- **A cited work's supplements need no flag.** Drop
+  `pyrros-2023-supplement.pdf` beside `pyrros-2023.pdf` in the sources folder.
+  Several per reference is fine. Each is judged separately, and a claim citing
+  `[14]` is read against every document `[14]` has.
+- **`--supplement` (repeatable) for the audited paper**, which has no reference
+  slug for a filename to key on. A claim pointing at its own `Table S3` is read
+  against those; with none supplied it is `not retrieved` and names the flag,
+  rather than sitting in the uncited register — the paper said where its
+  evidence was and nobody opened it.
+- **A supplement never stands in for the article.** It attaches only to a
+  reference that was actually obtained; an orphan is named in the ticker with
+  the reason, because a file the user supplied that then did nothing is the
+  quietest possible failure.
+- **The wizard now asks for the sources folder**, which it never did:
+  `run_wizard` hardcoded `provided=None`, so the guided path could not reach a
+  flag the CLI has had all along.
+
+⚠️ **Two disclosures you should expect to see.** Supplements carry **no
+identity check** — a supplement's own title is not its parent's, so the check
+that guards every cited source cannot apply, and it is not faked. And a
+citation appearing *only* inside a supplement is **not counted** by the
+coverage audit, which reads the manuscript alone. Both are stated in all three
+reports whenever supplements were read, and a claim whose headline came from a
+supplement rather than the article body says so on the claim.
+
+Slugs come from the file stem, never an ordinal: `-suppl1`/`-suppl2` numbered
+in folder order is the shifting-id defect this codebase already rejects for
+citation occurrences, where deleting one file re-points another document's
+stored verdicts and crops.
+
+Wire format: `RefEntry.supplements`, `RefManifest.manuscript_supplements`,
+`SourceJudgement.kind`, `ClaimResult.own_supplement`, all schema-declared and
+absent-safe, so 0.5.x files still load. `RefManifest.from_json` also stops
+raising `TypeError` on a key it does not know — a manifest from a newer
+papertrace used to kill an older one outright.
+
+Both prompts changed, so `evals/provenance.prompt_fingerprint()` moves and
+`agreement.py` will refuse to compare a 0.6.0 run against an earlier one. That
+is the guard working, not a regression.
+
+Judgement quality here is **unmeasured**, like everything since ADR 0001.
+
 ## [0.5.0] — unreleased
 
 0.4.1 was never released, so its entries below ship together with these.

@@ -98,11 +98,16 @@ ingest → refs → scout → check → highlight → report
 - **`refs.py`** — resolves citations through legal open-access routes only
   (Crossref → Unpaywall → Europe PMC → arXiv), with a title sanity check that
   rejects a mismatched download rather than judging against the wrong paper.
-  Per-ref status from `REF_STATUSES`.
+  Per-ref status from `REF_STATUSES`. Also attaches **supplements** (0.6.0):
+  `_named_for` is the one token-match rule, `_provided_candidates` and
+  `_supplement_candidates` are that rule with `_SUPPLEMENT_RE` inverted, and a
+  supplement attaches only to an already-available reference — the orphan is
+  reported by `orphaned_supplements`, never silently dropped.
 - **`check.py`** — the **only** module that calls a model, and only through the
   `_ask()` seam (`claude -p` subprocess; inherits the user's Claude Code login,
   no API key). Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per
-  source so context stays small. Also holds `coverage_audit()`, which is
+  **document** so context stays small — an article, each of its supplements,
+  and each of the audited paper's own are separate calls with separate verdicts. Also holds `coverage_audit()`, which is
   deliberately **mechanical and prompt-independent** — a regex
   (`_LABEL_GROUP`) over bracketed numeric labels, so a citation the extractor
   missed still surfaces. The module global `_LAST_MODEL` carries the judging
@@ -112,9 +117,14 @@ ingest → refs → scout → check → highlight → report
   them with PyMuPDF `page.search_for` and draws the boxes. Boxes are never
   model-placed or hand-placed.
 - **`models.py`** — the dataclasses *are* the wire format. `VERDICTS`,
-  `REF_STATUSES` and `BLOCK_TYPES` are the vocabularies; `to_json`/`from_json`
-  pairs must stay symmetric, and `from_json` uses `.get(...)` defaults so older
-  `results.json` files still load.
+  `REF_STATUSES`, `BLOCK_TYPES` and `DOCUMENT_KINDS` are the vocabularies;
+  `to_json`/`from_json` pairs must stay symmetric, and `from_json` uses
+  `.get(...)` defaults so older `results.json` files still load. **A judgement
+  target is a document, not a reference**: `RefManifest.document(slug)` /
+  `.documents()` resolve an article, a cited work's supplement or the audited
+  paper's own behind one interface, so no consumer hand-rolls
+  `next(e for e in entries if e.slug == slug)` — that shape can only ever find
+  an article, and every supplement would be invisible to it.
 - **`report.py`** — Jinja2 over `src/papertrace/templates/` (three templates:
   markdown, editor HTML, terminal HTML). Templates are **package data** loaded
   via `importlib.resources`, not a repo-relative path — an installed wheel has
