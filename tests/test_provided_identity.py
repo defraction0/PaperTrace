@@ -439,3 +439,61 @@ def test_verified_round_trips_and_older_manifests_still_load(tmp_path):
     path.write_text(json.dumps(payload))
     jsonschema.validate(json.loads(path.read_text()), schema)
     assert [s.verified for s in RefManifest.from_json(path).entries[0].supplements] == [False, False]
+
+
+# --- the short-surname hole ------------------------------------------------
+
+
+def _liu() -> RefEntry:
+    """`liu-2019` yields tokens ['2019']: the len>3 filter drops the surname."""
+    return RefEntry(num="7", raw="Liu B, Xu J (2019) A study of something. BMJ 1:1",
+                    slug="liu-2019", status="provided", pdf_path="/tmp/liu-2019.pdf")
+
+
+def test_another_authors_appendix_does_not_attach_on_the_year_alone(tmp_path):
+    """With a surname under four characters only the year survives, so every
+    2019 supplement in the folder matched — and a supplement gets no title
+    check to catch it. That is a wrong-paper-as-evidence path."""
+    from papertrace.refs import attach_supplements
+
+    d = tmp_path / "src"
+    _pdf(d / "smith-2019-appendix.pdf", title="Appendix")
+    e = _liu()
+    attach_supplements(e, d, taken={e.slug})
+    assert e.supplements == []
+
+
+def test_the_correctly_named_appendix_still_attaches(tmp_path):
+    """The fix must not cost the case it is meant to serve: a file named for
+    this reference carries the user's assertion and is still honoured."""
+    from papertrace.refs import attach_supplements
+
+    d = tmp_path / "src"
+    good = _pdf(d / "liu-2019-appendix.pdf", title="Appendix")
+    e = _liu()
+    attach_supplements(e, d, taken={e.slug})
+    assert [s.pdf_path for s in e.supplements] == [str(good)]
+
+
+def test_a_content_verified_supplement_is_unaffected_by_the_rule(tmp_path):
+    """The rule exists because nothing checked the file. When something did,
+    it does not apply."""
+    from papertrace.refs import Identified, attach_supplements
+
+    d = tmp_path / "src"
+    sup = _pdf(d / "smith-2019-appendix.pdf", title="Appendix")
+    e = _liu()
+    attach_supplements(e, d, taken={e.slug},
+                       content=[Identified(sup, e, "supplement", "title")])
+    assert [(s.pdf_path, s.verified) for s in e.supplements] == [(str(sup), True)]
+
+
+def test_a_normal_surname_is_untouched_by_the_rule(tmp_path):
+    from papertrace.refs import attach_supplements
+
+    d = tmp_path / "src"
+    sup = _pdf(d / "littlejohns-2020-appendix.pdf", title="Appendix")
+    e = RefEntry(num="3", raw="Littlejohns TJ (2020) UK Biobank imaging",
+                 slug="littlejohns-2020", status="provided", pdf_path="/tmp/x.pdf")
+    attach_supplements(e, d, taken={e.slug})
+    assert [s.pdf_path for s in e.supplements] == [str(sup)]

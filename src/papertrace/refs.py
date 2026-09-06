@@ -957,7 +957,22 @@ def _supplement_candidates(entry: RefEntry, provided_dir: Path | None) -> list[P
     document they are asking to have read, and choosing between them would put
     one of them silently out of the audit.
     """
-    return [p for p in _named_for(entry, provided_dir) if _SUPPLEMENT_RE.search(p.stem)]
+    hits = [p for p in _named_for(entry, provided_dir) if _SUPPLEMENT_RE.search(p.stem)]
+    # A surname under four characters is dropped by `_named_for`'s length
+    # filter, so `liu-2019` matches on the YEAR alone and every 2019 appendix in
+    # the folder looked like Liu's. An article surviving that is caught by its
+    # title check; a supplement gets none, so a wrong one would be judged as
+    # part of the cited work with nothing able to notice.
+    #
+    # Requiring the slug itself in the name, rather than refusing outright, is
+    # what keeps the case this rule serves: `liu-2019-appendix.pdf` still
+    # attaches, `smith-2019-appendix.pdf` no longer does. A supplement whose own
+    # title named the work never reaches here — it is verified, not guessed.
+    tokens = [t for t in (entry.slug or "").lower().split("-") if len(t) > 3]
+    if all(t.isdigit() for t in tokens):
+        slug = (entry.slug or "").lower()
+        hits = [p for p in hits if slug and slug in p.name.lower()]
+    return hits
 
 
 _SLUG_UNSAFE = re.compile(r"[^a-z0-9]+")
