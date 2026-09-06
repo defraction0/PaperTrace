@@ -118,10 +118,13 @@ went uncited?**
   already-checked reference is not silently counted as covered. It also
   registers assertions carrying no citation at all. **Detection** is mechanical
   and prompt-independent (a regex over bracketed numeric labels): if extraction
-  skipped a citation, it shows up here. **Attribution** of a claim to a specific
-  occurrence is a text match the tool can get wrong; an attribution it cannot
-  make is reported as *uncertain* and counted as **not** covered, never as
-  covered.
+  skipped a citation, it shows up here. **Attribution** of a claim to a
+  specific occurrence is a *lookup*, not a guess: extraction is handed that
+  same mechanical inventory of citation places and returns which ones each
+  claim came from. It is still a model step and can name the wrong place, but
+  it is no longer a text comparison between a paraphrase and a sentence. A
+  claim that names no place is reported as *uncertain* and counted as **not**
+  covered, never as covered.
 - Judge a co-cited claim against **every** cited source it could retrieve, one
   model call each, and show the passage behind each verdict. Co-citation is an
   offer of support, so each source is checked on its own text: a claim citing

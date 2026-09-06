@@ -27,7 +27,7 @@ TRUNCATION_TOKEN = "text past the cut was never read"
 COVERAGE_TOKEN = "reached by an extracted claim"
 # published contract — tests/test_coverage.py asserts this literal
 COVERAGE_CAVEAT_TOKEN = "coverage not audited"
-COVERAGE_ATTRIBUTION_TOKEN = "attribution is a text match that can be wrong"
+COVERAGE_ATTRIBUTION_TOKEN = "attribution is the context the extractor named"
 UNJUDGED_TOKEN = "could not be obtained, so was never opened"
 MULTISOURCE_TOKEN = "cited sources checked"
 ANCHOR_LOCATED_TOKEN = "red box = matched text"
@@ -294,28 +294,33 @@ def _coverage_attribution() -> Disclosure:
     Label-level coverage was set arithmetic and could not produce a false
     positive. This can, so the ways it is weaker are printed on the report's
     face rather than merely known.
+
+    Shorter than it was, because one of the weaknesses is gone: attribution
+    used to be a similarity match between a paraphrase and a sentence, which
+    could place a claim on the wrong one of two look-alike sentences and
+    refused close calls outright. Extraction is now shown the occurrence list
+    and returns the id it used. What remains is that naming the id is still a
+    model step.
     """
     return Disclosure(
         key="coverage_attribution",
         level="warn",
         token=COVERAGE_ATTRIBUTION_TOKEN,
         text=(
-            f"How to read that figure: {COVERAGE_ATTRIBUTION_TOKEN} — deciding which "
-            "citation a claim came from is a text comparison, so the counts can be "
-            "right while a pointer is wrong. An attribution the tool cannot make "
-            "counts as NOT covered, never as covered — and it refuses close "
-            "calls, so two similar sentences citing one reference can both read "
-            "as unaddressed where a reader would pair them at a glance. This "
-            "figure understates coverage there. A sentence citing the same "
-            "reference twice needs two extracted claims, so the ratio is not "
-            "comparable between papers. And detection still reads bracketed numeric "
-            "markers only — a citation style it cannot see contributes no "
-            "occurrences at all, which makes this ratio look better than reality, "
-            "not worse."
+            f"How to read that figure: {COVERAGE_ATTRIBUTION_TOKEN}. Extraction is "
+            "shown every place this paper cites something and returns which of them "
+            "each claim came from, so the pointer is no longer a text comparison — "
+            "but naming it is still a model step, and a claim can be placed on the "
+            "wrong sentence. A claim that names no place at all leaves that "
+            "reference's remaining places counted as NOT covered, never as covered, "
+            "so the figure understates coverage there. And detection still reads "
+            "bracketed numeric markers only — a citation style it cannot see "
+            "contributes no occurrences at all, which makes this ratio look better "
+            "than reality, not worse."
         ),
         short=(
-            f"{COVERAGE_ATTRIBUTION_TOKEN}; unattributable = not covered, "
-            "including close calls it refuses to decide; unseen citation styles "
+            f"{COVERAGE_ATTRIBUTION_TOKEN}, which is still a model step; a claim "
+            "placed nowhere counts as not covered; unseen citation styles "
             "contribute no occurrences, so the ratio flatters the run"
         ),
     )

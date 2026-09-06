@@ -138,24 +138,35 @@ Three decisions not to re-litigate:
   byte for byte.** `evals/align.py` reads `missing` as a list of label strings
   to decide whether an unmatched gold case is the tool's failure or the
   evaluator's; reshaping it would move that blame silently, with no test going
-  red. Everything occurrence-level is additive under `"schema": "coverage/2"`.
-  In particular `covered` is *not* "labels with ≥1 covered occurrence" — that
-  would push an all-uncertain label into `missing`.
+  red. Everything occurrence-level is additive; `"schema"` is `coverage/3`
+  since 0.5.0 and `coverage/2` files still validate. In particular `covered` is
+  *not* "labels with ≥1 covered occurrence" — that would push an all-uncertain
+  label into `missing`.
 - **`uncertain` is a third status, never folded into either.** An attribution
   the tool cannot make counts as *not covered*, and the uncertain count is
   always printed beside the ratio: when it is large the ratio is close to
-  meaningless, and a percentage alone hides that.
-- **Reading-order zipping is rejected.** `EXTRACT_PROMPT` asks for reading
-  order, so pairing claim *n* with occurrence *n* is tempting. The order is
-  unverified and degrades silently — one skipped claim shifts every later
-  pairing and manufactures confident, wrong attributions. Attribution is
-  location narrowing plus text similarity assigned globally best-first,
-  accepted only on `ratio ≥ 0.45` **and** `margin ≥ 0.10`; the margin is the
-  decisive test, since the question is only *which* occurrence.
+  meaningless, and a percentage alone hides that. Since 0.5.0 it has exactly
+  one cause: a claim cites a label and names none of that label's contexts, so
+  a claim reached one of them and nothing can say which.
+- **Attribution is a lookup, not a match** (`coverage/3`). `citation_occurrences()`
+  builds the inventory **before** the model call, `_render_inventory()` renders
+  it as `ctx_NNNN` into `EXTRACT_PROMPT`, and each claim comes back carrying
+  the ids it was taken from — resolved through the map built in that same pass,
+  in `extract_claims`, and stored in `ClaimResult.ctx_ids`. A `ctx` not in the
+  inventory is **dropped**, never repaired into "the first occurrence of that
+  label".
 
-The attributor duplicates ~10 lines of normalize-and-ratio with
-`evals/align.py` **on purpose**: `papertrace` cannot import `evals` (not in the
-wheel), and `evals` must not import a matcher from the thing it grades.
+  This replaced ~130 lines of similarity matching (`_attribute_label`,
+  `_normalize_for_match`, `_ratio`, `_location_matches`, `OCCURRENCE_MIN_RATIO`,
+  `OCCURRENCE_MIN_MARGIN`). Do not reintroduce a text-similarity fallback for
+  an unresolvable `ctx`: that is the confident-wrong-pointer failure the
+  redesign removed, and `uncertain` is the honest answer instead.
+- **Reading-order zipping is still rejected**, and `ctx_NNNN` is not a licence
+  to reintroduce it. The labels are *assigned* in reading order, but they are
+  resolved through the mapping built with them — never by re-deriving position
+  later. Any consumer that pairs the *n*th ctx with the *n*th occurrence of a
+  freshly recomputed list has rebuilt the bug: one dropped occurrence shifts
+  every id after it, silently.
 
 ## Non-negotiable gates
 

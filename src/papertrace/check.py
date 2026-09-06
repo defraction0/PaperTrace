@@ -14,9 +14,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-import unicodedata
 from dataclasses import dataclass, field
-from difflib import SequenceMatcher
 from pathlib import Path
 
 from .models import (
@@ -52,6 +50,11 @@ def last_model() -> str | None:
 # A cut is recorded and disclosed in the report rather than passing silently.
 MANUSCRIPT_CHAR_LIMIT = 180_000
 SOURCE_CHAR_LIMIT = 150_000
+# the citation inventory sent with the extraction prompt. A cut here is not
+# cosmetic: contexts past it are never offered to the model, so nothing can be
+# attributed to them and they can only ever come back `uncovered`. Disclosed
+# like every other cut rather than passing quietly.
+CONTEXT_CHAR_LIMIT = 60_000
 
 @dataclass
 class Truncations:
@@ -85,11 +88,21 @@ EXTRACT_PROMPT = """You are the claim-extraction step of a peer-review fact-chec
 Below is a manuscript converted to markdown with provenance markers
 (`<!-- block_NNNN, page N -->`).
 
-Task 1 — CITED claims: extract EVERY claim that carries a citation marker.
-Completeness over selectivity: each bracketed label like [3] or [7,8] or [9-11]
-that supports a statement must appear in at least one extracted claim. This
-includes numerical results, "X showed Y", methodological attributions,
-guideline statements, prevalence claims — and claims made inside TABLES.
+CITATION CONTEXTS below is the complete list of places this manuscript makes a
+citation, found mechanically. Each line is `ctx_NNNN`, its page, its section,
+the label(s) cited there, and the sentence.
+
+Task 1 — CITED claims: extract EVERY claim that carries a citation marker,
+working through the CITATION CONTEXTS list. Completeness over selectivity:
+each context must appear in at least one extracted claim. This includes
+numerical results, "X showed Y", methodological attributions, guideline
+statements, prevalence claims — and claims made inside TABLES.
+
+Every cited claim carries `ctx`: the ids of the contexts it was taken from,
+copied exactly from the list. One sentence citing [2] and [3] is ONE claim
+carrying BOTH ids, not two claims. Never invent an id and never guess: if you
+cannot tell which context a claim came from, return `"ctx": []` and it will be
+reported as unplaced rather than attributed to the wrong sentence.
 
 Task 2 — UNCITED assertions: list assertive factual statements that carry NO
 citation but would normally need one (numbers, prevalence, mechanisms,
@@ -108,8 +121,11 @@ Rules for both:
 - Number each list from 1 in reading order.
 
 Answer with ONLY a JSON object, no prose, no code fences:
-{"cited":[{"id":1,"quote":"...","claim":"...","location":"...","refs":["1"]}],
+{"cited":[{"id":1,"ctx":["ctx_0001"],"quote":"...","claim":"...","location":"...","refs":["1"]}],
  "uncited":[{"id":1,"quote":"...","claim":"...","location":"..."}]}
+
+CITATION CONTEXTS:
+<<CONTEXTS>>
 
 MANUSCRIPT:
 """
@@ -229,6 +245,46 @@ def _parse_json_object(text: str) -> dict:
     return json.loads(text[start : end + 1])
 
 
+def _ctx_labels(claim: dict) -> list[str]:
+    """The `ctx` values one returned claim carries, however it phrased them.
+
+    A list is the contract, but a model that has exactly one context sometimes
+    sends the bare string. Accepting both costs one branch; rejecting the
+    string form would discard a correct answer over its punctuation.
+    """
+    raw = claim.get("ctx")
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        return [str(x) for x in raw]
+    return []
+
+
+def _render_inventory(occurrences: list[dict]) -> tuple[str, dict[str, str]]:
+    """The citation inventory as the model sees it, and the map back.
+
+    Returns the `ctx_NNNN` block for the prompt and `{ctx label -> occurrence
+    id}`. Both come out of **one pass** over the same list, on purpose: the
+    caller resolves the model's answer through this map rather than re-deriving
+    the pairing from position later. Re-deriving it would be reading-order
+    zipping wearing a different hat — one dropped occurrence and every id after
+    it points at the wrong sentence, silently.
+
+    Internal occurrence ids (`block_0012:345:7`) are deliberately not shown.
+    They are long, punctuated, and a model asked to copy one exactly will
+    sometimes not; `ctx_0007` it copies.
+    """
+    lines: list[str] = []
+    mapping: dict[str, str] = {}
+    for n, o in enumerate(occurrences, start=1):
+        ctx = f"ctx_{n:04d}"
+        mapping[ctx] = o["id"]
+        where = f"p{o['page']}" if o.get("page") else "p?"
+        section = f" §{o['section']}" if o.get("section") else ""
+        lines.append(f"{ctx}  {where}{section}  [{o.get('group') or o['label']}]  {o['sentence']}")
+    return "\n".join(lines), mapping
+
+
 def extract_claims(
     case_dir: Path,
     model: str | None = None,
@@ -237,7 +293,16 @@ def extract_claims(
 ) -> tuple[list[ClaimResult], list[UncitedClaim]]:
     annotated = case_dir / "ingest" / "manuscript" / "annotated.md"
     text = _clip(annotated.read_text(), MANUSCRIPT_CHAR_LIMIT, "manuscript", truncations)
-    raw = _ask(EXTRACT_PROMPT + text, model)
+    # the inventory is built BEFORE the call, from source_map.json, and handed
+    # to the model — rather than built afterwards and matched back against a
+    # paraphrase. This is the whole redesign.
+    occurrences, _source = citation_occurrences(case_dir)
+    inventory, ctx_map = _render_inventory(occurrences)
+    prompt = EXTRACT_PROMPT.replace(
+        "<<CONTEXTS>>",
+        _clip(inventory or "(none found)", CONTEXT_CHAR_LIMIT, "citation contexts", truncations),
+    )
+    raw = _ask(prompt + text, model)
     data = _parse_json_object(raw)
     cited = [
         ClaimResult(
@@ -248,6 +313,11 @@ def extract_claims(
             # the compression back while looking like it had been removed
             quote=str(c.get("quote", "")),
             location=str(c.get("location", "")),
+            # resolved here, where the map is in hand. An id that is not in the
+            # inventory is DROPPED, never repaired into "the first occurrence of
+            # that label" — coverage reports the claim as unplaced instead, and
+            # the label's occurrences as uncertain.
+            ctx_ids=[ctx_map[k] for k in _ctx_labels(c) if k in ctx_map],
             refs=[str(r) for r in c.get("refs", [])],
         )
         for c in data.get("cited", [])
@@ -329,14 +399,20 @@ def citation_labels_in_text(clean_md: str) -> set[str]:
 #
 # Label-level coverage was pure set arithmetic — mechanical and incapable of a
 # false positive, but blind: two sentences citing [3] with one extracted claim
-# reported [3] as covered and left the other sentence invisible. Occurrences
-# fix the blindness and buy a new failure mode with it (the *counts* stay
-# right; the *pointer* can be wrong), which is why `uncertain` is a third
-# status and why the report carries a self-caveat.
+# reported [3] as covered and left the other sentence invisible. Occurrences fix
+# the blindness.
+#
+# Occurrences first bought a new failure mode with it: the inventory was built
+# AFTER the model call, so a paraphrase had to be matched back to a sentence by
+# text similarity, and the *pointer* could be wrong while the counts were right.
+# That is gone. The inventory is now built first and handed to the extractor as
+# `ctx_NNNN`, and attribution is a lookup of the ids it returned.
+#
+# `uncertain` stays, for the one case that can still produce doubt: a claim
+# cites a label and names none of that label's contexts, so a claim did reach
+# one of them and nothing can say which.
 # ---------------------------------------------------------------------------
 
-OCCURRENCE_MIN_RATIO = 0.45
-OCCURRENCE_MIN_MARGIN = 0.10
 _EXCERPT_RADIUS = 120
 
 # structural, not textual: the source map says a block IS a section header, so
@@ -344,37 +420,14 @@ _EXCERPT_RADIUS = 120
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
-def _normalize_for_match(text: str) -> str:
-    """Fold the differences that are never semantic, for attribution only.
-
-    Deliberately *similar* to `evals/align.py::normalize_claim`, not identical —
-    do not collapse the two. This one removes quotes outright and strips
-    bracketed citation markers, because it compares a claim against manuscript
-    sentences that carry `[3]` the claim text never had; `normalize_claim`
-    converts quotes to ASCII and keeps the markers, because it compares two
-    claim texts where a marker is signal.
-
-    They stay separate for a second reason: papertrace cannot import `evals`
-    (it is not in the wheel), and `evals` must not import a matcher from the
-    very thing it grades. Ten lines is the right price.
-    """
-    t = unicodedata.normalize("NFKC", text or "")
-    t = t.translate(dict.fromkeys(map(ord, "‐‑‒–—―"), "-"))
-    t = re.sub(r"[*_`\"'‘’“”]", "", t).casefold()
-    t = re.sub(r"\[\d[\d\s,–—-]*\]", " ", t)  # the markers themselves carry no meaning
-    return re.sub(r"\s+", " ", t).strip(" .")
-
-
-def _ratio(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b).ratio()
-
-
 def _excerpt(text: str, start: int, end: int) -> str:
     """The sentence carrying the marker, clipped to ±120 chars around it.
 
     The excerpt is what turns an uncovered occurrence from a bare number into
-    something a reader can act on, and it is also what the attributor matches
-    against — so it is the sentence, not an arbitrary window.
+    something a reader can act on, and it is also what the extractor is shown
+    in the `ctx_NNNN` inventory — so it is the sentence, not an arbitrary
+    window. A window that cut mid-clause would ask the model to place a claim
+    against half of the sentence it came from.
     """
     begin = 0
     for m in _SENTENCE_END.finditer(text, 0, start):
@@ -454,87 +507,32 @@ def citation_occurrences(case_dir: Path) -> tuple[list[dict], str]:
     return [], "none"
 
 
-def _location_matches(location: str, section: str) -> bool:
-    """Does a claim's free-text `location` ("Methods §2") name this section?"""
-    loc, sec = _normalize_for_match(location), _normalize_for_match(section)
-    if not loc or not sec:
-        return False
-    return sec in loc or loc in sec
-
-
-def _attribute_label(occs: list[dict], claims: list[ClaimResult]) -> tuple[dict, list[int], bool]:
-    """Which occurrence of ONE label each claim citing it reached.
-
-    Returns (occurrence id -> claim id, claim ids attributed to nothing,
-    whether any attribution was refused on the margin).
-
-    One occurrence is the whole answer: a claim citing the label reached the
-    only place the label appears. With several, the claim's `location` narrows
-    the field and text similarity decides, assigned globally best-first.
-
-    The ratio is taken on the claim's verbatim `quote` where extraction
-    returned one, so it compares a manuscript sentence with a manuscript
-    sentence rather than a paraphrase with a sentence. **The margin is still
-    the decisive test** — the question is only *which* occurrence, and a claim
-    with no quote still falls back to the paraphrase, where the absolute ratio
-    is as weak as it always was. Both thresholds are therefore left exactly
-    where they were: the evidence under them improved, and retuning them in the
-    same change would confound the two.
-
-    Reading-order zipping (claim 1 → occurrence 1, and so on) is deliberately
-    NOT used. `EXTRACT_PROMPT` does ask for reading order, which makes it
-    tempting, but the order is unverified and degrades silently on a single
-    skipped claim: every later pairing shifts by one and the audit manufactures
-    confident, wrong attributions. Refusing to answer is the honest failure.
-    """
-    if not occs:
-        return {}, [], False
-    if len(occs) == 1:
-        if claims:
-            return {occs[0]["id"]: claims[0].id}, [c.id for c in claims[1:]], False
-        return {}, [], False
-
-    edges: list[tuple[float, int, str]] = []
-    for c in claims:
-        narrowed = [o for o in occs if _location_matches(c.location, o["section"])] or occs
-        want = _normalize_for_match(c.quote or c.claim)
-        for o in narrowed:
-            edges.append((_ratio(want, _normalize_for_match(o["sentence"])), c.id, o["id"]))
-    edges.sort(key=lambda t: (-t[0], t[1], t[2]))
-
-    assigned: dict[str, int] = {}
-    taken: set[int] = set()
-    refused = False
-    for score, cid, oid in edges:
-        if cid in taken or oid in assigned or score < OCCURRENCE_MIN_RATIO:
-            continue
-        # the competitor is the best LIVE candidate sharing either endpoint —
-        # a row rival (this claim, another occurrence) or a column rival
-        # (another claim, this occurrence). Both are coin flips.
-        rivals = [
-            t for t in edges
-            if (t[1] == cid) != (t[2] == oid) and t[1] not in taken and t[2] not in assigned
-        ]
-        if score - max((t[0] for t in rivals), default=0.0) >= OCCURRENCE_MIN_MARGIN:
-            assigned[oid] = cid
-            taken.add(cid)
-        else:
-            refused = True
-    return assigned, [c.id for c in claims if c.id not in taken], refused
-
-
 def attribute_occurrences(
     occurrences: list[dict], claims: list[ClaimResult]
 ) -> tuple[list[dict], list[dict]]:
     """Stamp a `status` and a `claim_id` on every occurrence.
 
-    `uncertain` is a third status and is NEVER counted as covered: it means a
-    claim did reach this label and the tool cannot say which sentence it came
-    from. Calling that covered restores the overstatement; calling it
-    uncovered cries wolf. Surplus claims (more claims cite the label than there
-    are places citing it) are recorded and cast no doubt on anything — every
-    occurrence is already attributed, so nothing is left to be uncertain about.
+    Bookkeeping, not matching: an occurrence is `covered` when some claim's
+    `ctx_ids` names it. The extractor was shown this exact inventory and told
+    which ids to copy, so nothing here has to work out where a paraphrase came
+    from.
+
+    `uncertain` survives, for the one case that can still produce doubt: a
+    claim cites the label but named no usable context for it, so a claim *did*
+    reach one of these places and nothing can say which. Calling those covered
+    restores the overstatement occurrences exist to remove; calling them
+    uncovered cries wolf about a citation that was in fact read. It is never
+    counted as covered.
+
+    A claim naming a context that is not in the inventory lands here too, and
+    on purpose — a hallucinated `ctx_9999` and an honest `"ctx": []` are the
+    same amount of information about which sentence was meant.
     """
+    reached: dict[str, int] = {}
+    for c in claims:
+        for cid in c.ctx_ids:
+            reached.setdefault(cid, c.id)
+
     by_label: dict[str, list[dict]] = {}
     for o in occurrences:
         by_label.setdefault(o["label"], []).append(o)
@@ -542,13 +540,16 @@ def attribute_occurrences(
     status: dict[str, tuple[str, int | None]] = {}
     unattributed: list[dict] = []
     for label, occs in by_label.items():
-        citing = [c for c in claims if label in c.refs]
-        assigned, orphans, refused = _attribute_label(occs, citing)
-        rest = "uncertain" if (refused or orphans) else "uncovered"
+        here = {o["id"] for o in occs}
+        # a claim is unplaced *for this label* when it cites the label and
+        # named none of the label's own contexts — including when it named a
+        # context belonging to some other label
+        unplaced = [c.id for c in claims if label in c.refs and not (set(c.ctx_ids) & here)]
+        rest = "uncertain" if unplaced else "uncovered"
         for o in occs:
-            claim_id = assigned.get(o["id"])
+            claim_id = reached.get(o["id"])
             status[o["id"]] = ("covered", claim_id) if claim_id is not None else (rest, None)
-        unattributed += [{"claim_id": cid, "label": label} for cid in orphans]
+        unattributed += [{"claim_id": cid, "label": label} for cid in unplaced]
 
     items = [{**o, "status": status[o["id"]][0], "claim_id": status[o["id"]][1]}
              for o in occurrences]
@@ -591,16 +592,17 @@ def coverage_audit(case_dir: Path, claims: list[ClaimResult]) -> dict:
         "labels_in_text": sorted(in_text, key=int),
         "covered": sorted(covered & in_text, key=int),
         "missing": missing,
-        "schema": "coverage/2",
+        "schema": "coverage/3",
         "unit": "occurrence",
         "source": source,
         "labels_partially_covered": partial,
         "labels_uncertain_only": uncertain_only,
         "occurrences": {"total": len(items), **counts, "items": items},
         "attribution": {
-            "method": "location narrowing, then text similarity assigned globally best-first",
-            "min_ratio": OCCURRENCE_MIN_RATIO,
-            "min_margin": OCCURRENCE_MIN_MARGIN,
+            # no thresholds to report any more: the extractor was shown this
+            # inventory and returned the ids it used, so there is nothing to
+            # tune and no close call to refuse
+            "method": "context id returned by extraction, resolved against the inventory",
             "claims_unattributed": unattributed,
         },
     }

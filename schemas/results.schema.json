@@ -40,6 +40,11 @@
             "type": "string",
             "description": "The claim tightly paraphrased \u2014 what a report headline reads well."
           },
+          "ctx_ids": {
+            "type": "array",
+            "description": "Ids of the citation occurrences this claim was extracted from, resolved from the `ctx_NNNN` labels the inventory offered the extractor. Empty when the model named none or named one not in the inventory \u2014 never back-filled by guessing which occurrence of the label was meant. Absent before 0.5.0.",
+            "items": { "type": "string" }
+          },
           "quote": {
             "type": "string",
             "description": "The manuscript's own sentence carrying the claim, verbatim. This is what the judge rules on: a paraphrase can drop the population, the interval or the hedging that decides whether a source supports the statement. Empty string when extraction returned no quote \u2014 never back-filled from `claim`, and absent entirely in files written before 0.5.0."
@@ -207,8 +212,8 @@
         },
         "schema": {
           "type": "string",
-          "description": "'coverage/2' when occurrence-level keys are present. Absent means the label-level audit that shipped before them.",
-          "enum": ["coverage/2"]
+          "description": "'coverage/3' since 0.5.0: attribution is a lookup of the context ids extraction returned. 'coverage/2' was the same occurrence keys with similarity-based attribution and its two thresholds. Absent means the label-level audit that shipped before either. Both occurrence versions are accepted so an older results.json still validates.",
+          "enum": ["coverage/2", "coverage/3"]
         },
         "unit": {
           "type": "string",
@@ -265,14 +270,12 @@
         },
         "attribution": {
           "type": "object",
-          "description": "How claims were matched to occurrences. Reading-order zipping is deliberately not used: the order is unverified and degrades silently on one skipped claim.",
+          "description": "How claims were placed on occurrences. Since coverage/3 this is a lookup, not a match: extraction is shown the occurrence inventory as `ctx_NNNN` and returns the ids it used, so there are no similarity thresholds to report. Reading-order zipping remains deliberately unused \u2014 the order is unverified and degrades silently on one skipped claim.",
           "properties": {
             "method": { "type": "string" },
-            "min_ratio": { "type": "number" },
-            "min_margin": { "type": "number" },
             "claims_unattributed": {
               "type": "array",
-              "description": "Claims citing a label that reached no specific occurrence — surplus claims, and claims the attributor refused to place.",
+              "description": "Claims citing a label but naming none of that label's own contexts \u2014 a surplus claim, an empty `ctx`, or a `ctx` that was not in the inventory. Their label's unreached occurrences are `uncertain`, never `uncovered`.",
               "items": {
                 "type": "object",
                 "properties": {

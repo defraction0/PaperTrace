@@ -8,6 +8,61 @@ All notable changes to PaperTrace are documented here. The format follows
 
 0.4.1 was never released, so its entries below ship together with these.
 
+### Changed — extraction is told where the citations are ⚠️ **`coverage/3`**
+
+The old flow discarded the location and then worked to reconstruct it. The
+model returned a paraphrase plus a free-text `location` ("Methods ¶2"), and
+Python guessed which of several `[3]` markers that paraphrase had come from:
+normalise both sides, score with `SequenceMatcher`, accept only on
+`ratio ≥ 0.45` **and** `margin ≥ 0.10`, assign globally best-first, and report
+everything it could not decide as `uncertain`. The counts were right and the
+*pointer* could be wrong.
+
+The inventory it was matching against had been there all along — built
+deterministically from `source_map.json`, just *after* the model call instead
+of before it.
+
+- **The inventory goes into the prompt.** `_render_inventory()` renders each
+  citation occurrence as `ctx_NNNN` with its page, section, labels and
+  sentence; `EXTRACT_PROMPT` asks the model to work through that list and
+  return, per claim, the ids it was taken from. One sentence citing [2] and [3]
+  is **one** claim carrying **both** ids.
+- **Attribution becomes a set lookup.** An occurrence is covered when some
+  claim's `ctx_ids` names it. `results.json` gains `ctx_ids` per claim and the
+  audit is `"schema": "coverage/3"`; `coverage/2` files still validate, and
+  `labels_in_text`/`covered`/`missing` keep their label-level meaning byte for
+  byte, because `evals/align.py` reads `missing` to apportion blame.
+- **Six symbols deleted** — `_attribute_label`, `_normalize_for_match`,
+  `_ratio`, `_location_matches`, `OCCURRENCE_MIN_RATIO`,
+  `OCCURRENCE_MIN_MARGIN` — and the `unicodedata`/`SequenceMatcher` imports
+  with them. **This is not a net line saving and should not be sold as one:**
+  `check.py` loses 110 lines and gains 115, roughly a third of the new ones
+  being prompt text and comments. What goes is a *mechanism* — a scoring
+  function, two tuned thresholds and a global assignment pass — replaced by a
+  dictionary lookup. The audit no longer
+  publishes `min_ratio`/`min_margin` because there is nothing to tune. The
+  deliberate ~10-line duplication with `evals/align.py` is gone too — the
+  reason it existed (papertrace cannot import `evals`, `evals` must not import
+  a matcher from the thing it grades) no longer applies, since there is no
+  matcher on this side.
+- **A `ctx` the inventory does not contain is dropped, never repaired.**
+  A hallucinated `ctx_9999` and an honest `"ctx": []` carry the same amount of
+  information about which sentence was meant, and both are treated as such.
+  Falling back to "the first occurrence of that label" would manufacture
+  exactly the confident wrong pointer this removes.
+- **`uncertain` survives, with one cause instead of several.** A claim cites a
+  label and names none of that label's contexts ⇒ a claim reached one of those
+  places and nothing can say which, so they are `uncertain` and counted as
+  **not** covered. Previously it also absorbed close calls the matcher refused;
+  that category no longer exists.
+- The report's attribution self-caveat is correspondingly shorter, and its
+  token changes: attribution is no longer "a text match that can be wrong" but
+  "the context the extractor named" — still a model step, so still capable of
+  naming the wrong place, and the report keeps saying so.
+
+**Also unmeasured**, per ADR 0001. The argument for it is structural — it
+deletes a guess and a whole class of silent wrong pointer — not a score.
+
 ### Changed — the committed demo report is regenerated, and its judge is pinned
 
 `examples/demo/output/` is the only committed output and the artefact the README
@@ -116,12 +171,11 @@ and only one of them is checkable.
 - **The quote is never back-filled from the paraphrase.** That would reinstate
   the exact compression this change removes while looking like it had been
   fixed.
-- **Coverage attribution got more reliable for free.** `_attribute_label` now
-  takes its similarity ratio on the quote where there is one, comparing a
-  manuscript sentence against a manuscript sentence instead of a paraphrase
-  against a sentence. `OCCURRENCE_MIN_RATIO` and `OCCURRENCE_MIN_MARGIN` are
-  deliberately left where they were: the evidence under them improved, and
-  retuning them in the same change would confound the two.
+- Coverage attribution briefly took its similarity ratio on the quote rather
+  than the paraphrase, which was a free improvement to the matcher — and then
+  the matcher was deleted outright by the change below. Nothing of it remains;
+  the note is kept only so the two entries do not appear to contradict each
+  other.
 - `results.json` gains `quote` on both cited claims and the uncited register;
   `schemas/results.schema.json` is updated and `from_json` still loads a 0.4.x
   file, where the field is simply absent.

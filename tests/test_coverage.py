@@ -791,11 +791,15 @@ def test_surplus_claims_are_recorded_without_making_anything_uncertain(tmp_path)
         {"id": "block_0001", "page": 1, "text": "Recruitment reached 500,000 adults [2]."},
     ])
     claims = [
-        ClaimResult(id=1, claim="recruitment reached 500,000 adults", location="", refs=["2"]),
+        ClaimResult(id=1, claim="recruitment reached 500,000 adults", location="", refs=["2"],
+                    ctx_ids=["block_0001:35:2"]),
         ClaimResult(id=2, claim="the cohort is large", location="", refs=["2"]),
     ]
     cov = coverage_audit(case, claims)
 
+    # claim 1 named the only place [2] is cited, so nothing about that place is
+    # in doubt. Claim 2 named nothing and is reported unattributed — it cannot
+    # make an occurrence uncertain that another claim has already placed.
     assert cov["occurrences"]["covered"] == 1
     assert cov["occurrences"]["uncertain"] == 0
     assert [c["claim_id"] for c in cov["attribution"]["claims_unattributed"]] == [2]

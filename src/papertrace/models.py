@@ -524,6 +524,11 @@ class ClaimResult:
     # the compression the quote exists to remove
     quote: str = ""
     location: str = ""  # where in the manuscript, e.g. "Methods §2"
+    # ids of the citation occurrences this claim was extracted from, as resolved
+    # from the `ctx_NNNN` labels the inventory offered the extractor. Empty when
+    # the model named none, or named one that was not in the inventory: never
+    # back-filled by guessing which occurrence of the label it must have meant.
+    ctx_ids: list[str] = field(default_factory=list)
     refs: list[str] = field(default_factory=list)  # citation labels, e.g. ["14"]
     verdict: str = "not_retrieved"  # one of VERDICTS
     note: str = ""  # one/two-sentence finding

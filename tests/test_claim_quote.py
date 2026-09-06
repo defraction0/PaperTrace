@@ -163,49 +163,6 @@ def _stub_source(case: Path, monkeypatch, fake_ask) -> None:
     monkeypatch.setattr(check_mod, "_stale_ingest", lambda *a, **k: False)
 
 
-# --- the coverage matcher gets a real sentence to compare against ----------
-
-
-def test_attribution_matches_on_the_quote_when_there_is_one():
-    """`_attribute_label` compares the claim against each occurrence's own
-    verbatim sentence. Comparing a paraphrase to a sentence was the weak side of
-    that ratio; comparing the sentence to itself is not. This is why the 0.45
-    floor and 0.10 margin are left exactly where they were — the evidence under
-    them improved, so retuning them here would confound two changes."""
-    occs = [
-        {"id": "block_0001:10:3", "label": "3", "section": "Results",
-         "sentence": "Mortality fell by 12% in the subgroup over 65 (HR 0.88, "
-                     "95% CI 0.79-0.98) [3]."},
-        {"id": "block_0002:40:3", "label": "3", "section": "Results",
-         "sentence": "Readmission was unchanged across all strata [3]."},
-    ]
-    claim = ClaimResult(
-        id=7, claim="Mortality improved.", location="Results", refs=["3"],
-        quote="Mortality fell by 12% in the subgroup over 65 (HR 0.88, 95% CI 0.79-0.98).",
-    )
-    assigned, unattributed, refused = check_mod._attribute_label(occs, [claim])
-
-    assert assigned == {"block_0001:10:3": 7}, "the quote should pick its own sentence"
-    assert not unattributed and not refused
-
-
-def test_attribution_still_falls_back_to_the_paraphrase():
-    """An extraction that returned no quote must keep working exactly as it did
-    — the audit of an older case folder does not get worse because a field it
-    never had is now available."""
-    occs = [
-        {"id": "a:1:3", "label": "3", "section": "Results",
-         "sentence": "Mortality fell by 12% in the over-65 subgroup [3]."},
-        {"id": "b:2:3", "label": "3", "section": "Methods",
-         "sentence": "Scans were reconstructed with a sharp kernel [3]."},
-    ]
-    claim = ClaimResult(id=7, claim="Mortality fell by 12% in the over-65 subgroup.",
-                        location="Results", refs=["3"])
-    assigned, _, refused = check_mod._attribute_label(occs, [claim])
-    assert assigned == {"a:1:3": 7}
-    assert not refused
-
-
 # --- gate 4: the failure paths still degrade honestly ---------------------
 
 
