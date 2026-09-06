@@ -601,3 +601,34 @@ def test_the_results_schema_declares_the_supplement_verification(tmp_path):
     assert [x.verified for x in RunResults.from_json(path).claims[0].judgements] == [
         False, False, False
     ]
+
+
+def test_a_doi_match_beats_a_title_match_for_the_same_reference(tmp_path, monkeypatch):
+    """Two files can honestly identify as the same reference — a duplicate copy,
+    or a full text beside a truncated one. Which is used was decided by
+    alphabetical order, so a DOI match could lose to a title match, and the
+    audit depended on what the files happened to be called. That is the
+    filesystem-order defect `_provided_candidates` already fixed once.
+
+    A DOI is exact identity; a title is a token-overlap judgement. The stronger
+    signal wins, and the rest is name order so the answer is the same on every
+    machine."""
+    from papertrace.refs import resolve_all, unused_provided
+
+    _no_network(monkeypatch)
+    d = tmp_path / "src"
+    title_only = _pdf(d / "aaa-first-alphabetically.pdf",
+                      title="Opportunistic detection of type 2 diabetes using deep "
+                            "learning from frontal chest radiographs")
+    by_doi = _pdf(d / "zzz-last-alphabetically.pdf",
+                  title="Opportunistic detection of type 2 diabetes using deep "
+                        "learning from frontal chest radiographs",
+                  doi="10.1038/s41467-023-39631-x")
+    entries = [_entries()[0]]
+    resolve_all(entries, tmp_path / "dest", "t@example.org", provided_dir=d)
+
+    assert entries[0].pdf_path == str(by_doi), "the exact signal must win"
+    assert "own DOI" in entries[0].reason
+    spare = dict(unused_provided(entries, d))
+    assert list(spare) == [title_only]
+    assert "already has a file" in spare[title_only]

@@ -1532,7 +1532,15 @@ def resolve_all(
     identified, _unidentified = identify_by_content(entries, provided_dir, claimed)
     articles: dict[str, Identified] = {}
     supplements: dict[str, list[Identified]] = {}
-    for found in identified.values():
+    # Two files can honestly identify as the same reference — a duplicate copy,
+    # or a full text beside a truncated one. `setdefault` over a sorted glob
+    # settled that by ALPHABETICAL ORDER, so a title match could beat a DOI
+    # match and the audit depended on what the files happened to be called: the
+    # filesystem-order defect `_provided_candidates` already fixed once. A DOI
+    # is exact identity and a title is a token-overlap judgement, so the exact
+    # signal wins; name order breaks the remaining tie so the answer is the same
+    # on every machine.
+    for found in sorted(identified.values(), key=lambda f: (f.signal != "DOI", f.path.name)):
         if found.kind == "article":
             articles.setdefault(found.entry.num, found)
         else:
