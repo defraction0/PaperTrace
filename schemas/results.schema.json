@@ -112,7 +112,11 @@
                 "source_slug": { "type": "string" },
                 "ref": {
                   "type": "string",
-                  "description": "The citation label this source answers for, e.g. \"3\"."
+                  "description": "The citation label this source answers for, e.g. \"3\". A supplement answers for the label its parent article carries; the audited paper's own supplement answers for none and carries \"\"."
+                },
+                "kind": {
+                  "enum": ["article", "supplement", "own_supplement"],
+                  "description": "Which document this verdict was read from: the cited article, supplementary material accompanying it, or supplementary material belonging to the audited paper itself. Absent on files written before 0.6.0, where every judgement was an article. A reader holding only results.json needs this to tell a verdict resting on an appendix from one resting on the paper of record — and note that a supplement is attached by filename with NO identity check, so its provenance is weaker than an article's."
                 },
                 "verdict": {
                   "enum": [
@@ -156,7 +160,7 @@
     },
     "source_converters": {
       "type": "object",
-      "description": "Cited-source slug -> the converter that read that source. Sources are ingested with the same backend as the paper, but a case folder can hold a map from an earlier run whose PDF is now gone, so the two can differ. An empty object or an absent key means the run did not record this (every file written before 0.5.0) \u2014 which is NOT the same as every source having been read flat.",
+      "description": "Document slug -> the converter that read it. Keyed by document and not by reference, so a supplement appears under its own slug beside the article it accompanies. Sources are ingested with the same backend as the paper, but a case folder can hold a map from an earlier run whose PDF is now gone, so the two can differ. An empty object or an absent key means the run did not record this (every file written before 0.5.0) \u2014 which is NOT the same as every source having been read flat.",
       "additionalProperties": {
         "type": "string"
       }

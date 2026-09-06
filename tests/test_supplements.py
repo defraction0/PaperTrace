@@ -352,3 +352,238 @@ def test_run_forwards_supplements_to_refs(tmp_path, monkeypatch):
     assert seen["supplement"] == [si]
     # and the flag really is declared on `run`, not silently swallowed by **kw
     assert "supplement" in inspect.signature(cli.run).parameters
+
+
+# --- check: a cited work's supplements are judged too ----------------------
+
+
+def _ingested(dirpath: Path, slug: str) -> None:
+    from papertrace.models import Block, SourceMap
+
+    dirpath.mkdir(parents=True, exist_ok=True)
+    (dirpath / "annotated.md").write_text(
+        f"<!-- block_0001, page 1 -->\nText of {slug}.\n"
+    )
+    SourceMap(
+        doc=f"{slug}.pdf", pages=1,
+        blocks=[Block("block_0001", "text", 1, (0.0, 0.0, 100.0, 20.0), [],
+                      f"Text of {slug}.")],
+    ).to_json(dirpath / "source_map.json")
+
+
+def _case_with_supplement(tmp_path: Path) -> RefManifest:
+    """One cited reference [1] carrying two supplements, all already ingested."""
+    for slug in ("pyrros-2023", "pyrros-2023-supplement", "pyrros-2023-appendix-b"):
+        _ingested(tmp_path / "ingest" / slug, slug)
+    return RefManifest(
+        manuscript="m.pdf",
+        entries=[
+            RefEntry(num="1", raw="Pyrros", status="retrieved", slug="pyrros-2023",
+                     pdf_path="pyrros-2023.pdf",
+                     supplements=[
+                         Supplement("pyrros-2023-supplement", "pyrros-2023-supplement.pdf"),
+                         Supplement("pyrros-2023-appendix-b", "pyrros-2023-appendix-b.pdf"),
+                     ]),
+        ],
+    )
+
+
+def _verdicts(mapping: dict[str, str]):
+    """A fake `_ask` answering per document, and the record of what it was asked."""
+    seen: list[str] = []
+
+    def fake_ask(prompt, model=None):
+        slug = next(s for s in mapping if f"SOURCE ({s})" in prompt)
+        seen.append(slug)
+        return json.dumps([{
+            "id": 1, "verdict": mapping[slug], "note": f"per {slug}",
+            "source_page": 1, "source_block": "block_0001",
+            "anchor_phrases": [f"Text of {slug}"],
+        }])
+
+    return fake_ask, seen
+
+
+def test_a_supplement_is_judged_as_its_own_document(tmp_path, monkeypatch):
+    from papertrace import check as check_mod
+    from papertrace.models import ClaimResult
+
+    manifest = _case_with_supplement(tmp_path)
+    claim = ClaimResult(id=1, claim="the cohort was imaged twice", location="Methods",
+                        refs=["1"])
+    fake_ask, seen = _verdicts({
+        "pyrros-2023": "not_addressed",
+        "pyrros-2023-supplement": "contradicted",
+        "pyrros-2023-appendix-b": "not_addressed",
+    })
+    monkeypatch.setattr(check_mod, "_ask", fake_ask)
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    assert sorted(seen) == [
+        "pyrros-2023", "pyrros-2023-appendix-b", "pyrros-2023-supplement",
+    ], "one call per document"
+    assert {j.source_slug: j.verdict for j in claim.judgements} == {
+        "pyrros-2023": "not_addressed",
+        "pyrros-2023-supplement": "contradicted",
+        "pyrros-2023-appendix-b": "not_addressed",
+    }
+    # a supplement answers for the label its parent carries
+    assert {j.ref for j in claim.judgements} == {"1"}
+    assert {j.kind for j in claim.judgements} == {"article", "supplement"}
+
+
+def test_a_supplement_contradicting_decides_the_headline(tmp_path, monkeypatch):
+    """The supplement is part of the cited work. A contradiction found only in
+    the appendix is still a contradiction the reviewer needs."""
+    from papertrace import check as check_mod
+    from papertrace.models import ClaimResult
+
+    manifest = _case_with_supplement(tmp_path)
+    claim = ClaimResult(id=1, claim="c", location="Methods", refs=["1"])
+    fake_ask, _ = _verdicts({
+        "pyrros-2023": "not_addressed",
+        "pyrros-2023-supplement": "contradicted",
+        "pyrros-2023-appendix-b": "not_addressed",
+    })
+    monkeypatch.setattr(check_mod, "_ask", fake_ask)
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    assert claim.verdict == "contradicted"
+    assert claim.source_slug == "pyrros-2023-supplement"
+
+
+def test_the_judge_is_told_which_kind_of_document_it_is_holding(tmp_path, monkeypatch):
+    """Handed an appendix with no warning, a judge has no reason to expect
+    `not_addressed` to be the ordinary answer."""
+    from papertrace import check as check_mod
+    from papertrace.models import ClaimResult
+
+    manifest = _case_with_supplement(tmp_path)
+    claim = ClaimResult(id=1, claim="c", location="Methods", refs=["1"])
+    prompts: dict[str, str] = {}
+
+    def fake_ask(prompt, model=None):
+        slug = next(s for s in ("pyrros-2023-supplement", "pyrros-2023-appendix-b",
+                                "pyrros-2023") if f"SOURCE ({s})" in prompt)
+        prompts[slug] = prompt
+        return json.dumps([{"id": 1, "verdict": "not_addressed", "note": "n"}])
+
+    monkeypatch.setattr(check_mod, "_ask", fake_ask)
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    assert "<<DOCKIND>>" not in prompts["pyrros-2023"], "placeholder left unsubstituted"
+    assert "supplementary material" in prompts["pyrros-2023-supplement"].lower()
+    assert "supplementary material" not in prompts["pyrros-2023"].lower()
+
+
+def test_a_supplement_is_not_judged_when_its_reference_is_not_cited(tmp_path, monkeypatch):
+    """A claim citing [2] must not pick up [1]'s appendix."""
+    from papertrace import check as check_mod
+    from papertrace.models import ClaimResult
+
+    manifest = _case_with_supplement(tmp_path)
+    manifest.entries.append(
+        RefEntry(num="2", raw="Chen", status="retrieved", slug="chen-2021",
+                 pdf_path="chen-2021.pdf")
+    )
+    _ingested(tmp_path / "ingest" / "chen-2021", "chen-2021")
+    claim = ClaimResult(id=1, claim="c", location="Methods", refs=["2"])
+    fake_ask, seen = _verdicts({"chen-2021": "supported"})
+    monkeypatch.setattr(check_mod, "_ask", fake_ask)
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    assert seen == ["chen-2021"]
+    assert [j.source_slug for j in claim.judgements] == ["chen-2021"]
+
+
+def test_the_results_schema_declares_the_document_kind(tmp_path):
+    """A judgement's `kind` is what tells a reader of results.json alone that a
+    verdict came from an appendix. Declaring it is the contract; validating is
+    not enough, since nothing here forbids an undeclared key."""
+    import jsonschema
+
+    from papertrace.models import ClaimResult, RunResults, SourceJudgement
+
+    results = RunResults(
+        manuscript="m.pdf", checker="claude -p", date="2026-09-06",
+        refs_total=1, refs_available=1,
+        claims=[ClaimResult(
+            id=1, claim="c", location="Methods", refs=["1"],
+            judgements=[
+                SourceJudgement("pyrros-2023", "1", kind="article", verdict="not_addressed"),
+                SourceJudgement("pyrros-2023-supplement", "1", kind="supplement",
+                                verdict="contradicted", source_page=1,
+                                source_block="block_0001"),
+            ],
+        )],
+    )
+    path = tmp_path / "results.json"
+    results.to_json(path)
+    schema = json.loads((_repo_root() / "schemas" / "results.schema.json").read_text())
+    jsonschema.validate(json.loads(path.read_text()), schema)
+
+    j = schema["properties"]["claims"]["items"]["properties"]["judgements"]["items"]
+    assert "kind" in j["properties"], "a judgement's document kind is undeclared"
+    assert set(j["properties"]["kind"]["enum"]) == {"article", "supplement", "own_supplement"}
+
+    back = RunResults.from_json(path)
+    assert [x.kind for x in back.claims[0].judgements] == ["article", "supplement"]
+
+
+def test_a_results_file_written_before_supplements_still_loads(tmp_path):
+    """Absent `kind` means the article — every judgement before 0.6.0 was one."""
+    from papertrace.models import ClaimResult, RunResults, SourceJudgement
+
+    results = RunResults(
+        manuscript="m.pdf", checker="claude -p", date="2026-09-06",
+        refs_total=1, refs_available=1,
+        claims=[ClaimResult(id=1, claim="c", location="M", refs=["1"],
+                            judgements=[SourceJudgement("a-2020", "1", verdict="supported")])],
+    )
+    path = tmp_path / "results.json"
+    results.to_json(path)
+    payload = json.loads(path.read_text())
+    for j in payload["claims"][0]["judgements"]:
+        del j["kind"]
+    path.write_text(json.dumps(payload))
+
+    back = RunResults.from_json(path)
+    assert [x.kind for x in back.claims[0].judgements] == ["article"]
+    assert back.claims[0].judgements[0].origin == "cited as [1]"
+
+
+def test_a_supplement_that_cannot_be_read_never_taints_the_articles_verdict(tmp_path,
+                                                                            monkeypatch):
+    """Gate 4. The supplement's own PDF is gone and it was never ingested, so
+    nobody read it — that is `unchecked`, on that document alone. The article
+    was read and its verdict stands; discarding it would report a gap that does
+    not exist, and letting the supplement default to anything would be a verdict
+    on a document nobody opened."""
+    from papertrace import check as check_mod
+    from papertrace.models import ClaimResult
+
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num="1", raw="Pyrros", status="retrieved", slug="pyrros-2023",
+                          pdf_path="pyrros-2023.pdf",
+                          supplements=[Supplement("pyrros-2023-supplement",
+                                                  "/nonexistent/pyrros-2023-supplement.pdf")])],
+    )
+    _ingested(tmp_path / "ingest" / "pyrros-2023", "pyrros-2023")  # the supplement: not ingested
+    claim = ClaimResult(id=1, claim="c", location="Methods", refs=["1"])
+
+    monkeypatch.setattr(check_mod, "_ask", lambda p, model=None: json.dumps([{
+        "id": 1, "verdict": "supported", "note": "per the article",
+        "source_page": 1, "source_block": "block_0001",
+        "anchor_phrases": ["Text of pyrros-2023"],
+    }]))
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    by_slug = {j.source_slug: j for j in claim.judgements}
+    assert by_slug["pyrros-2023"].verdict == "supported"
+    assert by_slug["pyrros-2023-supplement"].verdict == "unchecked"
+    assert "re-run" in by_slug["pyrros-2023-supplement"].note
+    # the readable document still decides the headline
+    assert claim.verdict == "supported"
+    # and the gap is NOT laundered into "the source could not be retrieved"
+    assert claim.unjudged_refs == []

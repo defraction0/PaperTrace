@@ -140,6 +140,8 @@ A claim may cite several sources. You are shown ONE of them. Judge only what
 THIS source does or does not say, and do not speculate about the others: each
 is judged in its own call and the results are combined afterwards.
 
+WHAT YOU ARE HOLDING: <<DOCKIND>>
+
 Each claim carries `quote`, the manuscript's own sentence, and `claim`, a short
 paraphrase of it. **Judge the quote.** It holds the population, the effect
 size, the interval and the hedging that decide whether the source supports the
@@ -826,6 +828,29 @@ def _judgement_from(entry, provenance: SourceProvenance | None) -> tuple[dict | 
     }, ""
 
 
+# What the judge is actually reading. A supplement handed over unannounced gets
+# treated as the article: `not_addressed` is the ordinary answer for an appendix
+# that covers a different part of the work, and a judge with no reason to expect
+# it reaches for `partial` instead and invents a true kernel.
+_DOCKIND = {
+    "article": "the cited article itself.",
+    "supplement": (
+        "supplementary material accompanying the cited article — an appendix, "
+        "supporting information, or an online-only data supplement. It is part of "
+        "the cited work, so what it states counts. But it covers only part of that "
+        "work, so a claim it simply does not speak to is `not_addressed`, and that "
+        "is the expected answer here far more often than for an article."
+    ),
+    "own_supplement": (
+        "supplementary material belonging to the manuscript UNDER REVIEW, not to a "
+        "cited work. The claim points at it — a table, figure or section number the "
+        "paper names. Judge whether this document actually states what the paper "
+        "says it does. `not_addressed` means the paper pointed here and the thing it "
+        "pointed at is not here."
+    ),
+}
+
+
 def check_claims(
     claims: list[ClaimResult],
     manifest: RefManifest,
@@ -874,8 +899,22 @@ def check_claims(
             if e.slug in seen_slugs:  # the same paper cited under two labels
                 continue
             seen_slugs.add(e.slug)
-            c.judgements.append(SourceJudgement(source_slug=e.slug, ref=r))
+            c.judgements.append(SourceJudgement(source_slug=e.slug, ref=r, kind="article"))
             by_slug.setdefault(e.slug, []).append(c)
+            # A supplement is part of the work that was cited, so it is read for
+            # every claim citing that label rather than only when the article
+            # turns out to be silent — a supplement contradicting a claim the
+            # article supports is exactly the finding that would be missed.
+            # Costs one extra call per supplement, not per claim: the loop below
+            # groups every claim for a document into a single call.
+            for s in e.supplements:
+                if s.slug in seen_slugs:
+                    continue
+                seen_slugs.add(s.slug)
+                c.judgements.append(
+                    SourceJudgement(source_slug=s.slug, ref=r, kind="supplement")
+                )
+                by_slug.setdefault(s.slug, []).append(c)
         # what is left here could NOT be obtained — the only remaining reason a
         # cited source goes unopened
         avail_refs = {r for r, _ in avail}
@@ -910,6 +949,7 @@ def check_claims(
             )
             prompt = (
                 CHECK_PROMPT.replace("<<CLAIMS>>", claims_json)
+                .replace("<<DOCKIND>>", _DOCKIND[doc.kind])
                 .replace("<<SLUG>>", slug)
                 .replace(
                     "<<SOURCE>>",

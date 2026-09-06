@@ -609,6 +609,11 @@ class SourceJudgement:
 
     source_slug: str
     ref: str  # the citation label this source answers for, e.g. "3"
+    # which of DOCUMENT_KINDS this document is. Stored rather than looked up in
+    # the manifest: the templates are handed `results` alone and
+    # `run_disclosures` takes the manifest optionally, so a reader with only
+    # `results.json` must still be able to tell an appendix from an article.
+    kind: str = "article"
     verdict: str = "unchecked"  # one of VERDICTS
     note: str = ""
     source_page: int | None = None
@@ -620,6 +625,20 @@ class SourceJudgement:
     @property
     def label(self) -> str:
         return VERDICT_LABEL.get(self.verdict, self.verdict.upper())
+
+    @property
+    def origin(self) -> str:
+        """Where this verdict came from, in the reader's terms.
+
+        One property rather than `cited as [{{ j.ref }}]` written out in three
+        templates: the paper's own supplement answers for no label at all, and
+        every one of them would otherwise have rendered `cited as []`.
+        """
+        if self.kind == "own_supplement":
+            return "this paper's own supplement"
+        if self.kind == "supplement":
+            return f"supplement to [{self.ref}]"
+        return f"cited as [{self.ref}]"
 
 
 # how adverse each judgement is, for picking a claim's headline. A single cited
