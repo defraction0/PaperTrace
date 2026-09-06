@@ -6,6 +6,68 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ## [0.6.0] — unreleased
 
+### Added — a provided PDF is identified by what is in it
+
+`--provided` matched on the **filename** and nothing said so. It needs the
+reference's surname and year in the name, which a reference-manager export has
+and a publisher download never does:
+
+```
+pyrros-2023.pdf                              matches
+Pyrros et al. - 2023 - Opportunistic....pdf  matches
+s41467-023-39631-x.pdf                       no
+1-s2.0-S0140673623001234-main.pdf            no
+41467_2023_39631_MOESM1_ESM.pdf              no   (the standard Nature supplement name)
+```
+
+So a user who dragged in a folder of downloads got an audit that looked
+entirely normal and used none of it — and the failure was **asymmetric**: an
+unmatched supplement was reported, an unmatched *article* was skipped in
+silence.
+
+Each unrecognised PDF is now identified from **its own DOI**, else from **its
+own title** compared against the reference list. Filename matching still runs
+first and still wins: that is the user's own assertion about the file, and
+content only fills the gap it leaves. Supplements are identified the same way,
+which matters more than it sounds — the publisher forms carry no filename
+marker at all (`\besm\b` cannot match inside `MOESM1_ESM`, and `mmc1` and
+`media-1` say nothing) while their first page states plainly what they are.
+
+**Nothing in the folder goes unremarked.** `unused_provided` lists every PDF
+that ended up attached to nothing, with the reason kept apart: unrecognisable,
+ambiguous, a spare copy of a paper already matched, or a supplement whose
+article is missing.
+
+⚠️ **Two refusals, both deliberate.** A title matching **two** references is
+used for neither — a corrigendum shares nearly every distinctive word with its
+original, and picking the better score would judge a claim against the wrong
+paper with nothing downstream able to notice. And a title with too few
+distinctive words to tell papers apart is not a match: a filename match may be
+accepted as `unverifiable` because the user named the file, but nobody asserted
+anything about a file identified by content.
+
+Not reused for this: `_title_check_text`, the rule that already vets a
+filename-matched file. Measured on the demo's real sources it verifies
+`pyrros-2023.pdf` against an unrelated NEJM review as well, because it counts a
+reference's words anywhere on a whole page and both are about AI in medical
+imaging. It is a forgiving veto for a file already chosen, and it stays that.
+
+`Supplement.verified` and `SourceJudgement.verified` record which supplements
+were established to belong to their work. The 0.6.0 disclosure said
+*"supplements carry no identity check"*; that was true of all of them then and
+is true of only some now, so the report states the split per file instead of
+warning about both equally.
+
+Also fixed: a surname under four characters is dropped by the filename token
+filter, so `liu-2019` matched on the **year alone** and `smith-2019-appendix.pdf`
+would attach to Liu 2019 — with no title check to catch it, since supplements
+had none. Such a match now requires the slug itself in the filename.
+
+The guided wizard asks *whether* you have cited PDFs before asking *where*,
+defaulting to yes when `<case>/sources` already holds some, and asks the same
+about the paper's own supplementary material. A user with neither now answers
+two questions instead of reading two explainers and two path prompts.
+
 ### Added — supplementary material, read as its own document
 
 A subgroup table in Supplementary Table S2, a sensitivity analysis in Appendix

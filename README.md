@@ -149,6 +149,12 @@ went uncited?**
   that was nonetheless read as flat text is named by slug in all three reports
   — a verdict resting on a linearized table is weaker than one resting on the
   table (see *Tables and figures are evidence too*).
+- **Identify a reference PDF from the file itself**, not from what it is
+  called. A folder of publisher-named downloads (`s41467-023-39631-x.pdf`,
+  `mmc1.pdf`) is matched by each file's own DOI, else by its own title against
+  the reference list. A file named for its reference is still taken at your
+  word first. Anything that cannot be placed — unrecognisable, or matching two
+  references equally — is listed with the reason rather than skipped.
 - Read **supplementary material** you supply, as its own document. A cited
   reference may carry several — dropped in the sources folder named after the
   reference — and the audited paper's own are named with `--supplement`. Each
@@ -161,12 +167,17 @@ went uncited?**
 
 **PaperTrace does not**
 
-- Verify that a supplement belongs to the work it was attached to. A
-  supplement's own title is not its parent's, so the identity check that guards
-  every cited source cannot be applied to one, and it is not faked. A
-  cited work's supplement is attached on its **filename** alone; the audited
-  paper's are whatever you passed to `--supplement`. That is the thinnest
-  provenance anything here carries, and all three reports say so.
+- **Always** establish that a supplement belongs to the work it was attached
+  to. Where its own title or DOI names that work, it does; where only its
+  filename matched, nothing read it, and the audited paper's own are whatever
+  you passed to `--supplement`. That last case is the thinnest provenance
+  anything here carries, and all three reports name which files it applies to
+  rather than warning about every supplement equally.
+- **Guarantee** it can place every PDF you supply. Identification needs a
+  readable title or a DOI on the first page, so a scanned copy with no text
+  layer is unplaceable — and a title matching two references is refused rather
+  than guessed. Either way the file is listed with the reason, never skipped in
+  silence.
 - Count a citation that appears **only inside a supplement**. The coverage audit
   reads the manuscript, so a reference cited nowhere but in supplementary
   material is absent from the labels rather than reported as uncovered. Stated
@@ -247,7 +258,7 @@ terminal — a pipe, a CI job — bare `papertrace` prints help instead of waiti
 on stdin.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, a DOI found on the first page offered for confirmation, a contact email it offers to remember — and finally the cost stated as up to 25 model calls before asking permission to start.">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, whether any cited PDFs are already to hand, whether the paper has supplementary material of its own, a DOI found on the first page offered for confirmation, a contact email it offers to remember — and finally the cost stated as a number of model calls before asking permission to start.">
 </p>
 
 ### Interactive — the `/review` skill (deepest mode)
@@ -317,17 +328,33 @@ deliberately, for speed or on a constrained machine. The report always says
 which one ran — for the paper, and by name for any cited source that was read
 flat — because a linearized table is a degradation worth disclosing.
 
-**`--provided` matches by filename**, so the name decides which file stands for
-a reference. Files must contain the reference's author and year (`pyrros-2023`
-matches `pyrros-2023.pdf` and `pyrros-et-al-2023-chest-radiographs.pdf`), and
-where several match, an exact `<author>-<year>.pdf` wins, else the shortest
-name. A filename that reads as supplemental material — `supplement`, `appendix`,
-`supporting information`, `ESM`, `online only` — is **not** used as the source:
-a supplement is not the paper it accompanies. Rename it to the plain
-`<author>-<year>.pdf` if you do mean it to stand in. Provided files are
-title-checked like downloaded ones, but a mismatch is recorded in the manifest
-rather than refused — you named the file, so it is used and the doubt is
-disclosed.
+**`--provided` reads the PDFs, so their names do not have to be tidy.** Drop a
+folder in as it came off the publisher's site. Each unrecognised file is
+identified from **its own DOI**, and failing that from **its own title**
+compared against the reference list — so `s41467-023-39631-x.pdf`,
+`1-s2.0-S0140673623001234-main.pdf` and `mmc1.pdf` all find their reference
+without being renamed.
+
+Two rules keep that from guessing. A file whose title matches **more than one**
+reference is used for neither, and is named so you can rename it to choose — a
+corrigendum shares nearly every word with its original, and picking the better
+score there would judge a claim against the wrong paper with nothing able to
+notice. And a title too thin to tell papers apart is not a match at all.
+
+**A filename that names its reference still wins**, because that is your own
+assertion about the file: `pyrros-2023.pdf`, or anything containing the
+author and year (`pyrros-et-al-2023-chest-radiographs.pdf`); where several
+match, an exact `<author>-<year>.pdf` wins, else the shortest name. Such a file
+is title-checked like a downloaded one, but a mismatch is recorded rather than
+refused — you named it, so it is used and the doubt is disclosed. Content
+identification only fills the gap that leaves.
+
+**Nothing in the folder goes unremarked.** Every PDF that ends up attached to
+no reference is listed with the reason — unrecognisable, ambiguous, a spare
+copy of a paper already matched, or a supplement whose article is missing.
+Before this, an unmatched article PDF was skipped in silence, so a folder of
+publisher-named downloads produced an audit that looked entirely normal and
+used none of it.
 
 **Supplementary material is read, as its own document.** Drop
 `pyrros-2023-supplement.pdf` beside `pyrros-2023.pdf` in the same folder and it
@@ -336,16 +363,17 @@ and evidence crop. Several per reference is fine. A claim citing `[14]` is read
 against every document `[14]` has, and the claim's headline is the most adverse
 of them — so a contradiction that lives only in Table S2 is still reported.
 
-Two rules hold that together. A supplement **only attaches to a reference that
-was actually obtained**; one whose article is missing is named in the ticker and
-set aside, because there is nothing to judge it as part of. And a supplement is
-**never title-checked** — its own title is not its parent's, so the identity
-check that guards every cited source cannot apply to one. It is attached on the
-strength of its filename alone, which makes it the thinnest provenance anything
-here carries, and all three reports say so.
+Publisher names work here too, and they are the common case: `MOESM1_ESM.pdf`,
+`mmc1.pdf` and `media-1.pdf` carry no hint of being supplements in their names
+at all, but their first page says so plainly, so that is where it is read from.
 
-For the paper under audit, name its supplements explicitly — the folder is
-matched against *reference* slugs and the paper being audited has none:
+Two rules hold this together. A supplement **only attaches to a reference that
+was actually obtained**; one whose article is missing is named and set aside,
+because there is nothing to judge it as part of. And the report says **how each
+supplement was attached**: by its own title or DOI naming that work — which
+establishes it belongs there — or by its filename alone, which nothing checked.
+The second is the thinnest provenance anything here carries, and it is named
+per file rather than as a blanket warning over both.
 
 ```bash
 papertrace run paper.pdf --provided ./my_pdfs \

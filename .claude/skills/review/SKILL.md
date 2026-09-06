@@ -37,10 +37,12 @@ Ask for all five at once, as a short checklist the user can answer in one messag
    you're evaluating, your own).
 2. **Sources you already have** — a folder of reference PDFs, if any.
    Optional: open-access copies of the rest are fetched automatically.
-   Supplementary material for a cited paper goes in the same folder, named
-   after its reference (`pyrros-2023-supplement.pdf`); several per reference
-   is fine, and each is judged as its own document. One whose article is
-   missing is set aside, so ask for the article too if they have it.
+   **Tell them not to bother renaming**: each PDF is identified by its own
+   DOI or title, so publisher downloads work as they came. Supplementary
+   material for a cited paper goes in the same folder too; several per
+   reference is fine, and each is judged as its own document. One whose
+   article is missing is set aside, so ask for the article too if they
+   have it.
 3. **Supplementary material for the paper itself** — the paper's own SI,
    appendices or eTables, if any. Optional, but a claim pointing at
    "Table S3" cannot be checked without it.
@@ -117,11 +119,14 @@ line, e.g. **“19/42 sources available — 23 not obtainable (paywall / no DOI 
 unpublished)”**, and remind the user they can drop more PDFs into the sources
 folder at any point; you'll pick them up on request.
 
-Two supplement lines in that ticker deserve saying out loud rather than
-scrolling past. `+ N supplements` under a reference means extra documents will
-be judged, and extra model calls spent. `⚠ … set aside` means a file the user
-supplied did **nothing** — usually because its article was never obtained — and
-they can fix it by adding the article. Never let that one pass silently.
+Three lines in that ticker deserve saying out loud rather than scrolling past.
+`identified … by its own DOI/title` means a file the filename rule could not
+place was recognised from its contents. `+ N supplements` means extra documents
+will be judged, and extra model calls spent. `⚠ … set aside` means a file the
+user supplied did **nothing** — its article was never obtained, its title
+matched two references equally, or nothing in it could be read — and each has a
+different fix. Never let that last one pass silently: the user believes that
+file was used.
 
 For a published paper, also run the literature scout
 (`papertrace scout -c <case>`, `--doi` if the title lookup misses) and show

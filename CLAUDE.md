@@ -102,7 +102,15 @@ ingest → refs → scout → check → highlight → report
   `_named_for` is the one token-match rule, `_provided_candidates` and
   `_supplement_candidates` are that rule with `_SUPPLEMENT_RE` inverted, and a
   supplement attaches only to an already-available reference — the orphan is
-  reported by `orphaned_supplements`, never silently dropped.
+  reported by `unused_provided`, never silently dropped.
+  **`identify_by_content` is the second pass**, for files the filename rule
+  cannot place: DOI first, then `titles_match` against a *short* title string.
+  Deliberately **not** `_title_check_text` — that counts a reference's words
+  across a whole page, which is right for vetoing a file the user already named
+  and measurably wrong for discovery (it verified one demo source against two
+  unrelated references). A non-unique match is refused, never ranked, and
+  `titles_match` returning `None` is not an accept: a filename carries the
+  user's assertion, content carries none.
 - **`check.py`** — the **only** module that calls a model, and only through the
   `_ask()` seam (`claude -p` subprocess; inherits the user's Claude Code login,
   no API key). Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per

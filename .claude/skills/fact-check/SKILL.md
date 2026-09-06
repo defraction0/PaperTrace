@@ -29,9 +29,10 @@ with `refs_manifest.json` and per-source ingests under `case/ingest/<slug>/`.
    "Table S3" is judged against those; with none supplied the verdict is
    `not_retrieved`, never a guess from the main text.
 
-   **A supplement's identity is unverified.** Articles are title-checked
-   against the reference that names them; a supplement cannot be, so it is
-   attached on its filename alone. Say so when a verdict rests on one.
+   **Check `verified` on each supplement.** True means its own title or DOI
+   named the work it accompanies. False means it was attached because its
+   filename carried the reference's tokens and nothing read it — say so when
+   a verdict rests on one of those.
 
 2. **Ingest on demand.** If `case/ingest/<slug>/` doesn't exist yet:
    `papertrace ingest <pdf> -o case/ingest/<slug>`
