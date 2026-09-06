@@ -260,7 +260,7 @@ Install options:
 
 | Command | What you get |
 |---|---|
-| `pip install -e .` | ⭐ **standard install** — layout-aware ingest of the paper **and its cited sources** (real tables, figures, lists). Pulls torch; first run downloads docling's layout models (~500 MB, once) |
+| `pip install -e .` | ⭐ **standard install** — layout-aware ingest of the paper **and its cited sources** (real tables, figures, lists). **~1.4 GB installed** (torch 591 MB, opencv, transformers, scipy), plus a ~500 MB one-time download of docling's layout models on first run |
 | `pip install -e ".[png]"` | the above plus PNG rendering of the report looks |
 | `pip install -e ".[dev]"` | the test and lint tooling — `pytest`, `ruff`, `jsonschema`. This is what CI installs |
 | `pip install -e ".[dev,png]"` | everything: run audits, export PNGs **and** run the suite |
@@ -271,6 +271,12 @@ base dependency, because the cited sources are read with it too: the evidence
 for a subgroup claim is usually a table row, and a linearized table has lost
 the row. Spending layout fidelity on the paper but not on the papers it is
 judged against had the asymmetry backwards.
+
+That is a real cost and it is stated rather than buried: a clean virtualenv
+measures **1.4 GB** after `pip install papertrace`, almost all of it torch and
+its dependencies. If that is unacceptable on your machine, `--backend pymupdf`
+still takes the flat path for both the paper and its sources, and every report
+names each source it read that way.
 
 `[docling]` and `[full]` still resolve — `[docling]` is now empty and `[full]`
 is just `png` — so install commands written against 0.4.x do not break.

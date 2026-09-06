@@ -48,9 +48,13 @@ claim is usually a table row. Read flat, the row is gone.
   `auto` drags docling into an offline test run, `pymupdf` silently downgrades
   a caller who asked for layout.
 - **`docling` moves from an extra to a base dependency.** It cannot be optional
-  once the sources depend on it. `pip install papertrace` now pulls torch, and
-  the ~500 MB layout models download on first *use*. The `[docling]` and
-  `[full]` extras are kept as aliases so 0.4.x install commands still resolve.
+  once the sources depend on it. The `[docling]` and `[full]` extras are kept as
+  aliases so 0.4.x install commands still resolve. **Measured in a clean
+  virtualenv: 1.4 GB installed** (torch 591 MB, then opencv, transformers,
+  scipy), plus the ~500 MB layout-model download on first *use*. That number is
+  in the README install table rather than left as "pulls torch", because it is
+  the kind of cost a user should meet before typing the command and not after.
+  `--backend pymupdf` remains the escape hatch.
 - **CI installs it and never runs it.** The models download on use, not on
   install, and every test pins `backend="pymupdf"` — which the required
   argument now makes impossible to forget. The suite stays offline and no
