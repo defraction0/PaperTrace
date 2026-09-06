@@ -88,7 +88,8 @@ def test_run_hands_report_its_formats_rather_than_an_option_info(monkeypatch, tm
     happened to mean — the failure this split exists to make impossible."""
     seen = {}
     monkeypatch.setattr(cli, "_report_pipeline", lambda **kw: seen.update(kw))
-    for name in ("_ingest_pipeline", "_refs_pipeline", "scout", "check", "highlight"):
+    for name in ("_ingest_pipeline", "_refs_pipeline", "_check_pipeline",
+                 "scout", "highlight"):
         monkeypatch.setattr(cli, name, lambda **kw: None)
     monkeypatch.setattr(cli, "_resolve_case", lambda case, manuscript: tmp_path)
     monkeypatch.setattr(cli, "_guard_case", lambda *a, **k: None)
@@ -101,3 +102,59 @@ def test_run_hands_report_its_formats_rather_than_an_option_info(monkeypatch, tm
             png=False, backend="pymupdf", with_scout=False, doi=None, formats=["md"])
 
     assert seen["formats"] == ["md"], "run() must pass formats through explicitly"
+
+
+def test_check_pipeline_rejects_a_positional_call():
+    with pytest.raises(TypeError):
+        cli._check_pipeline(Path("some-case"))
+
+
+def test_check_command_delegates_to_the_pipeline_function(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_pipeline(**kw):
+        seen.update(kw)
+
+    monkeypatch.setattr(cli, "_check_pipeline", fake_pipeline)
+
+    cli.check(case=tmp_path, model=None, backend="pymupdf")
+
+    assert seen == {"case": tmp_path, "model": None, "backend": "pymupdf"}
+
+
+def test_run_hands_check_its_backend_rather_than_an_option_info(monkeypatch, tmp_path):
+    """`check` gains `--backend` because the cited sources are now read with the
+    same backend as the paper. `run()` must pass it, or the sources would be
+    ingested against an `OptionInfo` — and `ingest_pdf` refuses an unknown
+    backend loudly, so a whole audit would fail at the judging step."""
+    seen = {}
+    monkeypatch.setattr(cli, "_check_pipeline", lambda **kw: seen.update(kw))
+    for name in ("_ingest_pipeline", "_refs_pipeline", "_report_pipeline", "scout", "highlight"):
+        monkeypatch.setattr(cli, name, lambda **kw: None)
+    monkeypatch.setattr(cli, "_resolve_case", lambda case, manuscript: tmp_path)
+    monkeypatch.setattr(cli, "_guard_case", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_open_case", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_detected_doi", lambda m: None)
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+
+    cli.run(manuscript=pdf, case=tmp_path, provided=None, email=None, model=None,
+            png=False, backend="docling", with_scout=False, doi=None, formats=["md"])
+
+    assert seen["backend"] == "docling", "run() must forward the backend to check"
+
+
+def test_check_claims_will_not_default_its_backend():
+    """`check_claims` reads every cited source, so its backend decides whether
+    a table in a source is readable at all. There is no honest default: `auto`
+    silently pulls docling into an offline test run, and `pymupdf` silently
+    downgrades a caller who asked for layout. So it is required, like `_clip`'s
+    truncation accumulator in the same module and for the same reason — no
+    future call site can omit it and quietly get the wrong one."""
+    import inspect
+
+    from papertrace.check import check_claims
+
+    p = inspect.signature(check_claims).parameters["backend"]
+    assert p.default is inspect.Parameter.empty, "backend must not have a default"
+    assert p.kind is inspect.Parameter.KEYWORD_ONLY

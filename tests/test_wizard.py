@@ -374,7 +374,8 @@ def test_run_forwards_the_backend_it_was_given(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_ingest_pipeline", spy("ingest"))
     monkeypatch.setattr(cli, "_refs_pipeline", spy("refs"))
     monkeypatch.setattr(cli, "_report_pipeline", spy("report"))
-    for stage in ("scout", "check", "highlight"):
+    monkeypatch.setattr(cli, "_check_pipeline", spy("check"))
+    for stage in ("scout", "highlight"):
         monkeypatch.setattr(cli, stage, spy(stage))
     monkeypatch.setattr(cli, "_guard_case", lambda case, manuscript: None)
 

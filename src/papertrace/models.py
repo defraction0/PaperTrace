@@ -659,6 +659,12 @@ class RunResults:
     refs_total: int = 0
     refs_available: int = 0
     converter: str = "pymupdf"  # ingest backend used for the manuscript
+    # slug -> the converter that read THAT cited source. Separate from
+    # `converter` above, which is the manuscript's: the two can differ, and a
+    # verdict resting on a linearized table is weaker than one resting on the
+    # table. An EMPTY dict means the run never recorded this (every 0.4.x
+    # file), which is not the same as "all of them were read flat".
+    source_converters: dict[str, str] = field(default_factory=dict)
     claims: list[ClaimResult] = field(default_factory=list)
     uncited: list[UncitedClaim] = field(default_factory=list)
     # deterministic citation-label audit: which [N] labels appear in the text,
@@ -688,6 +694,7 @@ class RunResults:
             "date": self.date,
             "refs": {"total": self.refs_total, "available": self.refs_available},
             "converter": self.converter,
+            "source_converters": self.source_converters,
             "counts": self.counts(),
             "claims": [asdict(c) for c in self.claims],
             "uncited": [asdict(u) for u in self.uncited],
@@ -706,6 +713,7 @@ class RunResults:
             refs_total=data.get("refs", {}).get("total", 0),
             refs_available=data.get("refs", {}).get("available", 0),
             converter=data.get("converter", "pymupdf"),
+            source_converters=data.get("source_converters", {}),
             claims=[_claim_from(c) for c in data["claims"]],
             uncited=[UncitedClaim(**u) for u in data.get("uncited", [])],
             coverage=data.get("coverage", {}),

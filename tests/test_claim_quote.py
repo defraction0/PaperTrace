@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from papertrace import check as check_mod  # noqa: E402
 from papertrace.models import ClaimResult, RunResults  # noqa: E402
+from papertrace.report import write_reports  # noqa: E402
 
 SCHEMA = json.loads((Path(__file__).parent.parent / "schemas" / "results.schema.json").read_text())
 
@@ -57,7 +58,7 @@ def test_the_judge_is_shown_the_quote_not_only_the_paraphrase(tmp_path, monkeypa
     claim = ClaimResult(id=1, claim="Mortality fell 12%.", location="Results",
                         refs=["1"], quote="Mortality fell by 12% in the subgroup "
                                           "over 65 (HR 0.88, 95% CI 0.79-0.98).")
-    check_mod.check_claims([claim], _manifest(), tmp_path)
+    check_mod.check_claims([claim], _manifest(), tmp_path, backend="pymupdf")
 
     assert "95% CI 0.79-0.98" in seen["prompt"], "the judge never saw the real sentence"
 
@@ -233,7 +234,7 @@ def test_a_quoted_claim_whose_source_was_never_retrieved_is_still_not_retrieved(
     claim = ClaimResult(id=1, claim="Mortality fell 12%.", location="Results",
                         refs=["1"], quote="Mortality fell by 12% (HR 0.88).")
 
-    check_mod.check_claims([claim], manifest, tmp_path)
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
 
     assert claim.verdict == "not_retrieved"
     assert calls == [], "an unretrieved source must cost no model call"
@@ -251,7 +252,7 @@ def test_an_unchecked_claim_keeps_its_quote(tmp_path, monkeypatch):
     claim = ClaimResult(id=1, claim="Mortality fell 12%.", location="Results",
                         refs=["1"], quote="Mortality fell by 12% (HR 0.88).")
 
-    check_mod.check_claims([claim], _manifest(), tmp_path)
+    check_mod.check_claims([claim], _manifest(), tmp_path, backend="pymupdf")
 
     assert claim.verdict == "unchecked"
     assert "timed out" in claim.note or "claude" in claim.note.lower()
@@ -291,3 +292,57 @@ def test_an_unretrieved_claim_is_not_nagged_about_a_missing_quote():
     gap = ClaimResult(id=1, claim="Mortality fell.", location="Results",
                       refs=["3"], verdict="not_retrieved")
     assert "no_quote" not in [d.key for d in claim_disclosures(gap)]
+
+
+# --- how the SOURCES were read, disclosed where verdicts are read ---------
+
+
+def test_a_flat_read_source_is_named_in_all_three_formats(tmp_path):
+    """`RunResults.converter` is the *manuscript's* backend, and the terminal
+    line was the only place that said anything about the sources. Now that a
+    source can be read either way, a verdict resting on a linearized table has
+    to say so in the report — a table's rows are exactly the evidence a
+    subgroup claim turns on."""
+    from papertrace.disclosures import SOURCE_FIDELITY_TOKEN, run_disclosures
+
+    r = RunResults(
+        manuscript="m.pdf", converter="docling 2.1.0",
+        claims=[ClaimResult(id=1, claim="x", location="Intro", refs=["4"],
+                            verdict="supported", source_slug="flat-2020", source_page=1)],
+        source_converters={"flat-2020": "pymupdf", "rich-2021": "docling 2.1.0"},
+    )
+    fired = [d for d in run_disclosures(r, None) if d.key == "source_fidelity"]
+    assert fired, "a flat-read source disclosed nothing"
+    assert "flat-2020" in fired[0].text
+
+    write_reports(r, None, tmp_path, png=False)
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        text = " ".join((tmp_path / name).read_text().split())
+        assert SOURCE_FIDELITY_TOKEN in text, f"{name} drops the source-fidelity notice"
+
+
+def test_sources_all_read_layout_aware_disclose_nothing():
+    """No loss, nothing to warn about. A notice that fires on the good path is
+    a notice readers learn to skip."""
+    from papertrace.disclosures import run_disclosures
+
+    r = RunResults(manuscript="m.pdf", converter="docling 2.1.0",
+                   source_converters={"a-2020": "docling 2.1.0", "b-2021": "docling 2.1.0"})
+    assert [d for d in run_disclosures(r, None) if d.key == "source_fidelity"] == []
+
+
+def test_a_run_that_recorded_no_source_converters_claims_nothing():
+    """A 0.4.x results.json has no such field. Absent is not "all flat" — the
+    run simply never recorded it, and inventing either answer is the failure
+    this codebase is built to avoid."""
+    from papertrace.disclosures import run_disclosures
+
+    r = RunResults(manuscript="m.pdf", converter="pymupdf")
+    assert [d for d in run_disclosures(r, None) if d.key == "source_fidelity"] == []
+
+
+def test_source_converters_round_trip(tmp_path):
+    r = RunResults(manuscript="m.pdf", source_converters={"a-2020": "pymupdf"})
+    p = tmp_path / "results.json"
+    r.to_json(p)
+    assert RunResults.from_json(p).source_converters == {"a-2020": "pymupdf"}

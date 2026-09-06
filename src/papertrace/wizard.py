@@ -107,12 +107,13 @@ def preflight() -> list[Check]:
             fatal=False,
             label="layout-aware ingest",
             detail=(
-                "docling found — tables and figures are read as structure"
+                "docling found — the paper and its cited sources are read as structure"
                 if docling_available()
-                else "flat-text ingest only: tables are linearized and figures "
-                "are invisible, and every report says so"
+                else "docling is a required dependency but did not import, so this "
+                "install is broken: flat-text ingest only, tables linearized and "
+                "figures invisible, in the sources as well as the paper"
             ),
-            fix="pip install 'papertrace[docling]'",
+            fix="reinstall: pip install --force-reinstall papertrace",
         ),
         Check(
             key="png",

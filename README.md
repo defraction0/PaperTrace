@@ -139,9 +139,11 @@ went uncited?**
   at all. The per-source breakdown beside the headline is where an inapt
   citation stays visible.
 - Disclose its ingest fidelity: every report — markdown, editor and terminal —
-  names the converter that read the **audited paper**, and a flat-text fallback
-  says so loudly. Cited sources are ingested separately (see *Tables and
-  figures are evidence too*).
+  names the converter that read the audited paper, and a flat-text fallback
+  says so loudly. The cited sources get the **same** backend, and any source
+  that was nonetheless read as flat text is named by slug in all three reports
+  — a verdict resting on a linearized table is weaker than one resting on the
+  table (see *Tables and figures are evidence too*).
 - Keep the human responsible for interpretation — it prepares evidence and
   drafts; the conclusions are yours.
 
@@ -235,7 +237,7 @@ claude                       # start Claude Code here
 ```
 
 *(First run of the layout backend downloads docling's models — ~500 MB, once.
-On a constrained machine, `pip install -e .` gives the light flat-text core.)*
+On a constrained machine, `--backend pymupdf` skips it and takes flat text.)*
 
 The interactive audit interviews you: the paper's PDF, any reference PDFs you
 already have — and, if you are using it for peer review, screenshots of your
@@ -256,24 +258,33 @@ Install options:
 
 | Command | What you get |
 |---|---|
-| `pip install -e ".[full]"` | ⭐ **standard install** — layout-aware ingest (real tables, figures, lists) + PNG rendering. Pulls torch; first run downloads docling's layout models (~500 MB, once) |
-| `pip install -e ".[docling]"` | layout-aware ingest only |
-| `pip install -e ".[png]"` | PNG report rendering only |
+| `pip install -e .` | ⭐ **standard install** — layout-aware ingest of the paper **and its cited sources** (real tables, figures, lists). Pulls torch; first run downloads docling's layout models (~500 MB, once) |
+| `pip install -e ".[png]"` | the above plus PNG rendering of the report looks |
 | `pip install -e ".[dev]"` | the test and lint tooling — `pytest`, `ruff`, `jsonschema`. This is what CI installs |
-| `pip install -e ".[dev,full]"` | everything: run audits **and** run the suite |
-| `pip install -e .` | minimal core — flat-text ingest. For CI and constrained machines; every report will carry a "tables linearized" warning |
+| `pip install -e ".[dev,png]"` | everything: run audits, export PNGs **and** run the suite |
 
-> **`[full]` does not include the test tooling.** The extras are independent:
-> `full` is user features, `dev` is `pytest` + `ruff`. Installing `[full]` and
-> then running `pytest` finds whatever `pytest` happens to be on your `PATH` —
-> usually a system one, with none of this project's dependencies — and fails
-> with `ModuleNotFoundError: No module named 'pymupdf'`. If you intend to run
-> the suite, install `".[dev,full]"` and invoke it as `python -m pytest`, which
-> fails loudly instead of silently using the wrong interpreter.
+**As of 0.5.0 the layout backend is not optional.** It was an extra through
+0.4.x, and a plain `pip install papertrace` got flat-text ingest. It is now a
+base dependency, because the cited sources are read with it too: the evidence
+for a subgroup claim is usually a table row, and a linearized table has lost
+the row. Spending layout fidelity on the paper but not on the papers it is
+judged against had the asymmetry backwards.
 
-`--backend auto` (default) uses docling when installed and falls back to flat
-text otherwise — and the report always says which one ran, because a
-linearized table is a degradation worth disclosing.
+`[docling]` and `[full]` still resolve — `[docling]` is now empty and `[full]`
+is just `png` — so install commands written against 0.4.x do not break.
+
+> **`[png]` does not include the test tooling.** The extras are independent:
+> `dev` is `pytest` + `ruff`. Installing without it and then running `pytest`
+> finds whatever `pytest` happens to be on your `PATH` — usually a system one,
+> with none of this project's dependencies — and fails with
+> `ModuleNotFoundError: No module named 'pymupdf'`. If you intend to run the
+> suite, install `".[dev]"` and invoke it as `python -m pytest`, which fails
+> loudly instead of silently using the wrong interpreter.
+
+`--backend auto` (default) uses docling; `--backend pymupdf` chooses flat text
+deliberately, for speed or on a constrained machine. The report always says
+which one ran — for the paper, and by name for any cited source that was read
+flat — because a linearized table is a degradation worth disclosing.
 
 **`--provided` matches by filename**, so the name decides which file stands for
 a reference. Files must contain the reference's author and year (`pyrros-2023`
@@ -392,9 +403,8 @@ page, never the extracted text:
   <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
 </p>
 
-Both crops above come from **cited sources** whose block types (`table block`,
-`picture block`) come from ingesting those sources with the layout backend by
-hand — in batch mode `check` reads a cited source as flat text.
+Both crops above come from **cited sources** ingested with the layout backend,
+which as of 0.5.0 is what `check` does for every cited source by default.
 
 Whether such a number can be *claimed and checked* in the first place is a
 different question, decided by what the backend hands the model:
@@ -402,7 +412,7 @@ different question, decided by what the backend hands the model:
 | | a table cell | text drawn inside a figure |
 |---|---|---|
 | **flat text** (`pymupdf`) | reaches the model linearised — the row and column it belongs to are lost | reaches the model as loose words, with no figure to belong to |
-| **layout-aware** (`docling`; standard install, audited paper only) | reaches the model as a GFM table | the figure arrives as `[FIGURE: <caption>]`; in-figure text arrives only where docling's layout model found a text region inside the figure |
+| **layout-aware** (`docling`; the default, for the paper **and** its cited sources) | reaches the model as a GFM table | the figure arrives as `[FIGURE: <caption>]`; in-figure text arrives only where docling's layout model found a text region inside the figure |
 
 On the one paper measured for this, it found none: of 9 figures, 5 carried text
 in the PDF's text layer, and docling emitted no text block anywhere inside a
@@ -416,14 +426,18 @@ is the weakest evidence this tool produces — under the layout backend the judg
 may never have seen the number, and under flat text it saw the number without
 the figure that gives it meaning.
 
-That layout fidelity is spent on the **audited paper**. In batch mode a cited
-source that has **not yet been ingested** is ingested with the fast flat-text
-backend, so its tables reach the judge linearised and its figures only as
-whatever loose words sat inside them.
-`check` reuses an existing `case/ingest/<slug>/annotated.md` if one is already
-there — so a source you ingested yourself with `papertrace ingest --backend
-docling` keeps its layout, and the report does **not** currently distinguish
-the two cases.
+**Cited sources get the same backend as the paper** (0.5.0). Through 0.4.x they
+were always read as flat text, on the theory that text anchors are all a
+verdict needs — but the evidence for a subgroup claim is usually a table row,
+and a linearized table has lost the row, so the asymmetry was backwards.
+
+`check` still reuses an existing `case/ingest/<slug>/annotated.md` rather than
+re-reading a source every run, and it now rebuilds one that a *different*
+backend wrote: reusing a flat map under `--backend docling` would hand the
+judge the linearized table while the run reported layout-aware ingest. A source
+can still end up flat — you asked for `--backend pymupdf`, or its map survives
+from an earlier run whose PDF is no longer on disk — and every such source is
+**named** in all three reports rather than left to be assumed.
 
 ## Try the demo yourself
 

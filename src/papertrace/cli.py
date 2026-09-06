@@ -276,9 +276,10 @@ def _provenance_line(converter: str) -> str:
     """Which backend read the manuscript, and how the sources were read.
 
     Both halves matter. The manuscript's backend decides whether tables and
-    figures exist at all. The sources are ingested flat-text *always* and on
-    purpose (`check.py` passes `backend="pymupdf"`), which no reader can infer
-    from a line that names docling — so it is said rather than assumed.
+    figures exist at all, and the cited sources are now read with the *same*
+    backend — so the one name covers both, which is exactly why it has to say
+    so. This line used to promise the opposite ("sources are always read as
+    flat text"), and a stale reassurance is worse than none.
     """
     flat = converter.startswith("pymupdf")
     manuscript = (
@@ -288,8 +289,8 @@ def _provenance_line(converter: str) -> str:
     )
     return (
         f"  read with: {manuscript}\n"
-        f"  [dim]cited sources are always read as flat text — text anchors are what "
-        f"verdicts and crops need[/dim]"
+        f"  [dim]cited sources are read with the same backend — the report names any "
+        f"that fell back to flat text[/dim]"
     )
 
 
@@ -774,15 +775,21 @@ def scout(
     )
 
 
-@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
-def check(
-    case: Path = typer.Option(
-        None, "--case", "-c",
-        help="Case folder holding the audit (required unless ./case exists)",
-    ),
-    model: str = typer.Option(None, "--model", help="Model override for claude -p"),
+def _check_pipeline(
+    *,
+    case: Path | None = None,
+    model: str | None = None,
+    backend: str = "auto",
 ) -> None:
-    """Extract citation-backed claims and judge each against its cited source (claude -p)."""
+    """`check`'s work, with ordinary Python defaults.
+
+    Keyword-only for the reason the other pipeline functions are: an omitted
+    argument to the Typer command is an `OptionInfo`, not the default `--help`
+    shows. `backend` is what made this split necessary — it reaches
+    `ingest_pdf`, which refuses an unrecognised value loudly, so a sentinel
+    arriving here would fail an audit at the judging step after the retrieval
+    work was already done.
+    """
     from .check import Truncations, check_claims, claude_available, extract_claims
 
     case = _stage_case(case)
@@ -816,7 +823,7 @@ def check(
     with console.status("reading claims against their cited pages…"):
         check_claims(
             claims, manifest, case, model, progress=tick, on_error=fail,
-            truncations=truncations,
+            truncations=truncations, backend=backend,
         )
 
     from .check import coverage_audit
@@ -825,6 +832,16 @@ def check(
     coverage = coverage_audit(case, claims)
     smap_path = case / "ingest" / "manuscript" / "source_map.json"
     converter = SourceMap.from_json(smap_path).converter if smap_path.exists() else "pymupdf"
+    # how each cited source was read, recorded per slug. The manuscript's
+    # converter above says nothing about them, and until this was carried the
+    # markdown and HTML reports said nothing about them either.
+    source_converters: dict[str, str] = {}
+    for e in manifest.entries:
+        if not e.slug:
+            continue
+        sp = case / "ingest" / e.slug / "source_map.json"
+        if sp.exists() and e.slug not in source_converters:
+            source_converters[e.slug] = SourceMap.from_json(sp).converter
 
     from .check import last_model
 
@@ -835,6 +852,7 @@ def check(
         refs_total=len(manifest.entries),
         refs_available=len(manifest.retrieved),
         converter=converter,
+        source_converters=source_converters,
         claims=claims,
         uncited=uncited,
         coverage=coverage,
@@ -864,6 +882,19 @@ def check(
         )
     if uncited:
         console.print(f"[cyan]{len(uncited)} uncited assertions[/cyan] — see report section")
+
+
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
+def check(
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder holding the audit (required unless ./case exists)",
+    ),
+    model: str = typer.Option(None, "--model", help="Model override for claude -p"),
+    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+) -> None:
+    """Extract citation-backed claims and judge each against its cited source (claude -p)."""
+    _check_pipeline(case=case, model=model, backend=backend)
 
 
 def _downgrade_unshowable(anchor) -> bool:
@@ -1080,10 +1111,12 @@ def run(
     # OptionInfo that equals none of the expected strings, and the stage takes a
     # fallback branch. Adding `--case` to `ingest` did exactly that — the backend
     # became an OptionInfo and every audit ingested as flat text while claiming
-    # layout-aware ingest. `_ingest_pipeline`, `_refs_pipeline` and
-    # `_report_pipeline` below are split out of their Typer commands
-    # specifically to make that mistake impossible rather than just avoided by
-    # convention — `scout`, `check` and `highlight` are still convention-only.
+    # layout-aware ingest. `_ingest_pipeline`, `_refs_pipeline`,
+    # `_check_pipeline` and `_report_pipeline` below are split out of their
+    # Typer commands specifically to make that mistake impossible rather than
+    # just avoided by convention — `scout` and `highlight` are still
+    # convention-only, and each should be split the next time it gains a
+    # parameter.
     _ingest_pipeline(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
     # detected once, here, and handed to both consumers. `refs` detects for
     # itself when called alone, so forwarding the raw option left the scout
@@ -1095,7 +1128,7 @@ def run(
                     parse_only=False, backend=backend, doi=doi)
     if with_scout:
         scout(case=case, doi=doi, email=email)
-    check(case=case, model=model)
+    _check_pipeline(case=case, model=model, backend=backend)
     highlight(case=case, claim=None)
     _report_pipeline(case=case, png=png, formats=formats)
     # a four-minute run should not need scrolling to learn how the paper was

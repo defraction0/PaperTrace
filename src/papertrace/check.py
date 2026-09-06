@@ -606,8 +606,8 @@ def coverage_audit(case_dir: Path, claims: list[ClaimResult]) -> dict:
     }
 
 
-def _stale_ingest(ingest_dir: Path, pdf_path: str | None) -> bool:
-    """Was `ingest_dir` built from some other PDF than the one now at `pdf_path`?
+def _stale_ingest(ingest_dir: Path, pdf_path: str | None, *, backend: str) -> bool:
+    """Must `ingest_dir` be rebuilt — wrong PDF, or read by the wrong backend?
 
     The directory is named after the reference's slug, and a slug is not an
     identity that holds still. Fixing a slug collision renames one of the two
@@ -622,6 +622,13 @@ def _stale_ingest(ingest_dir: Path, pdf_path: str | None) -> bool:
     treated as stale. Re-ingesting is local, free and quick; trusting it is a
     guess about which paper is in a file, and that guess is the whole thing this
     module refuses to make.
+
+    The **converter** is checked for the same reason, and it is not the same
+    question as the hash: a case folder built before sources were read
+    layout-aware holds `pymupdf` maps of exactly the right PDFs. Reusing one
+    under `--backend docling` would hand the judge a linearized table while the
+    run reports layout-aware source ingest — the fidelity claim would be true
+    of the paper and false of the papers it is judged against.
     """
     if not pdf_path or not Path(pdf_path).exists():
         return False  # nothing better to ingest; SourceProvenance reports the gap
@@ -631,12 +638,18 @@ def _stale_ingest(ingest_dir: Path, pdf_path: str | None) -> bool:
     try:
         from .models import SourceMap
 
-        recorded = SourceMap.from_json(smap_path).source_sha256
+        smap = SourceMap.from_json(smap_path)
+        recorded, converter = smap.source_sha256, smap.converter
     except (OSError, ValueError, KeyError, TypeError):
         return True
+    from .ingest import resolve_backend
     from .models import manuscript_fingerprint
 
-    return recorded != manuscript_fingerprint(Path(pdf_path))
+    if recorded != manuscript_fingerprint(Path(pdf_path)):
+        return True
+    # "auto" is not a converter name, and a docling map records its version
+    # ("docling 2.53.0"), so compare the resolved backend against the first word
+    return resolve_backend(backend) != converter.split()[0]
 
 
 def _slug_for_ref(manifest: RefManifest, label: str):
@@ -820,6 +833,11 @@ def check_claims(
     on_error=None,
     *,
     truncations: Truncations | None = None,
+    # REQUIRED, like `_clip`'s accumulator above: this decides whether a table
+    # in a cited source is readable at all, and neither possible default is
+    # honest. "auto" drags docling into an offline test run; "pymupdf" silently
+    # downgrades a caller who asked for layout. So there is no default.
+    backend: str,
 ) -> list[ClaimResult]:
     """Fill verdicts in place. One model call per source that carries claims.
 
@@ -828,9 +846,13 @@ def check_claims(
     the claims get verdict `unchecked`, the reason lands in the note, and
     `on_error(slug, message)` fires so the CLI can say so loudly.
 
-    Sources are ingested with the flat backend on purpose — fast and
-    dependable, and text anchors are what verdicts and crops need. Layout
-    fidelity (tables/figures) is spent on the audited paper, not its sources.
+    Sources are ingested with the SAME backend as the audited paper. They used
+    to be read flat on the theory that text anchors are all a verdict needs,
+    but the decisive evidence for a claim is often a table — a subgroup row, a
+    confidence interval in a column — and a linearized table loses the
+    relationships that make those readable. Spending layout fidelity on the
+    paper and not on the papers it is judged against had the asymmetry
+    backwards.
     """
     by_slug: dict[str, list[ClaimResult]] = {}
     for c in claims:
@@ -867,10 +889,12 @@ def check_claims(
             # judgement instead, with a note naming the fix — see
             # SourceProvenance.read.
             entry = next(e for e in manifest.entries if e.slug == slug)
-            if not annotated.exists() or _stale_ingest(ingest_dir, entry.pdf_path):
+            if not annotated.exists() or _stale_ingest(
+                ingest_dir, entry.pdf_path, backend=backend
+            ):
                 from .ingest import ingest_pdf
 
-                ingest_pdf(Path(entry.pdf_path), ingest_dir, backend="pymupdf")
+                ingest_pdf(Path(entry.pdf_path), ingest_dir, backend=backend)
             # the quote goes with the paraphrase, not instead of it: the judge
             # is told to rule on the quote, and the paraphrase stays so a claim
             # whose extraction returned no quote is still judgeable

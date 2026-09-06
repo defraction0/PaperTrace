@@ -8,6 +8,60 @@ All notable changes to PaperTrace are documented here. The format follows
 
 0.4.1 was never released, so its entries below ship together with these.
 
+### Changed — cited sources are read with the layout backend ⚠️ **breaking**
+
+`check.py` hard-coded `backend="pymupdf"` for every cited source, and said why:
+*"Layout fidelity (tables/figures) is spent on the audited paper, not its
+sources."* That had the asymmetry backwards. The manuscript's claim is the
+question; the **source** is the evidence — and the evidence for a subgroup
+claim is usually a table row. Read flat, the row is gone.
+
+- **Sources now get the same backend as the paper.** `check` gains
+  `--backend`, `run` forwards its own, and `check_claims` takes it as a
+  **required** keyword — no default, like `_clip`'s truncation accumulator in
+  the same module and for the same reason. Neither possible default is honest:
+  `auto` drags docling into an offline test run, `pymupdf` silently downgrades
+  a caller who asked for layout.
+- **`docling` moves from an extra to a base dependency.** It cannot be optional
+  once the sources depend on it. `pip install papertrace` now pulls torch, and
+  the ~500 MB layout models download on first *use*. The `[docling]` and
+  `[full]` extras are kept as aliases so 0.4.x install commands still resolve.
+- **CI installs it and never runs it.** The models download on use, not on
+  install, and every test pins `backend="pymupdf"` — which the required
+  argument now makes impossible to forget. The suite stays offline and no
+  slower: measured back to back on one machine, 632 tests in 22.6 s before this
+  change and 645 tests in 17.1 s after. `import docling` is itself only ~0.2 s,
+  because it does not pull torch until something converts a PDF.
+
+**Two defects this would otherwise have introduced, both found by looking:**
+
+- **`_stale_ingest` compared only the PDF hash**, so re-running an existing
+  case folder would have reused its 0.4.x **pymupdf** source maps while the run
+  reported layout-aware source ingest — a silent wrong-fidelity judgement,
+  which is the exact failure class this project exists to refuse. It now
+  compares the recorded `converter` too, resolving `auto` and ignoring
+  docling's version suffix through a shared `ingest.resolve_backend()`.
+- **The reports never said how the sources were read.** `RunResults.converter`
+  is the *manuscript's*, and the only mention of the sources was one dim line
+  in the terminal — the markdown and both HTML looks said nothing. Each
+  source's converter now travels in `RunResults.source_converters`, and any
+  source read as flat text is **named by slug** in all three formats. An empty
+  dict means the run never recorded it (every 0.4.x file) and is deliberately
+  not read as "all of them were flat".
+
+**Measured cost**, since this is a real slowdown and not an unpriced one: on
+this machine the first docling ingest in a process costs ~41 s (loading the
+layout models) and each subsequent source ~3 s. Under `papertrace run` the
+models are already loaded from the manuscript, so a 20-source paper pays
+roughly a minute more in total; `papertrace check` on its own pays the load
+once. `--backend pymupdf` remains a deliberate choice for a constrained
+machine, and now says so per source in the report instead of being the
+unstated default.
+
+A source-ingest failure — docling can run out of memory or fail to fetch its
+models, which flat text never could — unchecks that one source with the reason
+in its note, and is never laundered into `not_retrieved`.
+
 ### Changed — the judge reads the paper's own sentence, not a summary of it
 
 `EXTRACT_PROMPT` asked for each claim "tightly paraphrased, ≤160 chars", and

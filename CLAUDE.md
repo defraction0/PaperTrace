@@ -57,9 +57,13 @@ papertrace run examples/demo/demo_manuscript.pdf -c demo_case
 # expect: 2 supported · 2 contradicted · 1 not retrieved · 1 uncited assertion
 ```
 
-Install: `pip install -e ".[dev]"` for development (this is also exactly what CI
-installs — `full`/`docling`/`png` pull docling, torch and playwright, which must
-stay out of CI). `playwright install chromium` once, only for `--png`.
+Install: `pip install -e ".[dev]"` for development (this is also exactly what
+CI installs). **`docling` is a base dependency as of 0.5.0**, so CI installs it
+and torch with it — but never *runs* it: the ~500 MB layout models download on
+first use, not on install, and every test pins `backend="pymupdf"`
+(`check_claims` makes `backend` a required argument so none can forget).
+`playwright` must still stay out of CI; it is the `png` extra, needed only for
+`--png`, with `playwright install chromium` once.
 
 ## Architecture
 
@@ -71,11 +75,17 @@ there is no in-memory pipeline object:
 ingest → refs → scout → check → highlight → report
 ```
 
-- **`ingest/`** — two backends behind one contract: `pymupdf_.py` (always
-  available, flat text, tables linearized) and `docling_.py` (optional,
-  layout-aware, ~500 MB model download on first run). `backend="auto"` prefers
-  docling and falls back loudly. Everything downstream reads only
-  `source_map.json` and does not know which backend ran.
+- **`ingest/`** — two backends behind one contract: `pymupdf_.py` (flat text,
+  tables linearized) and `docling_.py` (layout-aware, ~500 MB model download on
+  first run). Both are installed; `--backend pymupdf` is a deliberate choice,
+  not a fallback for a missing package. `backend="auto"` resolves through the
+  shared `resolve_backend()` and falls back loudly. Everything downstream reads
+  only `source_map.json` and does not know which backend ran — except
+  `check._stale_ingest`, which compares the recorded `converter` so a source
+  map from an earlier run with the other backend is rebuilt rather than reused.
+  **Cited sources are ingested with the same backend as the paper** (0.5.0);
+  each source's converter travels in `RunResults.source_converters` and a
+  flat-read source is named in all three reports.
 - **`refs.py`** — resolves citations through legal open-access routes only
   (Crossref → Unpaywall → Europe PMC → arXiv), with a title sanity check that
   rejects a mismatched download rather than judging against the wrong paper.

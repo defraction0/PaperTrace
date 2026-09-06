@@ -146,7 +146,15 @@
       }
     },
     "converter": {
-      "type": "string"
+      "type": "string",
+      "description": "The ingest backend that read the AUDITED PAPER. Says nothing about the cited sources \u2014 see source_converters."
+    },
+    "source_converters": {
+      "type": "object",
+      "description": "Cited-source slug -> the converter that read that source. Sources are ingested with the same backend as the paper, but a case folder can hold a map from an earlier run whose PDF is now gone, so the two can differ. An empty object or an absent key means the run did not record this (every file written before 0.5.0) \u2014 which is NOT the same as every source having been read flat.",
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "uncited": {
       "type": "array",

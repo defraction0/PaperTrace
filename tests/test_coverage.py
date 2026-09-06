@@ -140,7 +140,8 @@ def test_failed_check_is_unchecked_never_not_retrieved(tmp_path, monkeypatch):
 
     monkeypatch.setattr(check_mod, "_ask", boom)
     errors = []
-    check_claims(claims, manifest, tmp_path, on_error=lambda s, m: errors.append((s, m)))
+    check_claims(claims, manifest, tmp_path, on_error=lambda s, m: errors.append((s, m)),
+                 backend="pymupdf")
 
     assert len(calls) == 2  # one retry before giving up
     assert claims[0].verdict == "unchecked"
@@ -149,7 +150,7 @@ def test_failed_check_is_unchecked_never_not_retrieved(tmp_path, monkeypatch):
 
     # and a genuinely missing source still reads not_retrieved
     claims2 = [ClaimResult(id=2, claim="d", location="Intro", refs=["9"])]
-    check_claims(claims2, manifest, tmp_path)
+    check_claims(claims2, manifest, tmp_path, backend="pymupdf")
     assert claims2[0].verdict == "not_retrieved"
 
 
@@ -207,7 +208,7 @@ def test_malformed_verdict_becomes_unchecked_never_partial(tmp_path, monkeypatch
         lambda prompt, model=None: '[{"id":1,"note":"no verdict key"},'
                                    ' {"id":2,"verdict":"probably fine","note":"junk"}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     assert claims[0].verdict == "unchecked"
     assert claims[1].verdict == "unchecked"
@@ -240,7 +241,7 @@ def test_multiref_claim_records_only_the_sources_it_could_not_obtain(tmp_path, m
                                    ' "source_page":1,"source_block":"block_0001",'
                                    ' "anchor_phrases":["Text"]}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     c = claims[0]
     assert c.verdict == "supported"
@@ -371,7 +372,7 @@ def test_model_may_not_assign_a_pipeline_state(tmp_path, monkeypatch):
         check_mod, "_ask",
         lambda prompt, model=None: '[{"id":1,"verdict":"not_retrieved","note":"could not find"}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     c = claims[0]
     assert c.verdict == "unchecked"
@@ -415,7 +416,7 @@ def test_verdict_without_a_source_page_is_unchecked_not_page_none(tmp_path, monk
         lambda prompt, model=None: '[{"id":1,"verdict":"supported","note":"ok",'
                                    ' "anchor_phrases":["Text"]}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     assert claims[0].verdict == "unchecked"
     assert "source_page" in claims[0].note
@@ -443,7 +444,7 @@ def test_a_rejected_response_writes_nothing_to_the_claim(tmp_path, monkeypatch):
         lambda prompt, model=None: '[{"id":1,"verdict":"supported","note":"ok",'
                                    ' "source_block":"block_0001","anchor_phrases":["Text"]}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     c = claims[0]
     assert c.verdict == "unchecked"
@@ -476,7 +477,7 @@ def test_null_anchor_phrases_is_rejected_without_poisoning_siblings(tmp_path, mo
             ' {"id":2,"verdict":"partial","note":"fine","source_page":2,'
             ' "source_block":"block_0002","anchor_phrases":["Text"]}]',
     )
-    check_claims(claims, manifest, tmp_path)  # must not raise
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")  # must not raise
 
     assert claims[0].verdict == "unchecked"
     assert "anchor_phrases" in claims[0].note
@@ -509,7 +510,7 @@ def test_a_bug_in_our_validator_is_not_relabelled_as_the_models_fault(tmp_path, 
 
     monkeypatch.setattr(check_mod, "_judgement_from", our_bug)
     with pytest.raises(AttributeError):
-        check_claims(claims, manifest, tmp_path)
+        check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
 
 def test_truncations_cannot_leak_between_runs(tmp_path, monkeypatch):

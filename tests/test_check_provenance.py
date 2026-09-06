@@ -162,7 +162,7 @@ def test_check_claims_downgrades_an_impossible_page_to_unchecked(tmp_path, monke
         ),
     )
     claims = [ClaimResult(id=1, claim="the rate was 84.3%", location="Results", refs=["1"])]
-    check_claims(claims, _manifest("smith-2020"), tmp_path)
+    check_claims(claims, _manifest("smith-2020"), tmp_path, backend="pymupdf")
 
     j = claims[0].judgements[0]
     assert j.verdict == "unchecked"
@@ -182,7 +182,7 @@ def test_check_claims_keeps_a_verdict_whose_block_is_real(tmp_path, monkeypatch)
         ),
     )
     claims = [ClaimResult(id=1, claim="the rate was 84.3%", location="Results", refs=["1"])]
-    check_claims(claims, _manifest("smith-2020"), tmp_path)
+    check_claims(claims, _manifest("smith-2020"), tmp_path, backend="pymupdf")
     assert claims[0].judgements[0].verdict == "contradicted"
     assert claims[0].verdict == "contradicted"
 
@@ -352,9 +352,99 @@ def test_a_stale_source_directory_is_re_ingested_not_reused(tmp_path, monkeypatc
         return '[{"id":1,"verdict":"not_addressed","note":"n/a"}]'
 
     monkeypatch.setattr("papertrace.check._ask", _fake_ask)
-    check_claims(claims, manifest, case)
+    check_claims(claims, manifest, case, backend="pymupdf")
 
     assert prompts, "no model call was made"
     body = prompts[0]
     assert "alpha" in body, "the model was not shown the paper the manifest names"
     assert "beta" not in body, "the model was shown the previous occupant of the directory"
+
+
+def test_a_source_read_by_the_other_backend_is_re_ingested(tmp_path):
+    """A case folder built before layout-aware source ingest holds pymupdf
+    source maps. Re-running `check` on it must not reuse them while the run
+    claims docling: the whole point of reading sources with the layout backend
+    is that a table in a source is readable, and a stale flat map silently
+    gives the judge the linearized version instead.
+
+    `source_sha256` cannot catch this — it is the same PDF. The converter is
+    the fact that changed.
+    """
+    from papertrace.check import _stale_ingest
+    from papertrace.models import manuscript_fingerprint
+
+    pdf = tmp_path / "smith-2020.pdf"
+    _pdf_saying(pdf, "HR 0.88 (0.79-0.98).")
+    ingest_dir = tmp_path / "ingest" / "smith-2020"
+    ingest_dir.mkdir(parents=True)
+    smap = {
+        "doc": "smith-2020.pdf", "pages": 1, "converter": "pymupdf",
+        "source_sha256": manuscript_fingerprint(pdf),
+        "blocks": [{"id": "block_0001", "page": 1, "type": "text",
+                    "bbox": [0, 0, 10, 10], "text": "HR 0.88 (0.79-0.98)."}],
+    }
+    (ingest_dir / "source_map.json").write_text(json.dumps(smap))
+
+    # same backend that wrote it: nothing to redo
+    assert _stale_ingest(ingest_dir, str(pdf), backend="pymupdf") is False
+    # a different backend: the map does not answer the question being asked now
+    assert _stale_ingest(ingest_dir, str(pdf), backend="docling") is True
+
+
+def test_auto_is_resolved_before_the_converter_is_compared(tmp_path):
+    """`--backend auto` is not a converter name, so comparing it literally
+    would report every existing map as stale and re-ingest the whole reference
+    list on every run."""
+    from papertrace.check import _stale_ingest
+    from papertrace.ingest import _docling_available
+    from papertrace.models import manuscript_fingerprint
+
+    pdf = tmp_path / "smith-2020.pdf"
+    _pdf_saying(pdf, "text")
+    ingest_dir = tmp_path / "ingest" / "smith-2020"
+    ingest_dir.mkdir(parents=True)
+    resolved = "docling" if _docling_available() else "pymupdf"
+    (ingest_dir / "source_map.json").write_text(json.dumps({
+        "doc": "smith-2020.pdf", "pages": 1,
+        # a docling map records its version too — "docling 2.x", not "docling"
+        "converter": f"{resolved} 9.9.9" if resolved == "docling" else resolved,
+        "source_sha256": manuscript_fingerprint(pdf),
+        "blocks": [],
+    }))
+
+    assert _stale_ingest(ingest_dir, str(pdf), backend="auto") is False
+
+
+def test_a_source_ingest_that_fails_unchecks_only_that_source(tmp_path, monkeypatch):
+    """Reading sources with the layout backend introduces a failure mode flat
+    text never had: docling can run out of memory, fail to fetch its models, or
+    choke on a malformed PDF. That must uncheck the one source and name the
+    reason — not abort a run that has already paid for retrieval, and never be
+    laundered into `not_retrieved`, which would blame the publisher for a local
+    failure.
+    """
+    pdf = tmp_path / "sources_resolved" / "smith-2020.pdf"
+    _pdf_saying(pdf, "HR 0.88 (0.79-0.98).")
+    manifest = RefManifest(manuscript="m.pdf", entries=[
+        RefEntry(num="1", raw="Smith J (2020)", status="retrieved", slug="smith-2020",
+                 pdf_path=str(pdf))])
+    claim = ClaimResult(id=1, claim="Mortality fell.", location="Results", refs=["1"])
+
+    import papertrace.ingest as ingest_mod
+
+    def boom(*a, **kw):
+        raise RuntimeError("docling layout model could not be loaded")
+
+    monkeypatch.setattr(ingest_mod, "ingest_pdf", boom)
+    called = []
+    monkeypatch.setattr(check_mod, "_ask", lambda *a, **k: called.append(1) or "[]")
+
+    errors: list[tuple[str, str]] = []
+    check_claims([claim], manifest, tmp_path, on_error=lambda s, m: errors.append((s, m)),
+                 backend="docling")
+
+    assert claim.verdict == "unchecked", "a local ingest failure is not a retrieval gap"
+    assert "docling layout model" in claim.note
+    assert "re-run" in claim.note, "the note must name the fix"
+    assert called == [], "no model call once there is no source text to send"
+    assert errors and errors[0][0] == "smith-2020"

@@ -41,6 +41,7 @@ CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
 # HTML formats too, and autoescape would rewrite it there but not in markdown —
 # so the parity test would fail on a difference the reader never sees
 NO_QUOTE_TOKEN = "judged on a paraphrase, not the sentence in the paper"
+SOURCE_FIDELITY_TOKEN = "cited sources read as flat text"
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ class Disclosure:
     key: str  # truncation | converter | coverage | coverage_caveat
     #          | coverage_attribution | sources | unjudged_refs | anchor
     #          | no_quote | claim_numbering | numbering | references_resumed
-    #          | source_identity
+    #          | source_identity | source_fidelity
     level: str  # info | warn
     token: str  # SHORT literal that must appear verbatim in ALL THREE formats
     text: str  # full sentence for markdown / editor
@@ -448,6 +449,30 @@ def _claim_numbering(claim, manifest) -> Disclosure:
     )
 
 
+def _source_fidelity(flat: list[str], total: int) -> Disclosure:
+    """Which cited sources were read as flat text, and what that costs.
+
+    `_converter` above says how the *audited paper* was read. This says how the
+    papers it was judged **against** were read, which the report never stated:
+    the terminal line said it, once, and the markdown and HTML said nothing.
+    A subgroup claim usually turns on a table row, and a linearized table has
+    lost the row.
+    """
+    named = ", ".join(f"`{s}`" for s in flat)
+    return Disclosure(
+        key="source_fidelity",
+        level="warn",
+        token=SOURCE_FIDELITY_TOKEN,
+        text=(
+            f"{len(flat)} of {total} {SOURCE_FIDELITY_TOKEN} — {named}. Tables in "
+            "those sources were linearized and their figures were invisible to "
+            "the judge, so a verdict resting on one is weaker than a verdict "
+            "resting on a table that was read as a table."
+        ),
+        short=f"{len(flat)} of {total} {SOURCE_FIDELITY_TOKEN}",
+    )
+
+
 def run_disclosures(results, manifest=None) -> list[Disclosure]:
     """Every run-level disclosure this RunResults owes its reader.
 
@@ -458,6 +483,13 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
     if results.truncated:
         out.append(_truncation(results.truncated))
     out.append(_converter(results.converter))
+    # an empty dict means the run never recorded this, which is not the same as
+    # "all of them were read flat" — a 0.4.x file must not grow a warning it
+    # has no evidence for
+    if recorded := (getattr(results, "source_converters", None) or {}):
+        flat = sorted(s for s, c in recorded.items() if c.split()[0] == "pymupdf")
+        if flat:
+            out.append(_source_fidelity(flat, len(recorded)))
     coverage = results.coverage or {}
     if coverage:
         # occurrences without labels means clean.md was missing while the source

@@ -367,7 +367,7 @@ def test_every_available_cited_source_is_judged_in_its_own_call(tmp_path, monkey
         }])
 
     monkeypatch.setattr(check_mod, "_ask", fake_ask)
-    check_claims([claim], manifest, tmp_path)
+    check_claims([claim], manifest, tmp_path, backend="pymupdf")
 
     assert sorted(seen) == ["a-2020", "b-2021", "c-2022"], "one call per source"
     assert {j.source_slug: j.verdict for j in claim.judgements} == verdict_for
@@ -399,7 +399,7 @@ def test_unjudged_refs_now_means_could_not_be_obtained(tmp_path, monkeypatch):
         "id": 1, "verdict": "supported", "note": "n", "source_page": 1,
         "source_block": "block_0001", "anchor_phrases": ["Text of a-2020"],
     }]))
-    check_claims([claim], manifest, tmp_path)
+    check_claims([claim], manifest, tmp_path, backend="pymupdf")
 
     assert [j.source_slug for j in claim.judgements] == ["a-2020"]
     assert claim.unjudged_refs == ["2"], "the paywalled co-citation, and only that"
@@ -423,7 +423,7 @@ def test_a_failed_call_unchecks_only_that_source(tmp_path, monkeypatch):
         }])
 
     monkeypatch.setattr(check_mod, "_ask", fake_ask)
-    check_claims([claim], manifest, tmp_path)
+    check_claims([claim], manifest, tmp_path, backend="pymupdf")
 
     by_slug = {j.source_slug: j.verdict for j in claim.judgements}
     assert by_slug["good-2020"] == "supported"
