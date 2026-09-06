@@ -528,10 +528,10 @@ def _refs_pipeline(
         deposit_corroborates,
         deposit_is_this_paper,
         manuscript_supplements,
-        orphaned_supplements,
         parse_references,
         reconcile,
         resolve_all,
+        unused_provided,
     )
 
     case = _resolve_case(case, manuscript)  # named after the paper unless -c said otherwise
@@ -703,7 +703,7 @@ def _refs_pipeline(
 
     # a file the user deliberately put in the folder that then did nothing is the
     # quietest possible failure — they would go on believing it had been read
-    for pdf, why in orphaned_supplements(entries, provided):
+    for pdf, why in unused_provided(entries, provided):
         console.print(f"  [yellow]⚠ {pdf.name} set aside — {why}[/yellow]")
 
     manifest = RefManifest(

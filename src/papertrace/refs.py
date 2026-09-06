@@ -1010,6 +1010,114 @@ def attach_supplements(entry: RefEntry, provided_dir: Path | None, taken: set[st
         entry.supplements.append(Supplement(slug=slug, pdf_path=str(pdf)))
 
 
+# How much of a first page stands in for a title when the PDF declares none.
+# Short on purpose: the comparison below is title-against-title, and letting a
+# whole page in is what makes it imprecise — see `identify_by_content`.
+_TITLE_FALLBACK_CHARS = 300
+
+
+def _self_declared_title(pdf: Path) -> str:
+    """The best short string this PDF offers about what it is.
+
+    Metadata first, because measured on real papers it carries the exact title
+    while the top of page 1 carries an article-type banner — `REVIEW ARTICLE`,
+    `Article`, `HEALTH IN ACTION`. `_declared_title_is_usable` rejects the
+    `Microsoft Word - draft.docx` shapes, and then the head of page 1 is the
+    fallback for the roughly one paper in seven whose metadata is empty.
+    """
+    from .ingest import declared_title
+    from .models import _declared_title_is_usable
+
+    title = declared_title(pdf)
+    if _declared_title_is_usable(title):
+        return title
+    return " ".join(_first_page_text(pdf).split())[:_TITLE_FALLBACK_CHARS]
+
+
+def _doi_in(pdf: Path) -> str | None:
+    """The DOI this PDF prints about itself, or None.
+
+    Truncated at the references heading for the reason `wizard.detect_doi` is:
+    a short paper's first page reaches its own bibliography, and every DOI
+    printed there belongs to somebody else.
+    """
+    from .wizard import _before_references
+
+    if m := DOI_RE.search(_before_references(_first_page_text(pdf))):
+        return m.group(0).rstrip(".,);]").lower()
+    return None
+
+
+def identify_by_content(
+    entries: list[RefEntry], provided_dir: Path | None, claimed: set[Path]
+) -> tuple[dict[Path, tuple[RefEntry, str]], list[tuple[Path, str]]]:
+    """Work out which reference each unclaimed PDF is, by reading it.
+
+    Filename matching answers "which files could be this entry?". This asks the
+    opposite — "which entry is this file?" — because a publisher download
+    (`s41467-023-39631-x.pdf`, `mmc1.pdf`) names nothing, and before this it was
+    ignored without a word while the audit looked entirely normal.
+
+    Returns `{path: (entry, "article" | "supplement")}` and the files it could
+    not place, each with the reason.
+
+    Two signals, and deliberately NOT the one already in this module.
+    `_title_check_text` counts a reference's words anywhere on a whole page,
+    which is right for vetoing a file the user already named and wrong here:
+    measured on a real pair, a chest-radiograph paper "verified" against an NEJM
+    review as well, on `current`, `future`, `interpretation`, `medical`,
+    `images`. Comparing title against title instead keeps the denominator small
+    and the answer unique.
+
+    A non-unique match is REFUSED, never ranked. A corrigendum shares nearly
+    every distinctive word with its original, so a best-score pick would judge a
+    claim against the wrong paper with nothing downstream able to notice.
+
+    `None` from `titles_match` — too few distinctive words to tell — is not an
+    accept either. A filename match may be taken as `unverifiable` because the
+    user asserted it by naming the file; nobody asserted anything here.
+    """
+    from .models import titles_match
+
+    if not provided_dir or not provided_dir.is_dir():
+        return {}, []
+    assigned: dict[Path, tuple[RefEntry, str]] = {}
+    unclaimed: list[tuple[Path, str]] = []
+    by_doi = {e.doi.lower(): e for e in entries if e.doi}
+
+    for pdf in sorted(provided_dir.glob("*.pdf")):
+        if pdf in claimed:
+            continue
+        title = _self_declared_title(pdf)
+        # the marker list is right about prose and wrong about publisher
+        # filenames — `\besm\b` cannot match inside `MOESM1_ESM` — so both are
+        # consulted and the file's own words are what usually decide
+        kind = "supplement" if (
+            _SUPPLEMENT_RE.search(pdf.stem) or _SUPPLEMENT_RE.search(title)
+        ) else "article"
+
+        if (doi := _doi_in(pdf)) and doi in by_doi:
+            assigned[pdf] = (by_doi[doi], kind)
+            continue
+        hits = [e for e in entries if titles_match(e.raw, title) is True]
+        if len(hits) == 1:
+            assigned[pdf] = (hits[0], kind)
+        elif hits:
+            labels = ", ".join(f"[{e.num}]" for e in hits)
+            unclaimed.append((
+                pdf,
+                f"its title matches {labels} equally well, and guessing between them "
+                f"would judge a claim against the wrong paper — rename it to "
+                f"<reference>.pdf to choose",
+            ))
+        else:
+            unclaimed.append((
+                pdf,
+                "could not tell which reference this is from its title or its DOI",
+            ))
+    return assigned, unclaimed
+
+
 def manuscript_supplements(paths: list[Path], taken: set[str]) -> list[Supplement]:
     """The audited paper's own supplementary files, as documents.
 
@@ -1030,20 +1138,29 @@ def manuscript_supplements(paths: list[Path], taken: set[str]) -> list[Supplemen
     return out
 
 
-def orphaned_supplements(
-    entries: list[RefEntry], provided_dir: Path | None
+def unused_provided(
+    entries: list[RefEntry],
+    provided_dir: Path | None,
+    reasons: dict[Path, str] | None = None,
 ) -> list[tuple[Path, str]]:
-    """Supplement files that attached to nothing, each with why.
+    """Every PDF in the folder that ended up attached to nothing, each with why.
 
     A file the user deliberately put in the folder and that then did nothing is
-    the quietest possible failure: they would go on believing the appendix had
-    been read. Reported by name, with the two reasons distinguished — the
-    article is missing, or the filename matches no reference at all — because
-    the fixes are different.
+    the quietest possible failure: they go on believing it was read. This used
+    to cover supplements only, so an unmatched *article* PDF was dropped in
+    silence while a supplement-named one was named — the asymmetry meant a
+    folder of publisher-named downloads produced an audit that looked entirely
+    normal and used none of it.
+
+    Reasons are kept apart because the fixes differ: `reasons` carries what
+    `identify_by_content` already worked out (ambiguous title, unrecognisable),
+    an unavailable article is named as such because supplying the article is
+    the fix, and anything left could not be placed at all.
     """
     if not provided_dir or not provided_dir.is_dir():
         return []
-    attached = {Path(s.pdf_path) for e in entries for s in e.supplements}
+    used = {Path(e.pdf_path) for e in entries if e.pdf_path}
+    used |= {Path(s.pdf_path) for e in entries for s in e.supplements}
     unavailable: dict[Path, str] = {}
     for e in entries:
         if e.status in ("retrieved", "provided"):
@@ -1054,9 +1171,10 @@ def orphaned_supplements(
             )
     out = []
     for pdf in sorted(provided_dir.glob("*.pdf")):
-        if not _SUPPLEMENT_RE.search(pdf.stem) or pdf in attached:
+        if pdf in used:
             continue
-        out.append((pdf, unavailable.get(pdf, "matches no reference in this paper")))
+        why = (reasons or {}).get(pdf) or unavailable.get(pdf)
+        out.append((pdf, why or "could not tell which reference this is"))
     return out
 
 

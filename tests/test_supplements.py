@@ -220,26 +220,27 @@ def test_a_supplement_does_not_attach_to_a_reference_nobody_could_obtain(tmp_pat
 def test_an_orphan_supplement_is_named_with_the_reason_it_was_set_aside(tmp_path):
     """Silently ignoring a file the user deliberately supplied is the failure
     mode this codebase exists to avoid — they would never learn it did nothing."""
-    from papertrace.refs import attach_supplements, orphaned_supplements
+    from papertrace.refs import attach_supplements, unused_provided
 
     d = _folder(tmp_path, "littlejohns-2020-appendix.pdf", "unrelated-supplement.pdf")
     paywalled = RefEntry(num="3", raw="Littlejohns", slug="littlejohns-2020",
                          status="paywalled")
     attach_supplements(paywalled, d, taken={paywalled.slug})
 
-    orphans = dict(orphaned_supplements([paywalled], d))
+    orphans = dict(unused_provided([paywalled], d))
     assert set(orphans) == {d / "littlejohns-2020-appendix.pdf", d / "unrelated-supplement.pdf"}
     assert "[3]" in orphans[d / "littlejohns-2020-appendix.pdf"]
-    assert "no reference" in orphans[d / "unrelated-supplement.pdf"]
+    assert "could not tell" in orphans[d / "unrelated-supplement.pdf"]
 
 
 def test_an_attached_supplement_is_not_also_reported_as_an_orphan(tmp_path):
-    from papertrace.refs import attach_supplements, orphaned_supplements
+    from papertrace.refs import attach_supplements, unused_provided
 
     d = _folder(tmp_path, "littlejohns-2020.pdf", "littlejohns-2020-supplement.pdf")
     e = _available()
+    e.pdf_path = str(d / "littlejohns-2020.pdf")  # the article really is this file
     attach_supplements(e, d, taken={e.slug})
-    assert orphaned_supplements([e], d) == []
+    assert unused_provided([e], d) == []
 
 
 def test_a_supplement_slug_survives_a_sibling_being_removed(tmp_path):
