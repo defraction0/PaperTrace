@@ -225,6 +225,27 @@ def workload(pdf: Path) -> dict:
     }
 
 
+def supplement_workload(provided_dir: Path | None, supplement: list[Path]) -> int:
+    """How many extra judging calls the supplements on hand will cost.
+
+    One per supplementary *document*, not per claim: `check_claims` groups every
+    claim for a document into a single call. An upper bound like the rest of
+    this estimate — a supplement whose reference no claim cites is never opened,
+    and one whose article turns out to be unavailable is set aside entirely.
+
+    Counted from the folder rather than from the manifest because this runs
+    before `refs` does. The alternative is to state a price that leaves the
+    supplements out, and check.py's own comment on ASK_ATTEMPTS is the rule
+    here: a cost ceiling that gets exceeded is a false promise about money.
+    """
+    from .refs import _SUPPLEMENT_RE
+
+    n = len(supplement or [])
+    if provided_dir and provided_dir.is_dir():
+        n += sum(1 for p in provided_dir.glob("*.pdf") if _SUPPLEMENT_RE.search(p.stem))
+    return n
+
+
 def equivalent_command(
     *,
     manuscript: Path,
@@ -234,6 +255,7 @@ def equivalent_command(
     with_scout: bool,
     provided: Path | None,
     email: str | None = None,
+    supplement: list[Path] | None = None,
 ) -> str:
     """The `papertrace run` line this session amounts to.
 
@@ -247,6 +269,8 @@ def equivalent_command(
     argv = ["papertrace", "run", str(manuscript), "-c", str(case)]
     if provided:
         argv += ["--provided", str(provided)]
+    for s in supplement or []:
+        argv += ["--supplement", str(s)]
     if doi:
         argv += ["--doi", doi]
     if email:
@@ -281,6 +305,61 @@ def _ask_paper() -> Path:
             console.print(f"  [red]{path.suffix or 'that'} is not a PDF or DOCX.[/red]")
             continue
         return path
+
+
+def _ask_sources(case: Path) -> Path | None:
+    """The folder of reference PDFs the user already holds.
+
+    Never asked before this: `run_wizard` passed `provided=None`, so the guided
+    path could not reach a flag the CLI has had all along, and a first-time user
+    following the wizard silently got open-access retrieval only.
+    """
+    default = case / "sources"
+    console.print(
+        "\n[bold]Reference PDFs you already have[/bold] — a folder. Files match by "
+        "name,\n  [cyan]<firstauthor>-<year>.pdf[/cyan] (e.g. pyrros-2023.pdf). "
+        "Open-access copies of\n  the rest are fetched for you."
+        "\n  [dim]Supplementary material for a cited paper goes in the same folder, "
+        "named\n  after its reference — pyrros-2023-supplement.pdf. Each is judged as "
+        "its own\n  document. A supplement whose article is missing is set aside and "
+        "said so.[/dim]"
+    )
+    raw = Prompt.ask("  folder (blank to skip)", default=str(default)).strip()
+    if not raw:
+        return None
+    path = clean_path(raw)
+    if not path.is_dir():
+        console.print(f"  [dim]No folder at {path} — continuing without one.[/dim]")
+        return None
+    n = len(list(path.glob("*.pdf")))
+    console.print(f"  [green]✓[/green] {n} PDF{'' if n == 1 else 's'} in {path}")
+    return path
+
+
+def _ask_supplements() -> list[Path]:
+    """Supplementary material belonging to the paper under audit.
+
+    Asked separately because the sources folder is matched against *reference*
+    slugs, and the audited paper has none for a filename to key on.
+    """
+    console.print(
+        "\n[bold]Supplementary material for this paper itself[/bold] — optional."
+        "\n  [dim]A claim that points at Table S3 or eFigure 2 is read against these; "
+        "with\n  nothing supplied it is reported as not retrieved, never guessed.[/dim]"
+    )
+    out: list[Path] = []
+    while True:
+        raw = Prompt.ask(
+            "  path (blank when done)" if out else "  path (blank to skip)", default=""
+        ).strip()
+        if not raw:
+            return out
+        path = clean_path(raw)
+        if not path.is_file():
+            console.print(f"  [red]No file at {path}[/red] — try again, or drag it in.")
+            continue
+        out.append(path)
+        console.print(f"  [green]✓[/green] {path.name}")
 
 
 def _ask_email() -> str:
@@ -377,6 +456,8 @@ def run_wizard() -> None:
         Prompt.ask("\n[bold]Where should I keep this audit?[/bold]\n  folder",
                    default=_suggest_case(paper))
     )
+    provided = _ask_sources(case)
+    supplement = _ask_supplements()
     doi, with_scout = _ask_doi(paper)
     email = _ask_email()
 
@@ -384,14 +465,26 @@ def run_wizard() -> None:
     if png_available:
         png = Confirm.ask("\n  Also export PNG pictures of the reports?", default=False)
 
+    # each supplement is one more document, so one more judging call. Folded in
+    # here rather than in `workload()` because it is not known until the sources
+    # folder has been named, which happens after the paper is measured.
+    extra = supplement_workload(provided, supplement)
+    calls = w["model_calls"] + extra
+    calls_max = w["model_calls_max"] + ASK_ATTEMPTS * extra
+
     console.print("\n[bold]Ready.[/bold]")
     console.print(
         "  This makes live requests to Crossref, Unpaywall"
         + (" and Europe PMC" if with_scout else "")
-        + f", and about [bold]{w['model_calls']}[/bold] model calls through `claude -p`"
-        + (f" — up to [bold]{w['model_calls_max']}[/bold] if calls have to be retried."
-           if w["model_calls_max"] != w["model_calls"] else ".")
+        + f", and about [bold]{calls}[/bold] model calls through `claude -p`"
+        + (f" — up to [bold]{calls_max}[/bold] if calls have to be retried."
+           if calls_max != calls else ".")
     )
+    if extra:
+        console.print(
+            f"  [dim]{_n(extra, 'supplementary document')} included — each is judged "
+            "separately from the article it accompanies.[/dim]"
+        )
     if w["multi"]:
         console.print(
             f"  [dim]{w['multi']} of {w['places']} citation places cite several sources, "
@@ -404,7 +497,7 @@ def run_wizard() -> None:
 
     cmd = equivalent_command(
         manuscript=paper, case=case, doi=doi, png=png,
-        with_scout=with_scout, provided=None, email=email,
+        with_scout=with_scout, provided=provided, email=email, supplement=supplement,
     )
     console.print(f"\n[dim]Same thing as one command, for next time:[/dim]\n  [cyan]{cmd}[/cyan]\n")
 
@@ -416,9 +509,9 @@ def run_wizard() -> None:
     # `formats=None` means report.md alone — the PNG answer above already pulls
     # in the HTML looks when it needs them, since a PNG is a shot of one.
     run_cmd(
-        manuscript=paper, case=case, provided=None, email=email, model=None,
+        manuscript=paper, case=case, provided=provided, email=email, model=None,
         png=png, backend="auto", with_scout=with_scout, doi=doi, formats=None,
-        supplement=None,
+        supplement=supplement,
     )
 
 
@@ -429,5 +522,6 @@ __all__ = [
     "equivalent_command",
     "preflight",
     "run_wizard",
+    "supplement_workload",
     "workload",
 ]

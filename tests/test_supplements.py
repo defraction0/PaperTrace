@@ -931,3 +931,50 @@ def test_the_papers_own_supplement_is_not_described_as_matched_by_filename():
     run = next(x for x in run_disclosures(RunResults(manuscript="m.pdf", claims=[c]))
                if x.key == "supplement_identity")
     assert "matched by filename" not in run.text
+
+
+# --- the wizard asks for the sources folder it never asked for -------------
+
+
+def test_the_equivalent_command_replays_the_sources_folder_and_supplements(tmp_path):
+    """The wizard prints the one-line command its session amounts to. A line
+    that omits the flags the session used does not reproduce the audit."""
+    from papertrace.wizard import equivalent_command
+
+    cmd = equivalent_command(
+        manuscript=tmp_path / "paper.pdf", case=tmp_path / "case", doi=None, png=False,
+        with_scout=False, provided=tmp_path / "sources", email="e@example.com",
+        supplement=[tmp_path / "si.pdf", tmp_path / "appendix.pdf"],
+    )
+    assert "--provided" in cmd
+    assert cmd.count("--supplement") == 2
+    assert "si.pdf" in cmd and "appendix.pdf" in cmd
+
+
+def test_the_cost_estimate_counts_the_supplements_it_can_see(tmp_path):
+    """Each supplement is one more document, so one more judging call. The
+    wizard states the cost before the user agrees to pay it, and an estimate
+    that ignores supplements understates what they are agreeing to."""
+    from papertrace.wizard import supplement_workload
+
+    d = tmp_path / "sources"
+    d.mkdir()
+    for n in ("pyrros-2023.pdf", "pyrros-2023-supplement.pdf", "chen-2021-appendix.pdf"):
+        (d / n).write_bytes(PDF)
+
+    assert supplement_workload(d, [tmp_path / "own-si.pdf"]) == 3
+    assert supplement_workload(d, []) == 2
+    assert supplement_workload(None, []) == 0
+    assert supplement_workload(tmp_path / "nope", []) == 0
+
+
+def test_the_wizard_hands_run_the_sources_folder_and_supplements(monkeypatch, tmp_path):
+    """`provided=None` was hardcoded, so a wizard user could not use a sources
+    folder at all — the flag existed and the guided path could not reach it."""
+    import inspect
+
+    from papertrace import wizard as wiz
+
+    src = inspect.getsource(wiz.run_wizard)
+    assert "provided=None" not in src, "the sources folder is still hardcoded away"
+    assert "supplement=None" not in src, "supplements are still hardcoded away"
