@@ -8,6 +8,31 @@ All notable changes to PaperTrace are documented here. The format follows
 
 0.4.1 was never released, so its entries below ship together with these.
 
+### Changed — the committed demo report is regenerated, and its judge is pinned
+
+`examples/demo/output/` is the only committed output and the artefact the README
+links as *"See a completed report"*. It was produced on 2026-08-30 by 0.4.1, so
+it showed none of what this release changed.
+
+- **Regenerated under 0.5.0**, and the demo command now pins
+  `--model claude-opus-5`. Without it `claude -p` takes the account default,
+  which had silently moved from opus to haiku between two regenerations — so
+  the committed showcase's judge depended on the day it was rebuilt.
+- **The pinned expectation moves to `1 supported · 2 contradicted · 1 not
+  retrieved · 1 uncited assertion`, over 4 claims rather than 5.** All four
+  planted defects are still found; what changed is that the sentence citing
+  both [2] and [3] now arrives as **one multi-source claim** instead of two
+  single-source ones, because extraction is asked for the verbatim sentence.
+  **Reproduced on `claude-opus-5` and `claude-haiku-4-5` alike**, so it is the
+  prompt and not the model — which is worth stating, because the first
+  regeneration changed both at once and the cause was ambiguous until the
+  second run isolated it.
+- Two README claims corrected as a consequence: the counts, and the line
+  asserting that no claim in the demo cites more than one reference. That is
+  now false, and the demo consequently exercises the per-source breakdown and
+  the new `most adverse of 2 cited sources` qualifier — which the old one
+  never did.
+
 ### Changed — cited sources are read with the layout backend ⚠️ **breaking**
 
 `check.py` hard-coded `backend="pymupdf"` for every cited source, and said why:

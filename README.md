@@ -36,10 +36,12 @@ A missed citation is reported, not silently skipped.</b></p>
 > **See the result first — no install needed.** The demo report committed at
 > [`examples/demo/output/report.md`](examples/demo/output/report.md) audits a
 > fictional mini-review with planted citation errors and real, published
-> references: **2 supported · 2 contradicted · 1 not retrieved · 1 uncited
+> references: **1 supported · 2 contradicted · 1 not retrieved · 1 uncited
 > assertion** — the planted errors, and exactly them, *in that run*. Extraction
 > and judgement are model steps, so the committed report is an inspectable
-> artefact, not a guaranteed re-run.
+> artefact, not a guaranteed re-run: the same demo audited under 0.4.1 returned
+> *2* supported, because extraction split one sentence citing two references
+> into two claims instead of keeping it whole. Same defects found either way.
 
 Pick a paper that matters to you — the landmark your project builds on, the
 method paper you are about to adopt, your own published work. PaperTrace
@@ -459,13 +461,17 @@ claim checker runs on `claude -p`.
 pip install -e ".[full]" && playwright install chromium   # 1 · install
 export PAPERTRACE_EMAIL="you@example.org"                 # 2 · Unpaywall contact
 python examples/demo/make_manuscript.py                   # 3 · build the demo paper
-papertrace run examples/demo/demo_manuscript.pdf -c demo_case   # 4 · audit it
+papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
+    --model claude-opus-5                                 # 4 · audit it
 ```
 
 When it finishes, open `demo_case/out/report.md`. Expected result:
-**2 supported · 2 contradicted · 1 not retrieved**, one uncited assertion
+**1 supported · 2 contradicted · 1 not retrieved**, one uncited assertion
 flagged, and all 5 citation occurrences — spread across the 4 labels — reached
-by an extracted claim, 0 uncertain. (The scout step reports the fictional paper
+by an extracted claim, 0 uncertain. That is **4** claims for 5 occurrences,
+because the sentence citing both [2] and [3] arrives as one multi-source claim;
+0.4.1 split it and reported 2 supported across 5 claims. What matters is the
+same in both: the two planted contradictions found, [4] declined. (The scout step reports the fictional paper
 as *not identified* in Europe PMC — the tool would rather say so than invent
 neighbours. Verdict wording varies run to run, and
 extraction and judgement are live model behaviour that nothing in the code
@@ -480,8 +486,11 @@ Details per plant:
 > stays an inspectable artefact, not a byte-exact expected output: judgement
 > wording differs between runs, and so can the page an anchor is found on — the
 > crop for claim 4 moved from page 1 to page 2 across two runs that reached the
-> same verdict. No claim in the demo cites more than one reference, so the
-> per-source breakdown and its summary count do not appear in it.
+> same verdict. Whether a claim cites more than one reference varies too: in
+> the committed 0.5.0 run the sentence citing [2] and [3] is a single
+> multi-source claim, so the per-source breakdown and the `most adverse of 2
+> cited sources` qualifier both appear; under 0.4.1 the same sentence became
+> two single-source claims and neither did.
 
 ## How it works
 

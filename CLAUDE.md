@@ -53,8 +53,17 @@ End-to-end smoke test — needs network and a logged-in `claude` CLI, ~5 min:
 
 ```bash
 python examples/demo/make_manuscript.py
-papertrace run examples/demo/demo_manuscript.pdf -c demo_case
-# expect: 2 supported · 2 contradicted · 1 not retrieved · 1 uncited assertion
+# --model is pinned so the committed showcase is reproducible: without it
+# `claude -p` takes the account default, which silently changed the judge
+# from opus to haiku between two regenerations of examples/demo/output/
+papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
+    --model claude-opus-5 --format terminal --png
+# expect: 1 supported · 2 contradicted · 1 not retrieved · 1 uncited assertion
+# 4 claims, not 5: the sentence citing [2] and [3] comes back as ONE
+# multi-source claim, because 0.5.0 asks extraction for the verbatim sentence.
+# Reproduced on both claude-opus-5 and claude-haiku-4-5, so it is the prompt
+# and not the model. Both planted contradictions, the paywalled [4] and the
+# uncited assertion are what actually matter and are unaffected.
 ```
 
 Install: `pip install -e ".[dev]"` for development (this is also exactly what

@@ -16,10 +16,14 @@ planted on purpose:
 | [4] | a headline claim resting on a **paywalled** reference | ⊘ `not_retrieved` |
 | — | "Routine imaging archives are among the largest untapped screening resources in medicine." — assertive, **no citation** | flagged in the uncited register |
 
-The remaining claims citing [2] and [3] state published cohort facts
+The remaining material citing [2] and [3] states published cohort facts
 faithfully and should come back ✅ `supported`. (Judgement calls like
 supported-vs-partial can vary a little between runs — the checker is a
-model. The planted contradictions are stable.)
+model. The *shape* changed with 0.5.0 rather than with the model: asking
+extraction for the verbatim sentence makes the sentence citing both [2] and
+[3] one multi-source claim, where 0.4.1 split it into two — so the total is 4
+claims for 5 citation occurrences. Reproduced on both `claude-opus-5` and
+`claude-haiku-4-5`. The planted contradictions are stable throughout.)
 
 ## Run it
 
@@ -39,7 +43,10 @@ export PAPERTRACE_EMAIL="you@example.org"   # use your real address
 python examples/demo/make_manuscript.py
 
 # 4) run the audit — the resolver fetches the open-access references live
-papertrace run examples/demo/demo_manuscript.pdf -c demo_case
+# --model pinned so this matches the committed output/ — otherwise the
+# account default decides the judge, and it changes
+papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
+    --model claude-opus-5
 
 # then read the results:
 open demo_case/out/report.md
