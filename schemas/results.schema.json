@@ -58,6 +58,10 @@
               "type": "string"
             }
           },
+          "own_supplement": {
+            "type": "boolean",
+            "description": "True when the claim points at the AUDITED paper's own supplementary material — \"Table S3\", \"eFigure 2\", \"Supplementary Methods\". A pointer, not a citation, so it never appears in `refs`; a claim can carry both. Such a claim is judged against every supplement supplied with --supplement, and is `not_retrieved` when none was — the paper said where its evidence is and nobody opened it, which is a retrieval gap rather than an assertion made without a citation. Absent on files written before 0.6.0, meaning false."
+          },
           "verdict": {
             "enum": [
               "supported",

@@ -118,10 +118,17 @@ Rules for both:
 - claim: the same statement tightly paraphrased for a headline, ≤300 chars.
 - location: manuscript section (e.g. "Introduction ¶2", "Methods", "Table 2").
 - cited claims also carry refs: citation labels as strings, e.g. ["3"] or ["7","8"].
+- own_supplement: true when the claim points at THIS paper's own supplementary
+  material — "Table S3", "eFigure 2", "Supplementary Methods", "Appendix A".
+  That is a pointer, not a citation, so it does NOT go in refs. A claim can
+  carry both: "as in [4] and Table S2" cites [4] and sets own_supplement.
+  Reserve it for the paper's own numbering; "the supplement of [4]" is just [4].
+  A claim whose ONLY support is such a pointer still belongs in `cited`, with
+  an empty refs list — it is not an assertion made without evidence.
 - Number each list from 1 in reading order.
 
 Answer with ONLY a JSON object, no prose, no code fences:
-{"cited":[{"id":1,"ctx":["ctx_0001"],"quote":"...","claim":"...","location":"...","refs":["1"]}],
+{"cited":[{"id":1,"ctx":["ctx_0001"],"quote":"...","claim":"...","location":"...","refs":["1"],"own_supplement":false}],
  "uncited":[{"id":1,"quote":"...","claim":"...","location":"..."}]}
 
 CITATION CONTEXTS:
@@ -321,6 +328,7 @@ def extract_claims(
             # the label's occurrences as uncertain.
             ctx_ids=[ctx_map[k] for k in _ctx_labels(c) if k in ctx_map],
             refs=[str(r) for r in c.get("refs", [])],
+            own_supplement=bool(c.get("own_supplement", False)),
         )
         for c in data.get("cited", [])
     ]
@@ -885,10 +893,21 @@ def check_claims(
     for c in claims:
         pairs = [(r, _slug_for_ref(manifest, r)) for r in c.refs]
         avail = [(r, e) for r, e in pairs if e and e.status in ("retrieved", "provided") and e.slug]
-        if not avail:
+        own = manifest.manuscript_supplements if c.own_supplement else []
+        if not avail and not own:
             c.verdict = "not_retrieved"
-            reasons = {e.status for _, e in pairs if e}
-            c.note = f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
+            if c.own_supplement:
+                # the paper said exactly where its evidence was and nobody
+                # opened it. That is a retrieval gap, not an uncited assertion.
+                c.note = (
+                    "points at this paper's own supplementary material, which was not "
+                    "provided — pass it with --supplement"
+                )
+            else:
+                reasons = {e.status for _, e in pairs if e}
+                c.note = (
+                    f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
+                )
             continue
         # Co-citation is an offer of support: every source cited for this claim
         # was put forward as backing it, so every one that could be obtained is
@@ -915,6 +934,18 @@ def check_claims(
                     SourceJudgement(source_slug=s.slug, ref=r, kind="supplement")
                 )
                 by_slug.setdefault(s.slug, []).append(c)
+        # the paper's own supplements answer for no citation label, so `ref` is
+        # empty: filling in a number would say the claim cited something it did
+        # not. Every one provided is read, matching the cited side and sparing
+        # the extractor a guess about which file "S3" lives in.
+        for s in own:
+            if s.slug in seen_slugs:
+                continue
+            seen_slugs.add(s.slug)
+            c.judgements.append(
+                SourceJudgement(source_slug=s.slug, ref="", kind="own_supplement")
+            )
+            by_slug.setdefault(s.slug, []).append(c)
         # what is left here could NOT be obtained — the only remaining reason a
         # cited source goes unopened
         avail_refs = {r for r, _ in avail}

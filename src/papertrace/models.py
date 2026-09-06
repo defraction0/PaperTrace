@@ -656,6 +656,11 @@ class ClaimResult:
     # return one: never back-filled from `claim`, which would reinstate exactly
     # the compression the quote exists to remove
     quote: str = ""
+    # the claim points at the AUDITED paper's own supplementary material —
+    # "Table S3", "eFigure 2", "Supplementary Methods". Not a citation: there is
+    # no label, so it cannot travel in `refs`, and a statement whose evidence the
+    # paper located precisely is not an assertion made without one.
+    own_supplement: bool = False
     location: str = ""  # where in the manuscript, e.g. "Methods §2"
     # ids of the citation occurrences this claim was extracted from, as resolved
     # from the `ctx_NNNN` labels the inventory offered the extractor. Empty when

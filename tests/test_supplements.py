@@ -7,6 +7,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from papertrace.models import RefEntry, RefManifest, Supplement  # noqa: E402
@@ -158,6 +160,8 @@ def test_a_slug_is_never_shared_between_a_supplement_and_an_article():
     m = _manifest()
     slugs = [d.slug for d in m.documents()]
     assert len(slugs) == len(set(slugs)), slugs
+
+
 # --- refs: attaching, and refusing to attach -------------------------------
 
 PDF = b"%PDF-1.4 fake"
@@ -587,3 +591,146 @@ def test_a_supplement_that_cannot_be_read_never_taints_the_articles_verdict(tmp_
     assert claim.verdict == "supported"
     # and the gap is NOT laundered into "the source could not be retrieved"
     assert claim.unjudged_refs == []
+
+
+# --- check: claims that point at this paper's own supplement ---------------
+
+
+def _manuscript_ingest(case: Path) -> None:
+    d = case / "ingest" / "manuscript"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "annotated.md").write_text(
+        "<!-- block_0001, page 1 -->\nModel AUC was 0.91 (Table S3).\n"
+    )
+
+
+def test_extraction_records_a_pointer_at_this_papers_own_supplement(tmp_path, monkeypatch):
+    from papertrace import check as check_mod
+
+    monkeypatch.setattr(check_mod, "_ask", lambda p, m=None: json.dumps(
+        {"cited": [{"id": 1, "claim": "AUC 0.91.", "location": "Results", "refs": [],
+                    "own_supplement": True}],
+         "uncited": []}))
+    _manuscript_ingest(tmp_path)
+    cited, _ = check_mod.extract_claims(tmp_path)
+    assert cited[0].own_supplement is True
+
+
+def test_a_claim_with_no_such_pointer_defaults_to_false(tmp_path, monkeypatch):
+    from papertrace import check as check_mod
+
+    monkeypatch.setattr(check_mod, "_ask", lambda p, m=None: json.dumps(
+        {"cited": [{"id": 1, "claim": "X causes Y.", "location": "Intro", "refs": ["1"]}],
+         "uncited": []}))
+    _manuscript_ingest(tmp_path)
+    cited, _ = check_mod.extract_claims(tmp_path)
+    assert cited[0].own_supplement is False
+
+
+def test_the_extraction_prompt_asks_for_the_pointer(tmp_path, monkeypatch):
+    from papertrace import check as check_mod
+
+    seen = {}
+
+    def fake_ask(prompt, m=None):
+        seen["prompt"] = prompt
+        return json.dumps({"cited": [], "uncited": []})
+
+    monkeypatch.setattr(check_mod, "_ask", fake_ask)
+    _manuscript_ingest(tmp_path)
+    check_mod.extract_claims(tmp_path)
+    assert "own_supplement" in seen["prompt"]
+
+
+def test_such_a_claim_is_judged_against_every_supplement_of_this_paper(tmp_path, monkeypatch):
+    """Judged against all of them, matching the rule on the cited side — and it
+    avoids asking the extractor to guess which file `S3` lives in."""
+    from papertrace import check as check_mod
+    from papertrace.models import ClaimResult
+
+    for slug in ("paper-si", "paper-appendix"):
+        _ingested(tmp_path / "ingest" / slug, slug)
+    manifest = RefManifest(
+        manuscript="m.pdf", entries=[],
+        manuscript_supplements=[Supplement("paper-si", "paper-si.pdf"),
+                                Supplement("paper-appendix", "paper-appendix.pdf")],
+    )
+    claim = ClaimResult(id=1, claim="AUC 0.91", location="Results", refs=[],
+                        own_supplement=True)
+    fake_ask, seen = _verdicts({"paper-si": "supported", "paper-appendix": "not_addressed"})
+    monkeypatch.setattr(check_mod, "_ask", fake_ask)
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    assert sorted(seen) == ["paper-appendix", "paper-si"]
+    assert {j.kind for j in claim.judgements} == {"own_supplement"}
+    assert {j.ref for j in claim.judgements} == {""}
+    assert claim.verdict == "supported"
+    assert claim.judgements[0].origin == "this paper's own supplement"
+
+
+def test_a_pointer_with_nothing_supplied_is_not_retrieved_and_says_how_to_fix_it(
+    tmp_path, monkeypatch
+):
+    """The paper named where its evidence was and nobody opened it. Leaving
+    that in the uncited register would call it an assertion with no citation,
+    which understates it."""
+    from papertrace import check as check_mod
+    from papertrace.models import ClaimResult
+
+    manifest = RefManifest(manuscript="m.pdf", entries=[])
+    claim = ClaimResult(id=1, claim="AUC 0.91", location="Results", refs=[],
+                        own_supplement=True)
+    monkeypatch.setattr(check_mod, "_ask", lambda p, m=None: pytest.fail("no call is due"))
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    assert claim.verdict == "not_retrieved"
+    assert "--supplement" in claim.note
+    assert claim.judgements == []
+
+
+def test_a_claim_pointing_at_both_a_citation_and_the_supplement_gets_both(tmp_path,
+                                                                          monkeypatch):
+    from papertrace import check as check_mod
+    from papertrace.models import ClaimResult
+
+    for slug in ("chen-2021", "paper-si"):
+        _ingested(tmp_path / "ingest" / slug, slug)
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num="1", raw="Chen", status="retrieved", slug="chen-2021",
+                          pdf_path="chen-2021.pdf")],
+        manuscript_supplements=[Supplement("paper-si", "paper-si.pdf")],
+    )
+    claim = ClaimResult(id=1, claim="c", location="Results", refs=["1"],
+                        own_supplement=True)
+    fake_ask, seen = _verdicts({"chen-2021": "supported", "paper-si": "supported"})
+    monkeypatch.setattr(check_mod, "_ask", fake_ask)
+    check_mod.check_claims([claim], manifest, tmp_path, backend="pymupdf")
+
+    assert sorted(seen) == ["chen-2021", "paper-si"]
+    assert {j.source_slug: j.kind for j in claim.judgements} == {
+        "chen-2021": "article", "paper-si": "own_supplement",
+    }
+
+
+def test_the_results_schema_declares_the_own_supplement_pointer(tmp_path):
+    import jsonschema
+
+    from papertrace.models import ClaimResult, RunResults
+
+    results = RunResults(
+        manuscript="m.pdf", checker="claude -p", date="2026-09-06",
+        refs_total=0, refs_available=0,
+        claims=[ClaimResult(id=1, claim="AUC 0.91", location="Results", refs=[],
+                            own_supplement=True, verdict="not_retrieved")],
+    )
+    path = tmp_path / "results.json"
+    results.to_json(path)
+    schema = json.loads((_repo_root() / "schemas" / "results.schema.json").read_text())
+    jsonschema.validate(json.loads(path.read_text()), schema)
+    assert "own_supplement" in schema["properties"]["claims"]["items"]["properties"]
+
+    payload = json.loads(path.read_text())
+    del payload["claims"][0]["own_supplement"]
+    path.write_text(json.dumps(payload))
+    assert RunResults.from_json(path).claims[0].own_supplement is False
