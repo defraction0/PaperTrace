@@ -8,6 +8,21 @@ All notable changes to PaperTrace are documented here. The format follows
 
 0.4.1 was never released, so its entries below ship together with these.
 
+### Added — `papertrace --version`
+
+The first thing anyone types after installing, and it answered *"No such
+option: --version"*. Found by installing this branch from GitHub into a clean
+virtualenv and typing it. The only way to check was
+`python -c "import papertrace; print(papertrace.__version__)"`, which nobody
+guesses — so a user who had just installed from a branch had no way to confirm
+which one they were running.
+
+`--version` / `-V`, eager so it answers before the callback body runs: a bare
+`papertrace` on a terminal opens the guided wizard, and a version flag resolved
+after that would have interviewed the user about their manuscript before
+telling them the number. It reads `papertrace.__version__`, the one home
+`docs/RELEASING.md` names, rather than restating it where it could drift.
+
 ### Changed — extraction is told where the citations are ⚠️ **`coverage/3`**
 
 The old flow discarded the location and then worked to reconstruct it. The

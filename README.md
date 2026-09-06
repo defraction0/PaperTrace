@@ -268,6 +268,8 @@ Install options:
 | `pip install -e ".[dev]"` | the test and lint tooling — `pytest`, `ruff`, `jsonschema`. This is what CI installs |
 | `pip install -e ".[dev,png]"` | everything: run audits, export PNGs **and** run the suite |
 
+Confirm what you got with `papertrace --version`.
+
 **As of 0.5.0 the layout backend is not optional.** It was an extra through
 0.4.x, and a plain `pip install papertrace` got flat-text ingest. It is now a
 base dependency, because the cited sources are read with it too: the evidence

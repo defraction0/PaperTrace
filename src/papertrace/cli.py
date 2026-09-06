@@ -19,6 +19,7 @@ import typer
 from rich.console import Console
 from rich.prompt import Prompt
 
+from . import __version__
 from .models import ClaimResult, RefManifest, RunResults, manuscript_fingerprint
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich", invoke_without_command=True)
@@ -316,8 +317,27 @@ def _email(cli_value: str | None) -> str:
     return email
 
 
+def _version(value: bool) -> None:
+    """Print the installed version and stop.
+
+    Read from `papertrace.__version__`, which `docs/RELEASING.md` names as the
+    version's one home — a literal here would drift at the next release and
+    answer confidently wrong, which is the failure this codebase exists to
+    refuse.
+    """
+    if value:
+        console.print(f"papertrace {__version__}")
+        raise typer.Exit(0)
+
+
 @app.callback()
-def _root(ctx: typer.Context) -> None:
+def _root(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        None, "--version", "-V", callback=_version, is_eager=True,
+        help="Print the installed version and exit",
+    ),
+) -> None:
     """Fact-check a paper's citations against the actual cited sources.
 
     New here? Run [bold]papertrace[/bold] with no arguments and answer the
