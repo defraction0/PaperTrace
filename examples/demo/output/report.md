@@ -8,14 +8,14 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 > Ingest `converter: docling 2.118.1` — layout-aware.
 
-> ⚠️ How to read that figure: attribution is a text match that can be wrong — deciding which citation a claim came from is a text comparison, so the counts can be right while a pointer is wrong. An attribution the tool cannot make counts as NOT covered, never as covered — and it refuses close calls, so two similar sentences citing one reference can both read as unaddressed where a reader would pair them at a glance. This figure understates coverage there. A sentence citing the same reference twice needs two extracted claims, so the ratio is not comparable between papers. And detection still reads bracketed numeric markers only — a citation style it cannot see contributes no occurrences at all, which makes this ratio look better than reality, not worse.
+> ⚠️ How to read that figure: attribution is the context the extractor named. Extraction is shown every place this paper cites something and returns which of them each claim came from, so the pointer is no longer a text comparison — but naming it is still a model step, and a claim can be placed on the wrong sentence. A claim that names no place at all leaves that reference's remaining places counted as NOT covered, never as covered, so the figure understates coverage there. And detection still reads bracketed numeric markers only — a citation style it cannot see contributes no occurrences at all, which makes this ratio look better than reality, not worse.
 
 ---
 
-## Claim 1: "Deep learning on frontal chest radiographs detected type 2 diabetes with external validation AUC of 0.94."
+## Claim 1: "Deep learning on frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94."
 
 **Status:** ❌ CONTRADICTED
-**Location:** Background ¶1 · cites [1]
+**Location:** Background · cites [1]
 
 > Deep learning applied to frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94 [1].
 
@@ -24,14 +24,14 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 ### ❌ CONTRADICTED — `pyrros-2023` (cited as [1])
 
 - **Source:** Page 4 `(block_0050)` 
-> The source reports external validation at a distinct institution yielding a ROC AUC of 0.77, not 0.94 (internal prospective AUC was 0.84); no 0.94 figure appears anywhere.
+> The source reports external validation ROC AUC of 0.77 (internal prospective AUC 0.84); no AUC of 0.94 appears anywhere.
 
 ![evidence](evidence/claim_01_pyrros-2023_p4.png)
 *red box = matched text*
 ## Claim 3: "UK Biobank recruited approximately 500,000 adults aged 40-69 years, and its imaging enhancement targets 100,000 participants."
 
 **Status:** ✅ SUPPORTED — *most adverse of 2 cited sources*
-**Location:** Population imaging ¶1 · cites [2, 3]
+**Location:** Population imaging · cites [2, 3]
 
 > Dedicated cohorts complement such opportunistic reuse: the UK Biobank cohort profile describes recruitment of approximately 500,000 adults aged 40-69 years [2], and its imaging enhancement targets 100,000 participants [3].
 
@@ -41,24 +41,24 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 ### ✅ SUPPORTED — `sudlow-2015` (cited as [2])
 
-- **Source:** Page 1 `(block_0018)` 
-> The source states the cohort has "over 500,000 participants aged 40 -69 years when recruited in 2006 -2010", and separately reports multi-modal imaging in a subset of 100,000 participants (block_0038, block_0054).
+- **Source:** Page 3 `(block_0038)` 
+> Source states over 500,000 participants aged 40-69 recruited 2006-2010 (block_0018/block_0027) and that multimodal imaging is planned in subsets of 100,000 participants (block_0038, Table 3).
 
-![evidence](evidence/claim_03_sudlow-2015_p1.png)
+![evidence](evidence/claim_03_sudlow-2015_p3.png)
 *red box = matched text*
 <br>
 
 ### ✅ SUPPORTED — `littlejohns-2020` (cited as [3])
 
 - **Source:** Page 2 `(block_0013)` 
-> The source states UK Biobank is a cohort of half a million participants aged 40-69 and that the imaging enhancement aims to image 100,000 of the existing 500,000 participants.
+> The source states the imaging enhancement aims to image "100,000 of the existing 500,000 UKB participants", and describes the cohort as half a million participants aged 40-69 recruited 2006-2010.
 
 ![evidence](evidence/claim_03_littlejohns-2020_p2.png)
 *red box = matched text*
 ## Claim 4: "Nearly one in five confirmed UK Biobank participants had not attended an imaging assessment centre."
 
 **Status:** ❌ CONTRADICTED
-**Location:** Population imaging ¶1 · cites [3]
+**Location:** Population imaging · cites [3]
 
 > Attendance logistics remain a bottleneck, however - nearly one in five confirmed participants had not attended an imaging assessment centre [3].
 
@@ -67,10 +67,10 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 ### ❌ CONTRADICTED — `littlejohns-2020` (cited as [3])
 
 - **Source:** Page 3 `(block_0023)` 
-> The source reports that of those eligible who booked an appointment, 97% attended an imaging assessment centre, i.e. ~3% non-attendance, not nearly one in five; the ~20% figure in the source is the attendance rate of the full 500,000 cohort required to reach 100,000 scans.
+> The source reports that of those eligible who booked an appointment, "97% have attended an imaging assessment centre" — i.e., about 3%, not nearly one in five, had not attended.
 
 ![evidence](evidence/claim_04_littlejohns-2020_p3.png)
-*red box = matched text*
+*⚠️ no anchor phrase was found on this page — the crop is shown for context and nothing is boxed.*
 ---
 
 ## Not verified — source not retrieved, or check failed (1 of 4)
@@ -80,14 +80,14 @@ the check step failed (see each note).
 Reported as such — never filled in from memory.
 
 - **Background** (1):
-  - ⊘ NOT RETRIEVED · [4] Regulatory clearance of AI systems for clinical imaging is accelerating. — *cited source not available (paywalled)*
+  - ⊘ NOT RETRIEVED · [4] Regulatory clearances of AI systems for clinical imaging are accelerating. — *cited source not available (paywalled)*
 
 ## Assertions without citation (1) — your judgement required
 
 Statements that would normally carry a reference but don't. Not verified —
 flagged for you to weigh.
 
-- **[U1]** Routine imaging archives are among the largest untapped screening resources in medicine. *(Background ¶1)*
+- **[U1]** Routine imaging archives are among the largest untapped screening resources in medicine. *(Background)*
 ## Literature scout — what the reference list doesn't know
 
 
