@@ -340,3 +340,102 @@ def test_a_second_copy_of_an_already_matched_paper_says_so(tmp_path, monkeypatch
     out = dict(unused_provided(entries, d))
     assert list(out) == [spare]
     assert "[1]" in out[spare] and "already" in out[spare], out[spare]
+
+
+# --- supplements get the identity check they lacked ------------------------
+
+
+def test_a_content_identified_supplement_attaches_and_is_marked_verified(tmp_path,
+                                                                         monkeypatch):
+    """0.6.0 attached supplements on a filename alone and disclosed that nothing
+    verified them. A supplement whose own title names its parent HAS been
+    verified, and the report should stop saying otherwise about it."""
+    from papertrace.refs import resolve_all
+
+    _no_network(monkeypatch)
+    d = tmp_path / "src"
+    art = _pdf(d / "s41467-023-39631-x.pdf",
+               title="Opportunistic detection of type 2 diabetes using deep learning "
+                     "from frontal chest radiographs",
+               doi="10.1038/s41467-023-39631-x")
+    sup = _pdf(d / "41467_2023_39631_MOESM1_ESM.pdf",
+               title="Supplementary Information for Opportunistic detection of type 2 "
+                     "diabetes using deep learning from frontal chest radiographs")
+    entries = [_entries()[0]]
+    resolve_all(entries, tmp_path / "dest", "t@example.org", provided_dir=d)
+
+    assert entries[0].pdf_path == str(art)
+    assert [(s.pdf_path, s.verified) for s in entries[0].supplements] == [(str(sup), True)]
+
+
+def test_a_filename_attached_supplement_is_not_marked_verified(tmp_path, monkeypatch):
+    """Nothing read it; it matched a name. The distinction is the whole point."""
+    from papertrace.refs import resolve_all
+
+    _no_network(monkeypatch)
+    d = tmp_path / "src"
+    _pdf(d / "pyrros-2023.pdf", title="Opportunistic detection of type 2 diabetes "
+                                      "using deep learning from frontal chest radiographs")
+    _pdf(d / "pyrros-2023-supplement.pdf", title="")  # no title to verify against
+    entries = [_entries()[0]]
+    resolve_all(entries, tmp_path / "dest", "t@example.org", provided_dir=d)
+
+    assert [s.verified for s in entries[0].supplements] == [False]
+
+
+def test_a_content_identified_supplement_still_needs_its_article(tmp_path, monkeypatch):
+    """The 0.6.0 rule is unchanged by inference: with no article there is
+    nothing for the appendix to be part of."""
+    from papertrace import refs as refs_mod
+    from papertrace.refs import resolve_all, unused_provided
+
+    # the article is genuinely absent, so the chain IS reached — and finds
+    # nothing. That is the situation under test.
+    def _paywalled(entry, *a, **k):
+        entry.status, entry.reason = "paywalled", "no open-access copy"
+
+    monkeypatch.setattr(refs_mod, "_resolve_by_retrieval", _paywalled)
+    d = tmp_path / "src"
+    sup = _pdf(d / "41467_2023_39631_MOESM1_ESM.pdf",
+               title="Supplementary Information for Opportunistic detection of type 2 "
+                     "diabetes using deep learning from frontal chest radiographs")
+    entries = [_entries()[0]]
+    resolve_all(entries, tmp_path / "dest", "t@example.org", provided_dir=d)
+
+    assert entries[0].supplements == []
+    assert [p for p, _ in unused_provided(entries, d)] == [sup]
+
+
+def test_verified_round_trips_and_older_manifests_still_load(tmp_path):
+    import json
+
+    import jsonschema
+
+    from papertrace.models import RefManifest, Supplement
+
+    def _root():
+        for x in [Path(__file__).resolve(), *Path(__file__).resolve().parents]:
+            if (x / "pyproject.toml").exists():
+                return x
+        raise RuntimeError("no pyproject.toml")
+
+    m = RefManifest(manuscript="p.pdf", entries=[
+        RefEntry(num="1", raw=PYRROS, slug="pyrros-2023", status="provided",
+                 pdf_path="/tmp/a.pdf",
+                 supplements=[Supplement("a-suppl", "/tmp/a-suppl.pdf", verified=True),
+                              Supplement("b-suppl", "/tmp/b-suppl.pdf")])])
+    path = tmp_path / "refs_manifest.json"
+    m.to_json(path)
+    schema = json.loads((_root() / "schemas" / "refs_manifest.schema.json").read_text())
+    jsonschema.validate(json.loads(path.read_text()), schema)
+
+    sup = schema["properties"]["entries"]["items"]["properties"]["supplements"]
+    assert "verified" in sup["items"]["properties"], "the identity flag is undeclared"
+    assert [s.verified for s in RefManifest.from_json(path).entries[0].supplements] == [True, False]
+
+    payload = json.loads(path.read_text())
+    for s in payload["entries"][0]["supplements"]:
+        del s["verified"]
+    path.write_text(json.dumps(payload))
+    jsonschema.validate(json.loads(path.read_text()), schema)
+    assert [s.verified for s in RefManifest.from_json(path).entries[0].supplements] == [False, False]

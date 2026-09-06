@@ -120,6 +120,10 @@
                 "pdf_path": {
                   "type": "string",
                   "description": "Local path to the supplementary PDF, as supplied by the user."
+                },
+                "verified": {
+                  "type": "boolean",
+                  "description": "Did anything establish that this file belongs to the reference it is attached to? True when the file's own title or DOI named that work. False when it was attached because its FILENAME carried the reference's tokens — a guess nobody checked. Absent on manifests written before 0.6.0, meaning false. The report distinguishes the two rather than warning about both equally."
                 }
               }
             }

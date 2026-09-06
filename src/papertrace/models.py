@@ -361,6 +361,12 @@ class Supplement:
 
     slug: str
     pdf_path: str
+    # did anything establish that this file belongs to the work it is attached
+    # to? True when its own title or DOI named that work; False when it was
+    # attached because its FILENAME carried the reference's tokens, which is a
+    # guess nobody checked. The report tells the two apart rather than warning
+    # about both equally.
+    verified: bool = False
 
 
 @dataclass(frozen=True)

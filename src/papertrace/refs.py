@@ -990,7 +990,12 @@ def _free_slug(base: str, taken: set[str]) -> str:
     return slug
 
 
-def attach_supplements(entry: RefEntry, provided_dir: Path | None, taken: set[str]) -> None:
+def attach_supplements(
+    entry: RefEntry,
+    provided_dir: Path | None,
+    taken: set[str],
+    content: list[Identified] = (),
+) -> None:
     """Attach this reference's supplementary files, in place.
 
     **Only to an available reference.** A supplement whose article could not be
@@ -1005,10 +1010,15 @@ def attach_supplements(entry: RefEntry, provided_dir: Path | None, taken: set[st
     """
     if entry.status not in ("retrieved", "provided"):
         return
-    for pdf in _supplement_candidates(entry, provided_dir):
+    # a supplement whose own title or DOI named this work HAS been checked, and
+    # the report must stop warning about it in the same breath as one that only
+    # matched a filename
+    named = {(pdf, False) for pdf in _supplement_candidates(entry, provided_dir)}
+    inferred = {(found.path, True) for found in content}
+    for pdf, verified in sorted(named | inferred):
         slug = _free_slug(_stem_slug(pdf), taken)
         taken.add(slug)
-        entry.supplements.append(Supplement(slug=slug, pdf_path=str(pdf)))
+        entry.supplements.append(Supplement(slug=slug, pdf_path=str(pdf), verified=verified))
 
 
 # How much of a first page stands in for a title when the PDF declares none.
@@ -1504,18 +1514,22 @@ def resolve_all(
         for e in entries
         for p in _provided_candidates(e, provided_dir) + _supplement_candidates(e, provided_dir)
     }
-    identified, unidentified = identify_by_content(entries, provided_dir, claimed)
-    articles = {}
+    identified, _unidentified = identify_by_content(entries, provided_dir, claimed)
+    articles: dict[str, Identified] = {}
+    supplements: dict[str, list[Identified]] = {}
     for found in identified.values():
         if found.kind == "article":
             articles.setdefault(found.entry.num, found)
+        else:
+            supplements.setdefault(found.entry.num, []).append(found)
     with _client() as client:
         for entry in entries:
             resolve_entry(entry, dest_dir, email, client, provided_dir,
                           content_match=articles.get(entry.num))
             # after resolution, never before: whether a supplement may attach at
             # all depends on the status `resolve_entry` just decided
-            attach_supplements(entry, provided_dir, taken)
+            attach_supplements(entry, provided_dir, taken,
+                               content=supplements.get(entry.num, []))
             if progress:
                 progress(entry)
     return entries

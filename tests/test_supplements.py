@@ -80,7 +80,7 @@ def test_the_manifest_schema_declares_supplements(tmp_path):
     assert "supplements" in entry, "an entry's supplements are undeclared"
     assert entry["supplements"]["type"] == "array"
     sup = entry["supplements"]["items"]["properties"]
-    assert set(sup) == {"slug", "pdf_path"}, sup
+    assert set(sup) == {"slug", "pdf_path", "verified"}, sup
     assert "manuscript_supplements" in schema["properties"]
 
 
