@@ -315,16 +315,25 @@ def _ask_sources(case: Path) -> Path | None:
     following the wizard silently got open-access retrieval only.
     """
     default = case / "sources"
+    # the folder's contents answer this better than any fixed default can: a
+    # user whose PDFs are already sitting there should not skip them by pressing
+    # return, and a user with none should not be handed a path prompt at all
+    waiting = default.is_dir() and any(default.glob("*.pdf"))
+    if not Confirm.ask(
+        "\n[bold]Do you have any of the cited PDFs already?[/bold]"
+        + (f"\n  [dim]{default} looks like it holds some.[/dim]" if waiting else ""),
+        default=waiting,
+    ):
+        return None
     console.print(
-        "\n[bold]Reference PDFs you already have[/bold] — a folder. Files match by "
-        "name,\n  [cyan]<firstauthor>-<year>.pdf[/cyan] (e.g. pyrros-2023.pdf). "
-        "Open-access copies of\n  the rest are fetched for you."
-        "\n  [dim]Supplementary material for a cited paper goes in the same folder, "
-        "named\n  after its reference — pyrros-2023-supplement.pdf. Each is judged as "
-        "its own\n  document. A supplement whose article is missing is set aside and "
-        "said so.[/dim]"
+        "  [dim]Point me at a folder. Names do not have to be tidy — each PDF is "
+        "identified\n  by its own title or DOI, so a publisher download works as is. A "
+        "file named for\n  its reference ([cyan]pyrros-2023.pdf[/cyan]) is taken at your "
+        "word instead.\n  Supplementary material for a cited paper goes in the same "
+        "folder; each is\n  judged as its own document, and anything I cannot place I "
+        "will name.[/dim]"
     )
-    raw = Prompt.ask("  folder (blank to skip)", default=str(default)).strip()
+    raw = Prompt.ask("  folder", default=str(default)).strip()
     if not raw:
         return None
     path = clean_path(raw)
@@ -342,9 +351,13 @@ def _ask_supplements() -> list[Path]:
     Asked separately because the sources folder is matched against *reference*
     slugs, and the audited paper has none for a filename to key on.
     """
+    if not Confirm.ask(
+        "\n[bold]Does this paper have supplementary material of its own?[/bold]",
+        default=False,
+    ):
+        return []
     console.print(
-        "\n[bold]Supplementary material for this paper itself[/bold] — optional."
-        "\n  [dim]A claim that points at Table S3 or eFigure 2 is read against these; "
+        "  [dim]A claim that points at Table S3 or eFigure 2 is read against these; "
         "with\n  nothing supplied it is reported as not retrieved, never guessed.[/dim]"
     )
     out: list[Path] = []

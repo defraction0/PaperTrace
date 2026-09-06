@@ -979,3 +979,83 @@ def test_the_wizard_hands_run_the_sources_folder_and_supplements(monkeypatch, tm
     src = inspect.getsource(wiz.run_wizard)
     assert "provided=None" not in src, "the sources folder is still hardcoded away"
     assert "supplement=None" not in src, "supplements are still hardcoded away"
+
+
+# --- the wizard asks before it interrogates --------------------------------
+
+
+class _Answers:
+    """Stands in for rich's Prompt/Confirm, replaying scripted answers."""
+
+    def __init__(self, confirms, prompts=()):
+        self.confirms, self.prompts = list(confirms), list(prompts)
+        self.asked: list[str] = []
+
+    def confirm(self, text, **kw):
+        self.asked.append(text)
+        return self.confirms.pop(0)
+
+    def prompt(self, text, **kw):
+        self.asked.append(text)
+        return self.prompts.pop(0) if self.prompts else kw.get("default", "")
+
+
+def _script(monkeypatch, answers):
+    from papertrace import wizard as wiz
+
+    monkeypatch.setattr(wiz.Confirm, "ask", staticmethod(answers.confirm))
+    monkeypatch.setattr(wiz.Prompt, "ask", staticmethod(answers.prompt))
+    return answers
+
+
+def test_saying_no_to_sources_asks_for_no_path(tmp_path, monkeypatch):
+    """A user with nothing was made to read two paragraphs and answer a path
+    prompt to say so."""
+    from papertrace import wizard as wiz
+
+    a = _script(monkeypatch, _Answers(confirms=[False]))
+    assert wiz._ask_sources(tmp_path / "case") is None
+    assert not a.prompts and len([q for q in a.asked if "folder" in q.lower()]) == 0
+
+
+def test_saying_no_to_supplements_asks_for_no_path(tmp_path, monkeypatch):
+    from papertrace import wizard as wiz
+
+    a = _script(monkeypatch, _Answers(confirms=[False]))
+    assert wiz._ask_supplements() == []
+    assert len(a.asked) == 1
+
+
+def test_the_sources_question_defaults_to_yes_when_the_folder_has_pdfs(tmp_path,
+                                                                       monkeypatch):
+    """The folder's contents are better evidence of the answer than a fixed
+    default — and a user whose PDFs are already in place pressing return should
+    not silently skip them."""
+    from papertrace import wizard as wiz
+
+    seen = {}
+
+    def confirm(text, **kw):
+        seen["default"] = kw.get("default")
+        return False
+
+    monkeypatch.setattr(wiz.Confirm, "ask", staticmethod(confirm))
+    case = tmp_path / "case"
+    (case / "sources").mkdir(parents=True)
+
+    wiz._ask_sources(case)
+    assert seen["default"] is False, "an empty folder must not suggest yes"
+
+    (case / "sources" / "pyrros-2023.pdf").write_bytes(b"%PDF")
+    wiz._ask_sources(case)
+    assert seen["default"] is True
+
+
+def test_saying_yes_still_reaches_the_path_prompt(tmp_path, monkeypatch):
+    from papertrace import wizard as wiz
+
+    case = tmp_path / "case"
+    (case / "sources").mkdir(parents=True)
+    (case / "sources" / "a.pdf").write_bytes(b"%PDF")
+    _script(monkeypatch, _Answers(confirms=[True], prompts=[str(case / "sources")]))
+    assert wiz._ask_sources(case) == case / "sources"
