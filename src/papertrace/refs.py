@@ -12,6 +12,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx
 
@@ -1048,9 +1049,23 @@ def _doi_in(pdf: Path) -> str | None:
     return None
 
 
+class Identified(NamedTuple):
+    """What one file turned out to be, and what said so.
+
+    `signal` is provenance rather than decoration: a DOI is exact and a title is
+    a judgement over token overlap, and a reader weighing a verdict is owed the
+    difference. It reaches the manifest `reason`.
+    """
+
+    path: Path
+    entry: RefEntry
+    kind: str  # "article" | "supplement"
+    signal: str  # "DOI" | "title"
+
+
 def identify_by_content(
     entries: list[RefEntry], provided_dir: Path | None, claimed: set[Path]
-) -> tuple[dict[Path, tuple[RefEntry, str]], list[tuple[Path, str]]]:
+) -> tuple[dict[Path, Identified], list[tuple[Path, str]]]:
     """Work out which reference each unclaimed PDF is, by reading it.
 
     Filename matching answers "which files could be this entry?". This asks the
@@ -1058,7 +1073,7 @@ def identify_by_content(
     (`s41467-023-39631-x.pdf`, `mmc1.pdf`) names nothing, and before this it was
     ignored without a word while the audit looked entirely normal.
 
-    Returns `{path: (entry, "article" | "supplement")}` and the files it could
+    Returns `{path: Identified(entry, kind, signal)}` and the files it could
     not place, each with the reason.
 
     Two signals, and deliberately NOT the one already in this module.
@@ -1081,7 +1096,7 @@ def identify_by_content(
 
     if not provided_dir or not provided_dir.is_dir():
         return {}, []
-    assigned: dict[Path, tuple[RefEntry, str]] = {}
+    assigned: dict[Path, Identified] = {}
     unclaimed: list[tuple[Path, str]] = []
     by_doi = {e.doi.lower(): e for e in entries if e.doi}
 
@@ -1097,11 +1112,11 @@ def identify_by_content(
         ) else "article"
 
         if (doi := _doi_in(pdf)) and doi in by_doi:
-            assigned[pdf] = (by_doi[doi], kind)
+            assigned[pdf] = Identified(pdf, by_doi[doi], kind, "DOI")
             continue
         hits = [e for e in entries if titles_match(e.raw, title) is True]
         if len(hits) == 1:
-            assigned[pdf] = (hits[0], kind)
+            assigned[pdf] = Identified(pdf, hits[0], kind, "title")
         elif hits:
             labels = ", ".join(f"[{e.num}]" for e in hits)
             unclaimed.append((
@@ -1169,11 +1184,24 @@ def unused_provided(
             unavailable.setdefault(
                 pdf, f"[{e.num}] is not available ({e.status}), so nothing can be judged against it"
             )
+    # asked here rather than carried down from `resolve_all`, so there is ONE
+    # place that explains why a file went unused. Re-running inference over the
+    # leftovers is a reporting pass, not a second decision — and at ~9 ms a file
+    # it costs nothing worth arranging around.
+    identified, unclaimed = identify_by_content(entries, provided_dir, used)
+    inferred = dict(unclaimed)
     out = []
     for pdf in sorted(provided_dir.glob("*.pdf")):
         if pdf in used:
             continue
-        why = (reasons or {}).get(pdf) or unavailable.get(pdf)
+        why = (reasons or {}).get(pdf) or unavailable.get(pdf) or inferred.get(pdf)
+        if why is None and (found := identified.get(pdf)) is not None:
+            # it WAS recognised — another file got there first. A spare copy of
+            # a paper already matched is not a mystery and must not read as one.
+            why = (
+                f"it is [{found.entry.num}], recognised by its {found.signal}, but "
+                f"[{found.entry.num}] already has a file — this one was not needed"
+            )
         out.append((pdf, why or "could not tell which reference this is"))
     return out
 
@@ -1271,8 +1299,15 @@ def resolve_entry(
     email: str,
     client: httpx.Client,
     provided_dir: Path | None = None,
+    content_match: Identified | None = None,
 ) -> RefEntry:
-    """Resolve one reference in place. Never raises — failures land in status/reason."""
+    """Resolve one reference in place. Never raises — failures land in status/reason.
+
+    `content_match` is a file `identify_by_content` recognised as this reference
+    from its own DOI or title. Consulted only after the filename rule has had
+    its say: the filename is the user's own assertion about the file, and
+    content fills the gap it leaves rather than overruling it.
+    """
     # before anything else: an ambiguous boundary makes `raw` two references
     # spliced together, so the slug, the title and any Crossref lookup derived
     # from it can all name the wrong paper. A recorded gap is the honest result.
@@ -1325,6 +1360,22 @@ def resolve_entry(
                 note = f" — identity unverified: {detail}"
             entry.reason = f"matched {provided.name} in your sources folder{others}{note}"
             return entry
+
+    if content_match is not None:
+        # `verified` by construction: only a positive DOI or title match reaches
+        # here. `titles_match` returning None — too few distinctive words to
+        # tell — was already refused upstream, because nobody named this file
+        # and there is no user assertion to fall back on.
+        pdf = content_match.path
+        entry.status, entry.resolver = "provided", "user"
+        entry.pdf_path = str(pdf)
+        entry.title_check = TITLE_VERIFIED
+        entry.reason = (
+            f"identified {pdf.name} in your sources folder by its "
+            f"{'own DOI' if content_match.signal == 'DOI' else 'title'} — its filename "
+            "names no reference, so nothing but the file itself chose it"
+        )
+        return entry
 
     _resolve_by_retrieval(entry, dest, email, client)
     if refused is not None and not entry.pdf_path:
@@ -1443,9 +1494,25 @@ def resolve_all(
     # named on the command line rather than found here, share the same namespace.
     taken = set() if taken is None else taken
     taken |= {e.slug for e in entries if e.slug}
+    # Content inference runs once, over the whole folder, BEFORE the per-entry
+    # loop: the filename rule asks "which files could be this entry?" and this
+    # asks the opposite. Everything the filename rule could claim — as an
+    # article or as a supplement — is withheld from it, so the user's own naming
+    # always decides first and content only fills the gap it leaves.
+    claimed = {
+        p
+        for e in entries
+        for p in _provided_candidates(e, provided_dir) + _supplement_candidates(e, provided_dir)
+    }
+    identified, unidentified = identify_by_content(entries, provided_dir, claimed)
+    articles = {}
+    for found in identified.values():
+        if found.kind == "article":
+            articles.setdefault(found.entry.num, found)
     with _client() as client:
         for entry in entries:
-            resolve_entry(entry, dest_dir, email, client, provided_dir)
+            resolve_entry(entry, dest_dir, email, client, provided_dir,
+                          content_match=articles.get(entry.num))
             # after resolution, never before: whether a supplement may attach at
             # all depends on the status `resolve_entry` just decided
             attach_supplements(entry, provided_dir, taken)

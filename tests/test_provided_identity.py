@@ -68,8 +68,8 @@ def test_a_publisher_named_download_is_identified_by_its_doi(tmp_path):
          doi="10.1038/s41467-023-39631-x", body="Article")
     assigned, unclaimed = _identify(_entries(), tmp_path / "src")
 
-    assert {p.name: (e.num, kind) for p, (e, kind) in assigned.items()} == {
-        "s41467-023-39631-x.pdf": ("1", "article")
+    assert {p.name: (v.entry.num, v.kind, v.signal) for p, v in assigned.items()} == {
+        "s41467-023-39631-x.pdf": ("1", "article", "DOI")
     }
     assert unclaimed == []
 
@@ -84,7 +84,9 @@ def test_a_paper_whose_reference_printed_no_doi_is_identified_by_its_title(tmp_p
              body="HEALTH IN ACTION")
     assigned, unclaimed = _identify(entries, tmp_path / "src")
 
-    assert [(e.num, kind) for e, kind in assigned.values()] == [("2", "article")]
+    assert [(v.entry.num, v.kind, v.signal) for v in assigned.values()] == [
+        ("2", "article", "title")
+    ]
     assert f in assigned
 
 
@@ -96,7 +98,7 @@ def test_a_pdf_with_no_metadata_title_falls_back_to_its_first_page(tmp_path):
          body="UK Biobank: An Open Access Resource for Identifying the Causes of a\n"
               "Wide Range of Complex Diseases of Middle and Old Age")
     assigned, _ = _identify(entries, tmp_path / "src")
-    assert [(e.num, kind) for e, kind in assigned.values()] == [("2", "article")]
+    assert [(v.entry.num, v.kind) for v in assigned.values()] == [("2", "article")]
 
 
 # --- refusing to guess -----------------------------------------------------
@@ -156,7 +158,7 @@ def test_a_publisher_named_supplement_is_recognised_from_its_own_text(tmp_path):
                    "diabetes using deep learning from frontal chest radiographs")
     assigned, unclaimed = _identify(_entries(), tmp_path / "src")
 
-    assert [(e.num, kind) for e, kind in assigned.values()] == [("1", "supplement")]
+    assert [(v.entry.num, v.kind) for v in assigned.values()] == [("1", "supplement")]
     assert f in assigned
 
 
@@ -172,9 +174,9 @@ def test_the_article_and_its_supplement_both_land_on_the_same_reference(tmp_path
     entries[0].doi = None
     assigned, unclaimed = _identify(entries, tmp_path / "src")
 
-    assert assigned[art][1] == "article"
-    assert assigned[sup][1] == "supplement"
-    assert assigned[art][0].num == assigned[sup][0].num == "1"
+    assert assigned[art].kind == "article"
+    assert assigned[sup].kind == "supplement"
+    assert assigned[art].entry.num == assigned[sup].entry.num == "1"
     assert unclaimed == []
 
 
@@ -241,3 +243,100 @@ def test_a_supplement_with_no_article_keeps_its_own_reason(tmp_path):
                         slug="littlejohns-2020", status="paywalled")]
     out = dict(unused_provided(entries, d))
     assert "[3]" in out[orphan] and "not available" in out[orphan]
+
+
+# --- wired into resolution -------------------------------------------------
+
+
+def _no_network(monkeypatch):
+    """The online chain must not be reached for a file we already identified."""
+    from papertrace import refs as refs_mod
+
+    def _boom(*a, **k):
+        raise AssertionError("the online chain was reached for an identified file")
+
+    monkeypatch.setattr(refs_mod, "_resolve_by_retrieval", _boom)
+
+
+def test_resolve_all_uses_a_content_identified_file(tmp_path, monkeypatch):
+    from papertrace.refs import resolve_all
+
+    _no_network(monkeypatch)
+    d = tmp_path / "src"
+    f = _pdf(d / "s41467-023-39631-x.pdf",
+             title="Opportunistic detection of type 2 diabetes using deep learning "
+                   "from frontal chest radiographs",
+             doi="10.1038/s41467-023-39631-x")
+    entries = [_entries()[0]]
+    resolve_all(entries, tmp_path / "dest", "t@example.org", provided_dir=d)
+
+    e = entries[0]
+    assert (e.status, e.resolver) == ("provided", "user")
+    assert e.pdf_path == str(f)
+    # verified by construction: a positive title or DOI match is what chose it
+    assert e.title_check == "verified"
+
+
+def test_the_reason_says_which_signal_identified_it(tmp_path, monkeypatch):
+    """Provenance, not decoration: a DOI is exact and a title is a judgement,
+    and a reader deciding how much to trust the verdict needs to know which."""
+    from papertrace.refs import resolve_all
+
+    _no_network(monkeypatch)
+    d = tmp_path / "src"
+    _pdf(d / "by-doi.pdf", title="Opportunistic detection of type 2 diabetes using "
+                                 "deep learning from frontal chest radiographs",
+         doi="10.1038/s41467-023-39631-x")
+    _pdf(d / "by-title.pdf",
+         title="UK Biobank: An Open Access Resource for Identifying the Causes of a "
+               "Wide Range of Complex Diseases of Middle and Old Age")
+    entries = _entries()
+    entries[1].doi = None
+    resolve_all(entries, tmp_path / "dest", "t@example.org", provided_dir=d)
+
+    assert "DOI" in entries[0].reason, entries[0].reason
+    assert "title" in entries[1].reason, entries[1].reason
+    assert "by-doi.pdf" in entries[0].reason and "by-title.pdf" in entries[1].reason
+
+
+def test_a_filename_match_still_wins_over_content(tmp_path, monkeypatch):
+    """The filename is the user's own assertion about this file. Content fills
+    the gap it leaves; it never overrules it."""
+    from papertrace.refs import resolve_all
+
+    _no_network(monkeypatch)
+    d = tmp_path / "src"
+    named = _pdf(d / "pyrros-2023.pdf",
+                 title="Opportunistic detection of type 2 diabetes using deep learning "
+                       "from frontal chest radiographs")
+    _pdf(d / "s41467-023-39631-x.pdf",
+         title="Opportunistic detection of type 2 diabetes using deep learning "
+               "from frontal chest radiographs",
+         doi="10.1038/s41467-023-39631-x")
+    entries = [_entries()[0]]
+    resolve_all(entries, tmp_path / "dest", "t@example.org", provided_dir=d)
+
+    assert entries[0].pdf_path == str(named)
+    assert "sources folder" in entries[0].reason
+
+
+def test_a_second_copy_of_an_already_matched_paper_says_so(tmp_path, monkeypatch):
+    """Realistic: the user has both the reference-manager export and the
+    publisher download of the same paper. The spare is not a mystery file and
+    must not be reported as one."""
+    from papertrace.refs import resolve_all, unused_provided
+
+    _no_network(monkeypatch)
+    d = tmp_path / "src"
+    _pdf(d / "pyrros-2023.pdf", title="Opportunistic detection of type 2 diabetes "
+                                      "using deep learning from frontal chest radiographs")
+    spare = _pdf(d / "s41467-023-39631-x.pdf",
+                 title="Opportunistic detection of type 2 diabetes using deep learning "
+                       "from frontal chest radiographs",
+                 doi="10.1038/s41467-023-39631-x")
+    entries = [_entries()[0]]
+    resolve_all(entries, tmp_path / "dest", "t@example.org", provided_dir=d)
+
+    out = dict(unused_provided(entries, d))
+    assert list(out) == [spare]
+    assert "[1]" in out[spare] and "already" in out[spare], out[spare]
