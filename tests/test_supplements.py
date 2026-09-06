@@ -734,3 +734,200 @@ def test_the_results_schema_declares_the_own_supplement_pointer(tmp_path):
     del payload["claims"][0]["own_supplement"]
     path.write_text(json.dumps(payload))
     assert RunResults.from_json(path).claims[0].own_supplement is False
+
+
+# --- reports: a headline ranges over documents -----------------------------
+
+
+def _results_with_supplement(**claim_kw):
+    from papertrace.models import ClaimResult, RunResults, SourceJudgement
+
+    base = dict(
+        id=1, claim="the cohort was imaged twice", location="Methods", refs=["14"],
+        judgements=[
+            SourceJudgement("pyrros-2023", "14", kind="article", verdict="not_addressed",
+                            note="silent on this"),
+            SourceJudgement("pyrros-2023-supplement", "14", kind="supplement",
+                            verdict="contradicted", note="Table S2 reports 0.71",
+                            source_page=1, source_block="block_0001"),
+        ],
+    )
+    base.update(claim_kw)
+    claim = ClaimResult(**base)
+    claim.apply_headline()
+    return RunResults(manuscript="m.pdf", converter="docling", claims=[claim]), claim
+
+
+def test_the_qualifier_says_documents_when_a_supplement_is_among_them():
+    """"most adverse of 2 cited sources" would be false — there is one cited
+    source here, read as two documents."""
+    results, claim = _results_with_supplement()
+    assert claim.verdict == "contradicted"
+    assert claim.headline_qualifier() == "most adverse of 2 documents"
+
+
+def test_the_qualifier_still_says_cited_sources_when_they_all_are():
+    from papertrace.models import ClaimResult, SourceJudgement
+
+    c = ClaimResult(id=1, claim="c", location="M", refs=["1", "2"], judgements=[
+        SourceJudgement("a-2020", "1", verdict="supported"),
+        SourceJudgement("b-2021", "2", verdict="partial"),
+    ])
+    c.apply_headline()
+    assert c.headline_qualifier() == "most adverse of 2 cited sources"
+
+
+def test_every_format_names_the_document_a_verdict_came_from(tmp_path):
+    from papertrace.report import write_reports
+
+    results, _ = _results_with_supplement()
+    write_reports(results, None, tmp_path, png=False)
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        body = (tmp_path / name).read_text()
+        assert "supplement to [14]" in body, f"{name} does not say the verdict is from a supplement"
+
+
+def test_no_format_renders_an_empty_citation_label(tmp_path):
+    """The paper's own supplement answers for no label. Three templates used to
+    build `cited as [{{ j.ref }}]` by hand, which renders `cited as []`."""
+    from papertrace.models import ClaimResult, RunResults, SourceJudgement
+    from papertrace.report import write_reports
+
+    c = ClaimResult(id=1, claim="AUC 0.91", location="Results", refs=[],
+                    own_supplement=True, judgements=[
+                        SourceJudgement("paper-si", "", kind="own_supplement",
+                                        verdict="supported", note="Table S3 gives 0.91",
+                                        source_page=1, source_block="block_0001")])
+    c.apply_headline()
+    write_reports(RunResults(manuscript="m.pdf", claims=[c]), None, tmp_path, png=False)
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        body = (tmp_path / name).read_text()
+        assert "cited as []" not in body, name
+        assert "this paper" in body and "own supplement" in body, name
+
+
+# --- reports: the disclosures supplements owe the reader -------------------
+
+
+def test_a_supplement_is_disclosed_as_unverified_in_all_three_formats(tmp_path):
+    """Every article is checked against the reference that names it. A
+    supplement's title does not match its parent's, so that check cannot apply
+    and is not faked — which makes this the weakest provenance in the tool, and
+    a reader has to be told."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.report import write_reports
+
+    results, _ = _results_with_supplement()
+    fired = {d.key: d for d in run_disclosures(results)}
+    assert "supplement_identity" in fired
+
+    write_reports(results, None, tmp_path, png=False)
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        body = (tmp_path / name).read_text()
+        assert fired["supplement_identity"].token in body, name
+
+
+def test_the_coverage_blind_spot_is_disclosed_when_supplements_were_read(tmp_path):
+    """A [N] occurring only inside a supplement is not counted by the audit,
+    which reads the manuscript alone. Stated, not hidden."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.report import write_reports
+
+    results, _ = _results_with_supplement()
+    results.coverage = {"labels_in_text": ["14"], "covered": ["14"], "missing": []}
+    fired = {d.key: d for d in run_disclosures(results)}
+    assert "supplement_coverage" in fired
+
+    write_reports(results, None, tmp_path, png=False)
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        assert fired["supplement_coverage"].token in (tmp_path / name).read_text(), name
+
+
+def test_neither_disclosure_fires_when_no_supplement_was_read():
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import ClaimResult, RunResults, SourceJudgement
+
+    c = ClaimResult(id=1, claim="c", location="M", refs=["1"], judgements=[
+        SourceJudgement("a-2020", "1", verdict="supported")])
+    results = RunResults(manuscript="m.pdf", claims=[c],
+                         coverage={"labels_in_text": ["1"], "covered": ["1"], "missing": []})
+    keys = {d.key for d in run_disclosures(results)}
+    assert "supplement_identity" not in keys
+    assert "supplement_coverage" not in keys
+
+
+def test_a_headline_decided_by_a_supplement_says_so_in_all_three_formats(tmp_path):
+    """The claim reads `contradicted` on the strength of an appendix while the
+    article of record is silent. A reader acting on the headline alone needs
+    that on the claim, not only in a run-level footnote."""
+    from papertrace.disclosures import claim_disclosures
+    from papertrace.report import write_reports
+
+    results, claim = _results_with_supplement()
+    fired = {d.key: d for d in claim_disclosures(claim)}
+    assert "supplement_headline" in fired
+
+    write_reports(results, None, tmp_path, png=False)
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        assert fired["supplement_headline"].token in (tmp_path / name).read_text(), name
+
+
+def test_no_such_claim_disclosure_when_the_article_itself_decided():
+    from papertrace.disclosures import claim_disclosures
+    from papertrace.models import ClaimResult, SourceJudgement
+
+    c = ClaimResult(id=1, claim="c", location="M", refs=["14"], judgements=[
+        SourceJudgement("pyrros-2023", "14", kind="article", verdict="contradicted",
+                        source_page=1, source_block="block_0001"),
+        SourceJudgement("pyrros-2023-supplement", "14", kind="supplement",
+                        verdict="not_addressed"),
+    ])
+    c.apply_headline()
+    assert "supplement_headline" not in {d.key for d in claim_disclosures(c)}
+
+
+def test_the_per_claim_count_does_not_call_a_supplement_a_cited_source():
+    """One cited work read as two documents is not two cited works. The count
+    sits directly under the headline and would overstate how many independent
+    papers were consulted."""
+    from papertrace.disclosures import claim_disclosures
+
+    _, claim = _results_with_supplement()
+    d = next(x for x in claim_disclosures(claim) if x.key == "sources")
+    assert "2 cited sources checked" not in d.text
+    assert "2 documents checked" in d.text
+    assert d.token in d.text and d.token in d.short
+
+
+def test_a_plain_multi_source_claim_still_says_cited_sources():
+    from papertrace.disclosures import claim_disclosures
+    from papertrace.models import ClaimResult, SourceJudgement
+
+    c = ClaimResult(id=1, claim="c", location="M", refs=["1", "2"], judgements=[
+        SourceJudgement("a-2020", "1", verdict="supported"),
+        SourceJudgement("b-2021", "2", verdict="contradicted"),
+    ])
+    c.apply_headline()
+    d = next(x for x in claim_disclosures(c) if x.key == "sources")
+    assert "2 cited sources checked" in d.text
+
+
+def test_the_papers_own_supplement_is_not_described_as_matched_by_filename():
+    """It was named on the command line. Saying a file the user pointed at
+    directly was guessed from its name misstates which part is uncertain — the
+    identity gap here is that nothing checks the contents, not the file."""
+    from papertrace.disclosures import claim_disclosures, run_disclosures
+    from papertrace.models import ClaimResult, RunResults, SourceJudgement
+
+    c = ClaimResult(id=1, claim="AUC 0.91", location="Results", refs=[],
+                    own_supplement=True, judgements=[
+                        SourceJudgement("paper-si", "", kind="own_supplement",
+                                        verdict="supported", source_page=1,
+                                        source_block="block_0001")])
+    c.apply_headline()
+    head = next(x for x in claim_disclosures(c) if x.key == "supplement_headline")
+    assert "filename" not in head.text
+
+    run = next(x for x in run_disclosures(RunResults(manuscript="m.pdf", claims=[c]))
+               if x.key == "supplement_identity")
+    assert "matched by filename" not in run.text

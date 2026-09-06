@@ -79,6 +79,12 @@
 {% for d in disclosures if d.key == "source_fidelity" %}
     <div class="log"><span class="step">▸ sources</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
+{% for d in disclosures if d.key == "supplement_identity" %}
+    <div class="log"><span class="step">▸ sources</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
+{% for d in disclosures if d.key == "supplement_coverage" %}
+    <div class="log"><span class="step">▸ coverage</span><span class="dim">{{ d.short }}</span></div>
+{% endfor %}
 {% for d in disclosures if d.key == "truncation" %}
     <div class="log"><span class="step">▸ limits</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
@@ -107,6 +113,8 @@
 {% endfor %}
 {% for d in claim_disclosures(c) if d.key == "no_quote" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "supplement_headline" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
 {% if c.quote %}      <div class="cl-meta"><span class="lab">quote </span><span class="it">{{ c.quote }}</span></div>
 {% endif %}
 {% for d in claim_disclosures(c) if d.key == "claim_numbering" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
@@ -119,8 +127,8 @@
 {% if c.judgements %}
 {% for j in c.judgements %}
       <div class="cl-meta">
-        <span style="display:inline-block;width:190px"><span class="lab">[{{ j.ref }}] </span><span class="st {{ j.verdict }}"><span class="dot">●</span> {{ j.verdict|upper }}</span></span>
-        <span class="from">{{ j.source_slug }}</span>{% if j.source_page %}<span class="loc"> · p.{{ j.source_page }}</span>{% endif %}
+        <span style="display:inline-block;width:190px"><span class="lab">{% if j.kind == "article" %}[{{ j.ref }}] {% else %}[+] {% endif %}</span><span class="st {{ j.verdict }}"><span class="dot">●</span> {{ j.verdict|upper }}</span></span>
+        <span class="from">{{ j.source_slug }}</span><span class="loc"> · {{ j.origin }}</span>{% if j.source_page %}<span class="loc"> · p.{{ j.source_page }}</span>{% endif %}
       </div>
 {% if j.note %}
       <div class="note"><span class="a">└─</span> {{ j.note }}</div>
@@ -187,7 +195,7 @@
     <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
 {% for j in c.judgements %}
-    <div class="nrrow"><span class="sec"></span><span class="n">[{{ j.ref }}]</span><span class="it dim">{{ j.source_slug }} <span class="s">·</span> {{ j.verdict }}{% if j.source_page %} <span class="s">·</span> p.{{ j.source_page }}{% endif %}{% if j.note %} <span class="s">·</span> {{ j.note }}{% endif %}</span></div>
+    <div class="nrrow"><span class="sec"></span><span class="n">{% if j.kind == "article" %}[{{ j.ref }}]{% else %}[+]{% endif %}</span><span class="it dim">{{ j.source_slug }} <span class="s">·</span> {{ j.origin }} <span class="s">·</span> {{ j.verdict }}{% if j.source_page %} <span class="s">·</span> p.{{ j.source_page }}{% endif %}{% if j.note %} <span class="s">·</span> {{ j.note }}{% endif %}</span></div>
 {% for d in judgement_disclosures(j) %}
     <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}

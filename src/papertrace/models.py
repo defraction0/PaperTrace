@@ -734,7 +734,11 @@ class ClaimResult:
         """
         if not self.is_multi_source():
             return ""
-        return f"most adverse of {len(self.judgements)} cited sources"
+        # "cited sources" is false the moment a supplement is among them: one
+        # cited work read as two documents is not two cited works, and the
+        # count would overstate how many independent papers were consulted.
+        noun = "documents" if any(j.kind != "article" for j in self.judgements) else "cited sources"
+        return f"most adverse of {len(self.judgements)} {noun}"
 
     def deciding_judgement(self) -> SourceJudgement | None:
         """The judgement the headline came from — whose page the crop shows."""

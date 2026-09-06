@@ -135,6 +135,9 @@
 {% for d in claim_disclosures(c) if d.key == "no_quote" %}
     <p class="cap">⚠️ {{ d.text }}</p>
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "supplement_headline" %}
+    <p class="cap">⚠️ {{ d.text }}</p>
+{% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
     <p class="cap"><span style="color:var(--amber)">⚠ {{ d.text }}</span></p>
 {% endfor %}
@@ -143,7 +146,7 @@
 {% endfor %}
 {% if c.judgements %}
 {% for j in c.judgements %}
-    <h3><span class="hx">###</span> <span class="status {{ j.verdict }}">{{ j.label }}</span> — <span class="slug">{{ j.source_slug }}</span> <span class="cap">cited as [{{ j.ref }}]</span></h3>
+    <h3><span class="hx">###</span> <span class="status {{ j.verdict }}">{{ j.label }}</span> — <span class="slug">{{ j.source_slug }}</span> <span class="cap">{{ j.origin }}</span></h3>
 {% if j.source_page %}
     <ul class="src"><li><b>Source:</b> Page {{ j.source_page }}{% if j.source_block %} <code>({{ j.source_block }})</code>{% endif %}</li></ul>
 {% endif %}
@@ -209,7 +212,7 @@
           <div class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></div>
 {% endfor %}
 {% for j in c.judgements %}
-          <div class="cap"><span class="slug">{{ j.source_slug }}</span> cited as [{{ j.ref }}] — <span class="status {{ j.verdict }}">{{ j.verdict }}</span>{% if j.source_page %} · p.{{ j.source_page }}{% endif %}{% if j.note %} — {{ j.note }}{% endif %}</div>
+          <div class="cap"><span class="slug">{{ j.source_slug }}</span> {{ j.origin }} — <span class="status {{ j.verdict }}">{{ j.verdict }}</span>{% if j.source_page %} · p.{{ j.source_page }}{% endif %}{% if j.note %} — {{ j.note }}{% endif %}</div>
 {% for d in judgement_disclosures(j) %}
           <div class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></div>
 {% endfor %}

@@ -30,6 +30,9 @@ COVERAGE_CAVEAT_TOKEN = "coverage not audited"
 COVERAGE_ATTRIBUTION_TOKEN = "attribution is the context the extractor named"
 UNJUDGED_TOKEN = "could not be obtained, so was never opened"
 MULTISOURCE_TOKEN = "cited sources checked"
+# same falseness `headline_qualifier` avoids: one cited work read as its article
+# plus a supplement is not two cited works, and this count sits under the headline
+MULTISOURCE_DOCUMENTS_TOKEN = "documents checked"
 ANCHOR_LOCATED_TOKEN = "red box = matched text"
 ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase was found on this page"
 ANCHOR_UNKNOWN_TOKEN = "anchor match not recorded"
@@ -42,6 +45,12 @@ CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
 # so the parity test would fail on a difference the reader never sees
 NO_QUOTE_TOKEN = "judged on a paraphrase, not the sentence in the paper"
 SOURCE_FIDELITY_TOKEN = "cited sources read as flat text"
+# a general statement, deliberately: the token is asserted verbatim in all three
+# formats, so it has to stay true whether the supplements were matched by name
+# (cited side) or handed over by the user (this paper) — only the first is a guess
+SUPPLEMENT_IDENTITY_TOKEN = "supplements carry no identity check"
+SUPPLEMENT_COVERAGE_TOKEN = "citations inside a supplement are not counted"
+SUPPLEMENT_HEADLINE_TOKEN = "this verdict rests on supplementary material"
 
 
 @dataclass(frozen=True)
@@ -478,6 +487,104 @@ def _source_fidelity(flat: list[str], total: int) -> Disclosure:
     )
 
 
+def _supplement_slugs(results) -> tuple[list[str], list[str]]:
+    """The supplementary documents some verdict rested on: (cited, this paper).
+
+    Taken from the judgements and not from the manifest, because what a reader
+    is owed a caveat about is what was actually *read* — a supplement supplied
+    for a reference no claim cites was never opened and warrants no warning.
+
+    Split, because the two were obtained differently and only one of them was
+    guessed at. Describing a file the user pointed `--supplement` straight at as
+    "matched by filename" misstates which part is uncertain.
+    """
+    cited = {j.source_slug for c in results.claims for j in c.judgements
+             if j.kind == "supplement"}
+    own = {j.source_slug for c in results.claims for j in c.judgements
+           if j.kind == "own_supplement"}
+    return sorted(cited), sorted(own)
+
+
+def _supplement_identity(cited: list[str], own: list[str]) -> Disclosure:
+    """Supplements carry the thinnest provenance in a PaperTrace report.
+
+    Every article this tool accepts is checked against the reference that names
+    it, and one that fails is set aside. A supplement cannot go through that
+    check — its own title is not its parent's — so the check is skipped rather
+    than faked, and the weakness is stated instead.
+    """
+    slugs = cited + own
+    n = len(slugs)
+    why = []
+    if cited:
+        why.append(
+            f"{len(cited)} accompanying a cited work "
+            f"({', '.join(f'`{s}`' for s in cited)}) "
+            "— matched to that reference by filename. A supplement carries its own title "
+            "and not the title of the article it accompanies, so the identity check that "
+            "guards every cited source cannot be applied to one, and nothing establishes "
+            "that each file belongs to the reference it was attached to."
+        )
+    if own:
+        why.append(
+            f"{len(own)} belonging to this paper ({', '.join(f'`{s}`' for s in own)}) "
+            "— named on the command line, so which file was meant is not in doubt, but "
+            "nothing checks that what it contains is what the paper points at."
+        )
+    return Disclosure(
+        key="supplement_identity",
+        level="warn",
+        # the token has to appear whichever branches fired, so it is stated once
+        # up front rather than only inside the cited-side sentence
+        token=SUPPLEMENT_IDENTITY_TOKEN,
+        text=(
+            f"{n} supplementary {'document was' if n == 1 else 'documents were'} read, and "
+            f"{SUPPLEMENT_IDENTITY_TOKEN} — nothing confirmed which work each belongs to. "
+            + " ".join(why)
+        ),
+        short=f"{n} {SUPPLEMENT_IDENTITY_TOKEN}",
+        rows=tuple(slugs),
+    )
+
+
+def _supplement_coverage() -> Disclosure:
+    """The coverage audit reads the manuscript, and only the manuscript."""
+    return Disclosure(
+        key="supplement_coverage",
+        level="info",
+        token=SUPPLEMENT_COVERAGE_TOKEN,
+        text=(
+            f"The coverage audit reads the manuscript alone, so {SUPPLEMENT_COVERAGE_TOKEN}. "
+            "A reference cited only inside supplementary material is absent from the "
+            "labels below rather than reported as uncovered, and the ratio is over the "
+            "main text only."
+        ),
+        short=SUPPLEMENT_COVERAGE_TOKEN,
+    )
+
+
+def _supplement_headline(claim) -> Disclosure:
+    """The claim's headline came from an appendix, not the article of record."""
+    d = claim.deciding_judgement()
+    if d.kind == "own_supplement":
+        where = "this paper's own supplementary material, not its main text"
+        caveat = "which was supplied by hand and whose contents nobody checked against the claim"
+    else:
+        where = f"supplementary material accompanying [{d.ref}], not the article body"
+        caveat = "which was attached by filename and whose identity nobody confirmed"
+    return Disclosure(
+        key="supplement_headline",
+        level="warn",
+        token=SUPPLEMENT_HEADLINE_TOKEN,
+        text=(
+            f"The headline above is the verdict of `{d.source_slug}` — {where}. So "
+            f"{SUPPLEMENT_HEADLINE_TOKEN}, {caveat}. Read the per-document breakdown "
+            "before relying on it."
+        ),
+        short=SUPPLEMENT_HEADLINE_TOKEN,
+    )
+
+
 def run_disclosures(results, manifest=None) -> list[Disclosure]:
     """Every run-level disclosure this RunResults owes its reader.
 
@@ -495,6 +602,10 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
         flat = sorted(s for s, c in recorded.items() if c.split()[0] == "pymupdf")
         if flat:
             out.append(_source_fidelity(flat, len(recorded)))
+    cited_sup, own_sup = _supplement_slugs(results)
+    supplements = cited_sup + own_sup
+    if supplements:
+        out.append(_supplement_identity(cited_sup, own_sup))
     coverage = results.coverage or {}
     if coverage:
         # occurrences without labels means clean.md was missing while the source
@@ -505,6 +616,10 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
             # label-level audit it replaces could not make that mistake
             if coverage.get("occurrences"):
                 out.append(_coverage_attribution())
+            # gated on the audit having produced labels: on a run with no
+            # citations at all there is no ratio for the blind spot to qualify
+            if supplements:
+                out.append(_supplement_coverage())
         else:
             out.append(_coverage_caveat())
     # a source whose identity nobody established is a run-level fact: it is not
@@ -571,18 +686,21 @@ def _sources(claim) -> Disclosure:
     # a lone dissenter is the whole reason this box exists, so name the split
     # rather than leaving the reader to compare numbers
     split = s["supported"] and (s["contradicted"] or s["partial"])
+    token = (MULTISOURCE_DOCUMENTS_TOKEN
+             if any(j.kind != "article" for j in claim.judgements)
+             else MULTISOURCE_TOKEN)
     return Disclosure(
         key="sources",
         level="warn" if s["contradicted"] else "info",
-        token=MULTISOURCE_TOKEN,
+        token=token,
         text=(
-            f"{s['total']} {MULTISOURCE_TOKEN} for this claim: {breakdown}."
+            f"{s['total']} {token} for this claim: {breakdown}."
             + (" The sources disagree — each verdict below rests only on that "
                "source's own text." if split else "")
         ),
-        short=f"{s['total']} {MULTISOURCE_TOKEN}: {breakdown}",
+        short=f"{s['total']} {token}: {breakdown}",
         rows=tuple(
-            f"[{j.ref}] {j.source_slug} — {j.verdict}"
+            f"{j.origin} {j.source_slug} — {j.verdict}"
             + (f" (p{j.source_page})" if j.source_page else "")
             for j in claim.judgements
         ),
@@ -640,6 +758,12 @@ def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
     # every row of the gap register until readers stopped seeing it
     if not claim.quote and claim.verdict in JUDGMENT_VERDICTS:
         out.append(_no_quote(claim))
+    # the headline is an appendix's word, not the article's. A run-level note
+    # that supplements were read does not tell a reader that THIS verdict is
+    # one of them, and the headline is what most readers act on
+    _d = claim.deciding_judgement()
+    if _d is not None and _d.kind != "article" and claim.verdict in JUDGMENT_VERDICTS:
+        out.append(_supplement_headline(claim))
     if manifest is not None and any(manifest.label_is_doubtful(r) for r in claim.refs):
         out.append(_claim_numbering(claim, manifest))
     if (d := anchor_disclosure(claim)) is not None:

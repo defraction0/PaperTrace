@@ -47,6 +47,10 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 
 > ⚠️ {{ d.text }}
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "supplement_headline" %}
+
+> ⚠️ {{ d.text }}
+{% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
 
 > ⚠️ {{ d.text }}
@@ -60,7 +64,7 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 
 <br>
 
-### {{ j.label }} — `{{ j.source_slug }}` (cited as [{{ j.ref }}])
+### {{ j.label }} — `{{ j.source_slug }}` ({{ j.origin }})
 {% if j.source_page %}
 
 - **Source:** Page {{ j.source_page }}{% if j.source_block %} `({{ j.source_block }})` {% endif %}
@@ -120,7 +124,7 @@ Reported as such — never filled in from memory.
     - {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
 {% endfor %}
 {% for j in c.judgements %}
-    - `{{ j.source_slug }}` cited as [{{ j.ref }}] — **{{ j.verdict }}**{% if j.source_page %} · p.{{ j.source_page }}{% endif %}{% if j.note %} — *{{ j.note }}*{% endif +%}
+    - `{{ j.source_slug }}` {{ j.origin }} — **{{ j.verdict }}**{% if j.source_page %} · p.{{ j.source_page }}{% endif %}{% if j.note %} — *{{ j.note }}*{% endif +%}
 {% for d in judgement_disclosures(j) %}
       - {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
 {% endfor %}
