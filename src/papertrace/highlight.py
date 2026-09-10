@@ -2,7 +2,9 @@
 
 Boxes come from text search on the PDF — never hand-placed — so a box always
 sits where the evidence actually is. The crop region defaults to the anchored
-block's bbox (from the source's own source_map), padded for context.
+block's bbox (from the source's own source_map), padded for context; it bounds
+what is rendered and which hits are kept, and is never handed to `search_for`,
+whose own clip discards a column-spanning match whole.
 
 A quote can miss the page for typesetting reasons alone: a hyphenated line break
 reads as "Non- Hispanic" to `search_for`, and the text the model read says
@@ -71,21 +73,26 @@ def _as_the_page_breaks_it(page, phrase: str) -> str:
     return phrase
 
 
-def _search(page, phrase: str, clip=None) -> list:
-    """Locate `phrase` on `page`; retry the page's own hyphenation of it.
+def _search(page, phrase: str) -> list:
+    """Locate `phrase` anywhere on `page`; retry the page's own hyphenation of it.
 
     Every candidate is still an exact `search_for`, and every difference from
     the model's phrase comes from the page: whitespace beside a dash the phrase
     already carries, or a break the page itself makes. Returns [] when the page
     carries none of them — a genuine miss stays a miss, and the caller records
     anchor_located = False rather than boxing something that resembles the quote.
+
+    Deliberately takes no `clip`: `search_for`'s own clip drops a match that
+    straddles the region's edge WHOLE, so a quote continuing into the next
+    column matched nothing at all. Callers bound the boxes themselves — see
+    `crop_evidence`.
     """
     for candidate in _dash_variants(phrase):
-        hits = page.search_for(candidate, clip=clip)
+        hits = page.search_for(candidate)
         if hits:
             return hits
     broken = _as_the_page_breaks_it(page, phrase)  # last, it costs a text extraction
-    return page.search_for(broken, clip=clip) if broken != phrase else []
+    return page.search_for(broken) if broken != phrase else []
 
 
 def source_page_count(pdf_path: Path) -> int:
@@ -129,7 +136,12 @@ def crop_evidence(
 
     boxes = 0
     for phrase in phrases:
-        for hit in _search(page, phrase, clip=rect):
+        for hit in _search(page, phrase):
+            # the region bounds what is DRAWN, not what counts as a match. A hit
+            # elsewhere on the page is not this block's evidence and would land
+            # outside the image; a hit that merely continues past the edge is.
+            if not rect.intersects(hit):
+                continue
             x0 = (hit.x0 - BOX_PAD - rect.x0) * zoom
             y0 = (hit.y0 - BOX_PAD - rect.y0) * zoom
             x1 = (hit.x1 + BOX_PAD - rect.x0) * zoom

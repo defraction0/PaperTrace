@@ -126,6 +126,30 @@ is the guard working, not a regression.
 
 Judgement quality here is **unmeasured**, like everything since ADR 0001.
 
+### Fixed — a quote crossing a column break was boxed nowhere at all
+
+A two-column page splits a sentence at the column break, so a decisive passage
+often continues in the next column. `crop_evidence` bounded its text search
+with `search_for(phrase, clip=region)` — and PyMuPDF discards the **whole**
+match when any part of it falls outside the clip, not just the outside part.
+One phrase on one real page:
+
+```
+unclipped         [[268, 206, 278, 219], [40, 220, 154, 232], [305, 60, 407, 72]]
+clip = the block  []
+```
+
+So no box was drawn, and the crop was captioned as unboxed — the tool
+admitting a failure it had not suffered, on a quote that was verbatim on the
+page. The search is now unclipped and the hits are filtered by intersection
+with the region, so the crop region bounds what is **rendered** and no longer
+decides what counts as a match. The invariant that makes a box trustworthy is
+unchanged: a box is only ever drawn where `search_for` found the text, and only
+inside the region on screen.
+
+Still open, and unaffected by this: the region is one block's bbox on one page,
+so the continuation itself is not shown.
+
 ## [0.5.0] — unreleased
 
 0.4.1 was never released, so its entries below ship together with these.
