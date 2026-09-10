@@ -95,6 +95,10 @@ def test_run_hands_report_its_formats_rather_than_an_option_info(monkeypatch, tm
     monkeypatch.setattr(cli, "_guard_case", lambda *a, **k: None)
     monkeypatch.setattr(cli, "_open_case", lambda *a, **k: None)
     monkeypatch.setattr(cli, "_detected_doi", lambda m: None)
+    # not what is under test, and it must not be read from the machine: `_email`
+    # falls back to a SAVED CONFIG in the developer's home, so this test passed
+    # locally and failed on every CI python at `raise typer.Exit(2)`
+    monkeypatch.setattr(cli, "_email", lambda v: "t@example.org")
     pdf = tmp_path / "p.pdf"
     pdf.write_bytes(b"%PDF-1.4\n")
 
@@ -135,6 +139,10 @@ def test_run_hands_check_its_backend_rather_than_an_option_info(monkeypatch, tmp
     monkeypatch.setattr(cli, "_guard_case", lambda *a, **k: None)
     monkeypatch.setattr(cli, "_open_case", lambda *a, **k: None)
     monkeypatch.setattr(cli, "_detected_doi", lambda m: None)
+    # not what is under test, and it must not be read from the machine: `_email`
+    # falls back to a SAVED CONFIG in the developer's home, so this test passed
+    # locally and failed on every CI python at `raise typer.Exit(2)`
+    monkeypatch.setattr(cli, "_email", lambda v: "t@example.org")
     pdf = tmp_path / "p.pdf"
     pdf.write_bytes(b"%PDF-1.4\n")
 

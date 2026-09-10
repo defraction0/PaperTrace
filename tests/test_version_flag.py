@@ -10,6 +10,7 @@ so a `--version` resolved after the callback body would answer the question by
 interrogating the user about their manuscript.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -22,11 +23,24 @@ from papertrace import __version__  # noqa: E402
 from papertrace.cli import app  # noqa: E402
 
 
+def _plain(output: str) -> str:
+    """`output` with the styling removed — what a reader actually sees.
+
+    Every assertion on rendered CLI text goes through this. Rich styles pieces
+    of a token independently when colour is on, and colour depends on the
+    environment: `--version` comes out as `-` + `-version`, and `0.6.0` as
+    `0.6` + `.0`, so a substring assertion on the raw bytes is really a test of
+    whoever ran it. One such assertion passed on a laptop and failed on all
+    five CI pythons.
+    """
+    return re.sub(r"\x1b\[[0-9;]*m", "", output)
+
+
 @pytest.mark.parametrize("flag", ["--version", "-V"])
 def test_it_prints_the_installed_version_and_exits_cleanly(flag):
     res = CliRunner().invoke(app, [flag])
     assert res.exit_code == 0, res.output
-    assert __version__ in res.output
+    assert __version__ in _plain(res.output)
 
 
 def test_the_version_it_prints_is_the_package_version_not_a_literal():
@@ -54,8 +68,17 @@ def test_it_does_not_start_the_wizard(monkeypatch):
 
 
 def test_it_is_advertised_on_the_help_screen():
-    res = CliRunner().invoke(app, ["--help"])
-    assert "--version" in res.output
+    """Asserted on the text a READER sees, with the styling stripped.
+
+    Not a nicety. Where colour is enabled — every CI runner sets `FORCE_COLOR`
+    — rich's help highlighter emits the option as
+    `\x1b[1;36m-\x1b[0m\x1b[1;36m-version\x1b[0m`: the two dashes are styled
+    apart, so the literal `--version` is nowhere in the bytes. Asserting on the
+    raw output tested the colour support of whoever ran it, and passed on a
+    laptop while failing on all five CI pythons.
+    """
+    plain = _plain(CliRunner().invoke(app, ["--help"]).output)
+    assert "--version" in plain, plain
 
 
 def test_a_bare_invocation_still_reaches_the_wizard(monkeypatch):
