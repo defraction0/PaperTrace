@@ -340,19 +340,24 @@ compared against the reference list — so `s41467-023-39631-x.pdf`,
 `1-s2.0-S0140673623001234-main.pdf` and `mmc1.pdf` all find their reference
 without being renamed.
 
-Two rules keep that from guessing. A file whose title matches **more than one**
-reference is used for neither, and is named so you can rename it to choose — a
-corrigendum shares nearly every word with its original, and picking the better
-score there would judge a claim against the wrong paper with nothing able to
-notice. And a title too thin to tell papers apart is not a match at all.
+Three rules keep that from guessing. **A file answers for one reference only** —
+once a file is attributed to a reference, by an exact `<author>-<year>.pdf` name
+or by its own DOI, no other reference can be judged against it. A file whose
+title matches **more than one** reference is used for neither, and is named so
+you can rename it to choose — a corrigendum shares nearly every word with its
+original, and picking the better score there would judge a claim against the
+wrong paper with nothing able to notice. And a title too thin to tell papers
+apart is not a match at all.
 
 **A filename that names its reference still wins**, because that is your own
 assertion about the file: `pyrros-2023.pdf`, or anything containing the
 author and year (`pyrros-et-al-2023-chest-radiographs.pdf`); where several
-match, an exact `<author>-<year>.pdf` wins, else the shortest name. Such a file
-is title-checked like a downloaded one, but a mismatch is recorded rather than
-refused — you named it, so it is used and the doubt is disclosed. Content
-identification only fills the gap that leaves.
+match, an exact `<author>-<year>.pdf` wins, else the shortest name. A file whose
+name *is* the reference is title-checked like a downloaded one, but a mismatch is
+recorded rather than refused — you named it, so it is used and the doubt is
+disclosed. A file that merely *contains* the author and year is a weaker claim:
+it is used only if no other reference owns it, since a short surname reduces that
+match to the year alone.
 
 **Nothing in the folder goes unremarked.** Every PDF that ends up attached to
 no reference is listed with the reason — unrecognisable, ambiguous, a spare
