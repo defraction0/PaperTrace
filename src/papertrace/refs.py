@@ -9,6 +9,7 @@ fact-check step reports those claims as unverifiable instead of guessing.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -953,6 +954,101 @@ def _provided_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Pat
     return sorted(matches, key=lambda p: (p.stem.lower() != slug, len(p.stem), p.name))
 
 
+def _fold(text: str) -> str:
+    """Lowercase, with diacritics decomposed away — `İnce` → `ince`.
+
+    `_slug` deletes non-ASCII instead (`[^A-Za-z\\-]`), which is why `İnce O`
+    slugs `nce-2023` and `Müller` slugs `mller`. Folding is what a name
+    comparison needs: a surname that vanished cannot agree with its own paper.
+    """
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
+
+
+def _first_surname(raw: str) -> str:
+    """The first author's surname from a printed reference, folded, or "".
+
+    Two printed styles turn up and both have to work: `Smith J, Jones B` and
+    `M.A. Slabaugh, N.A. Friel`. `_slug` takes the first letter-bearing token and
+    so reads `F.P. Rivara` as `fp` — the divergence `_same_work` documents. A
+    leading run of initials is skipped here instead.
+    """
+    for token in re.split(r"[,\s]+", (raw or "").strip()):
+        folded = re.sub(r"[^a-z\-]", "", _fold(token)).strip("-")
+        if not folded:
+            continue
+        # `M.A.` / `F.P.` / `J` — an initials group, not a surname. Recognised by
+        # the printed dots or a lone capital, never by length alone: `Bo`, `Ma`
+        # and `He` are real surnames in this corpus.
+        if token.replace(".", "").isupper() and "." in token:
+            continue
+        if len(folded) == 1:
+            continue
+        return folded
+    return ""
+
+
+CORROBORATION = ("agree", "disagree", "unknown")
+
+
+def corroborate(entry: RefEntry, pdf: Path) -> tuple[str, str]:
+    """Do the reference's first author and year agree with the file? Three answers.
+
+    Reported beside an attribution and **decides nothing** — measured, it cannot.
+    Requiring the surname on the first page vetoes 7 of 8 real misattributions
+    but also refuses a correct source, because journal PDFs glue affiliation
+    superscripts to surnames (`Yin1` has no word boundary before the digit), and
+    it still cannot separate two Zhang 2024 papers in one bibliography. A false
+    gap is no better than a false verdict, so this informs the reader instead.
+
+    `unknown` is a third answer, not a soft `disagree`: 10 of 39 real files carry
+    no `/Author` at all, and silence about identity is not evidence against it.
+    """
+    surname = _first_surname(entry.raw)
+    author = _pdf_author(pdf)
+    if not surname or not author:
+        return "unknown", "the file declares no author to compare"
+    agrees = re.search(rf"\b{re.escape(surname)}\b", _fold(author)) is not None
+    year_note = ""
+    if entry.year:
+        page = _fold(_first_page_text(pdf))
+        year_note = (f" and the year {entry.year} appears on its first page"
+                     if entry.year in page else
+                     f", though the year {entry.year} does not appear on its first page")
+    if agrees:
+        return "agree", f"first author {surname.title()} matches the file{year_note}"
+    return "disagree", (
+        f"the reference's first author is {surname.title()} but the file declares "
+        f"“{author}”{year_note}"
+    )
+
+
+def _corroboration_note(entry: RefEntry, pdf: Path) -> str:
+    """The corroboration as report text, or "" when there is nothing to say.
+
+    `unknown` prints nothing: a reason that says "no author to compare" for the
+    ten files in forty that carry no metadata is noise, and the identity claim
+    beside it already states what WAS established.
+    """
+    state, detail = corroborate(entry, pdf)
+    if state == "unknown":
+        return ""
+    return f" · {'⚠ ' if state == 'disagree' else ''}{detail}"
+
+
+def _pdf_author(pdf: Path) -> str:
+    """What the PDF's metadata says its author is, or "". Never raises."""
+    try:
+        import pymupdf as fitz
+    except ImportError:  # pragma: no cover
+        import fitz
+    try:
+        with fitz.open(pdf) as doc:
+            return " ".join(((doc.metadata or {}).get("author") or "").split())
+    except Exception:  # noqa: BLE001 — an unreadable author is one more unknown
+        return ""
+
+
 def _exact_stem_claims(entry: RefEntry, provided_dir: Path | None) -> list[Path]:
     """The file whose stem IS this reference's slug — a list so it composes.
 
@@ -1429,7 +1525,10 @@ def resolve_entry(
                 # same thing to a reader: nobody established that this file is
                 # the paper the reference names
                 note = f" — identity unverified: {detail}"
-            entry.reason = f"matched {provided.name} in your sources folder{others}{note}"
+            entry.reason = (
+                f"matched {provided.name} in your sources folder{others}{note}"
+                f"{_corroboration_note(entry, provided)}"
+            )
             return entry
 
     if content_match is not None:
@@ -1445,6 +1544,7 @@ def resolve_entry(
             f"identified {pdf.name} in your sources folder by its "
             f"{'own DOI' if content_match.signal == 'DOI' else 'title'} — its filename "
             "names no reference, so nothing but the file itself chose it"
+            f"{_corroboration_note(entry, pdf)}"
         )
         return entry
 

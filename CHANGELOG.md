@@ -222,6 +222,33 @@ Not done here, deliberately: `_slug` still strips non-ASCII (`Müller`→`mller`
 That is a real bug, it is independent of this one, and fixing it renames
 `ingest/<slug>/` and every report source id — so it gets its own change.
 
+### Added — the first author and year are reported beside an attribution
+
+A bibliography always prints at least a first author and a year, so the manifest
+now says whether they agree with the file it accepted:
+
+```
+[1] matched yanagawa-2023.pdf … identity confirmed: 14/14 reference tokens on its
+    first page · first author Yanagawa matches the file and the year 2023 appears
+    on its first page
+```
+
+**It gates nothing, and that is measured rather than cautious.** Requiring the
+surname on the first page would have vetoed 7 of the 8 misattributions above —
+but it also refuses `yin-2024.pdf`, the *correct* source for its reference,
+because journal PDFs glue affiliation superscripts to surnames and `Yin1` has no
+word boundary before the digit. And it still cannot separate the two different
+Zhang 2024 papers in that same bibliography. A false gap is no better than a
+false verdict, so this informs the reader instead of deciding.
+
+Three answers, not two: `unknown` prints nothing, because 10 of those 39 files
+carry no `/Author` metadata and silence about identity is not evidence against
+it. Across all 39 attributions: 29 agree, 10 unknown, **0 false disagreements**.
+
+Surnames fold rather than vanish here (`İnce`→`ince`, `Müller`→`muller`) — the
+first use of `unicodedata` in the codebase — and a leading run of initials is
+skipped, so `F.P. Rivara` reads `rivara` and not `fp`.
+
 ### Fixed — the uncited register was one paragraph, not a list
 
 `report.md` is rendered with `trim_blocks=True`, which strips the newline after
