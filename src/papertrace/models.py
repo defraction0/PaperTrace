@@ -692,7 +692,8 @@ class ClaimResult:
     # not be read as having backed the verdict. Sources that WERE available are
     # in `judgements`, not here.
     unjudged_refs: list[str] = field(default_factory=list)
-    # False when no anchor phrase was found on the page: the crop is still
+    # False when no anchor phrase was found inside the cropped region — which is
+    # one block's bbox, so this is NOT "absent from the page". The crop is still
     # written for context, but it carries no red box and must not claim one
     anchor_located: bool | None = None
 

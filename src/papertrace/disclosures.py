@@ -34,7 +34,12 @@ MULTISOURCE_TOKEN = "cited sources checked"
 # plus a supplement is not two cited works, and this count sits under the headline
 MULTISOURCE_DOCUMENTS_TOKEN = "documents checked"
 ANCHOR_LOCATED_TOKEN = "red box = matched text"
-ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase was found on this page"
+# says nothing about the rest of the page, because nothing established it. The
+# crop region is one block's bbox, so a passage continuing into the next column
+# is on the page and outside the region at once — "was found on this page" made
+# that an absence, and the token is shared by both branches below, so it has to
+# stay true whether the phrase is elsewhere on the page or nowhere at all.
+ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase could be boxed"
 ANCHOR_UNKNOWN_TOKEN = "anchor match not recorded"
 SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
 REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
@@ -104,10 +109,10 @@ ANCHOR: dict[str, Disclosure] = {
         level="warn",
         token=ANCHOR_NOT_LOCATED_TOKEN,
         text=(
-            f"{ANCHOR_NOT_LOCATED_TOKEN} — the crop is shown for context and "
-            "nothing is boxed."
+            f"{ANCHOR_NOT_LOCATED_TOKEN} — none was found inside the region this "
+            "crop shows, so the crop is shown for context only."
         ),
-        short=f"{ANCHOR_NOT_LOCATED_TOKEN} — nothing is boxed",
+        short=f"{ANCHOR_NOT_LOCATED_TOKEN} — crop shown for context",
     ),
     "unknown": Disclosure(
         key="anchor",

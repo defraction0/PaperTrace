@@ -74,6 +74,26 @@ def test_the_no_crop_wording_never_mentions_a_crop():
     assert "no evidence image" in without.text
 
 
+def test_the_not_located_wording_never_claims_the_phrase_is_absent_from_the_page():
+    """`False` records "nothing was boxed in the region shown" — and the region
+    is one block's bbox, so a passage continuing into the next column is on the
+    page and outside it at once (see tests/test_crop_region.py for the page that
+    proves it, and demo claim 4, whose three phrases have five hits on page 3
+    while its crop is captioned unboxed).
+
+    Saying "not found on this page" turns that into an absence nobody
+    established. The weaker sentence is the true one, and it is true in both
+    branches — which matters, because the two share a token by design.
+    """
+    for d in (
+        judgement_disclosures(_j(anchor_located=False, evidence_image="e/x.png"))[0],
+        judgement_disclosures(_j(anchor_located=False, evidence_image=None))[0],
+    ):
+        for field in (d.token, d.text, d.short):
+            assert "on this page" not in field, field
+            assert "on the page" not in field, field
+
+
 def test_located_needs_no_no_crop_variant_but_still_only_fires_with_provenance():
     d = judgement_disclosures(_j(anchor_located=True, evidence_image="e/x.png"))[0]
     assert d.token == ANCHOR_LOCATED_TOKEN

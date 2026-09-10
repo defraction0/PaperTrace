@@ -81,11 +81,16 @@ went uncited?**
 - Show the evidence: real page crops with the matched text boxed in red.
   Claude proposes the page, the block and verbatim anchor phrases; Python then
   finds those phrases in the PDF and draws the boxes — placed by text search,
-  never by hand, and never by the model. The crop region comes from the source
-  block the verdict names, so a crop whose anchor phrase matched nothing is
-  still shown — unboxed, and captioned as unboxed. Where no anchor phrase was
-  offered at all, the caption says that instead: "searched and not found" and
-  "never searched for" are different facts and are never merged.
+  never by hand, and never by the model. A phrase is searched for across the
+  whole page and boxed where it falls inside the crop, so a quote that carries
+  on into the next column is still boxed. The crop region comes from the source
+  block the verdict names, so a crop whose anchor phrase was not found inside
+  that region is still shown — unboxed, and captioned as unboxed. That caption
+  is scoped to the region and says so: the region is one block, and a passage
+  continuing past it is on the page and outside the crop at once. Where no
+  anchor phrase was offered at all, the caption says that instead: "nothing
+  could be boxed" and "never searched for" are different facts and are never
+  merged.
 - Preserve unavailable sources as explicit gaps: a claim whose source
   couldn't be retrieved is `⊘ not retrieved` — recorded, never guessed.
 - **Check its own reference numbering before trusting it.** The citation label

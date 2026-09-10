@@ -1016,13 +1016,16 @@ def highlight(
                 done += 1
                 # `is True` / `is False` / `is None` — never truthiness. None
                 # means nothing was ever searched for, and calling that "not
-                # found on the page" asserts a search that did not happen.
+                # found" asserts a search that did not happen.
                 if a.anchor_located is True:
                     console.print(f"  [green]✓[/green] {tag}: {a.evidence_image}")
                 elif a.anchor_located is False:
+                    # "in the cropped region", not "on the page" — the region is
+                    # one block, and a quote continuing into the next column is
+                    # on the page and outside it at once
                     console.print(
                         f"  [yellow]○ {tag}: {a.evidence_image} — the anchor phrase "
-                        f"was searched for and not found on the page; crop written "
+                        f"was not found inside the cropped region; crop written "
                         f"unboxed[/yellow]"
                     )
                 else:
