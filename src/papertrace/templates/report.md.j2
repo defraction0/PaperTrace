@@ -139,7 +139,11 @@ Statements that would normally carry a reference but don't. Not verified —
 flagged for you to weigh.
 
 {% for u in r.uncited %}
-- **[U{{ u.id }}]** {{ u.quote or u.claim }}{% if u.location %} *({{ u.location }})*{% endif %}
+{# `+%}`, as at line 6 and 122: trim_blocks eats the newline after a block tag,
+   so a bare {% endif %} here emitted every assertion with no line ending and
+   the whole register collapsed into one paragraph. Nine of them on a real
+   paper rendered as one list item #}
+- **[U{{ u.id }}]** {{ u.quote or u.claim }}{% if u.location %} *({{ u.location }})*{% endif +%}
 {% endfor %}
 {% endif %}
 {% if scout and (scout.newer or scout.overlooked or scout.same_year or scout.error) %}

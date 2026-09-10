@@ -88,6 +88,7 @@ Statements that would normally carry a reference but don't. Not verified —
 flagged for you to weigh.
 
 - **[U1]** Routine imaging archives are among the largest untapped screening resources in medicine. *(Background ¶1)*
+
 ## Literature scout — what the reference list doesn't know
 
 
