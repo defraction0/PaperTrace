@@ -31,17 +31,26 @@ Print this banner (verbatim, in a fenced code block), then the one-liner:
 
 ## 1 · Intake (one batched exchange, not an interrogation)
 
-Ask for all four at once, as a short checklist the user can answer in one message:
+Ask for all five at once, as a short checklist the user can answer in one message:
 
 1. **The paper** — path to the PDF of interest (a paper you build on, one
    you're evaluating, your own).
 2. **Sources you already have** — a folder of reference PDFs, if any.
    Optional: open-access copies of the rest are fetched automatically.
-3. **Your questions** — what you want answered about this paper: free text,
+   **Tell them not to bother renaming**: each PDF is identified by its own
+   DOI or title, so publisher downloads work as they came. Supplementary
+   material for a cited paper goes in the same folder too; several per
+   reference is fine, and each is judged as its own document. One whose
+   article is missing is set aside, so ask for the article too if they
+   have it.
+3. **Supplementary material for the paper itself** — the paper's own SI,
+   appendices or eTables, if any. Optional, but a claim pointing at
+   "Table S3" cannot be checked without it.
+4. **Your questions** — what you want answered about this paper: free text,
    a list, or screenshots of form fields (a journal's reviewer form works
    too). Optional — without it, the standard audit runs: citation accuracy,
    coverage, uncited assertions, newer & overlooked literature.
-4. **Prior critique** — what's already been said about this paper, to be
+5. **Prior critique** — what's already been said about this paper, to be
    weighed as source material: published comments or letters, PubPeer
    threads, earlier reviewer reports and author responses, your own notes.
    Optional.
@@ -99,14 +108,25 @@ literature, methods and results consistency — and say you did.
 ## 4 · Retrieval — live ticker
 
 ```bash
-papertrace refs <paper.pdf> --provided <sources_dir> -c <case>
+papertrace refs <paper.pdf> --provided <sources_dir> -c <case> --supplement <si.pdf>
 ```
+
+Drop `--supplement` when the paper has none; repeat it when it has several.
 
 Stream the per-reference ticker as it runs (✓ retrieved via unpaywall · ✓
 provided by you · ⚠ paywalled · ⚠ no DOI). Close with the honest summary
 line, e.g. **“19/42 sources available — 23 not obtainable (paywall / no DOI /
 unpublished)”**, and remind the user they can drop more PDFs into the sources
 folder at any point; you'll pick them up on request.
+
+Three lines in that ticker deserve saying out loud rather than scrolling past.
+`identified … by its own DOI/title` means a file the filename rule could not
+place was recognised from its contents. `+ N supplements` means extra documents
+will be judged, and extra model calls spent. `⚠ … set aside` means a file the
+user supplied did **nothing** — its article was never obtained, its title
+matched two references equally, or nothing in it could be read — and each has a
+different fix. Never let that last one pass silently: the user believes that
+file was used.
 
 For a published paper, also run the literature scout
 (`papertrace scout -c <case>`, `--doi` if the title lookup misses) and show
@@ -121,8 +141,9 @@ Never bypass a paywall. Never pretend a source was read that wasn't.
 from `source_map.json` and say it in your first message after ingest. Not only
 when it is bad news: a reader who is told nothing cannot judge the fidelity of
 what follows in either direction, and the CLI now states it at the start and the
-end of every run. Say also that cited sources are always read as flat text, so a
-"docling" line is not mistaken for a claim about them.
+end of every run. Cited sources and supplements are read with the **same**
+backend as the paper (since 0.5.0), each recorded under its own slug — so name
+any that came back `pymupdf` while the paper did not.
 
 If the backend is `docling`, table blocks are real GFM tables and figure blocks
 carry captions with page bboxes. While working through Results/Discussion,

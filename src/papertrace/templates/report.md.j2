@@ -26,13 +26,36 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 
 ## Claim {{ c.id }}: "{{ c.claim }}"
 
-**Status:** {{ c.label }}
+{# an inline expression, NOT {% if %}: trim_blocks eats the newline after a
+   block tag, which merged this line into the Location line below it #}
+**Status:** {{ c.label }}{{ " — *%s*" % c.headline_qualifier() if c.headline_qualifier() else "" }}
 **Location:** {{ c.location }}{% if c.refs %} · cites [{{ c.refs|join(', ') }}]{% endif %}
+{% if c.quote %}
+{# two blank lines, not one: trim_blocks eats the newline after each block tag,
+   and a blockquote wants a blank line ahead of it rather than relying on a
+   renderer letting it interrupt the paragraph above. trim_blocks eats the
+   newline after this comment too, so there are two blanks below, not one #}
+
+
+> {{ c.quote }}
+{% endif %}
 {% for d in claim_disclosures(c) if d.key == "sources" %}
 
 > **{{ d.text }}**
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "no_quote" %}
+
+> ⚠️ {{ d.text }}
+{% endfor %}
+{% for d in claim_disclosures(c) if d.key == "supplement_headline" %}
+
+> ⚠️ {{ d.text }}
+{% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
+
+> ⚠️ {{ d.text }}
+{% endfor %}
+{% for d in claim_disclosures(c) if d.key == "claim_numbering" %}
 
 > ⚠️ {{ d.text }}
 {% endfor %}
@@ -41,7 +64,7 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 
 <br>
 
-### {{ j.label }} — `{{ j.source_slug }}` (cited as [{{ j.ref }}])
+### {{ j.label }} — `{{ j.source_slug }}` ({{ j.origin }})
 {% if j.source_page %}
 
 - **Source:** Page {{ j.source_page }}{% if j.source_block %} `({{ j.source_block }})` {% endif %}
@@ -53,8 +76,13 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if j.evidence_image %}
 
 ![evidence]({{ j.evidence_image }})
-{% for d in judgement_disclosures(j) %}{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}{% endfor %}
 {% endif %}
+{% for d in judgement_disclosures(j) %}
+{% if not j.evidence_image %}
+
+{% endif %}
+{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}
+{% endfor %}
 {% endfor %}
 {% else %}
 {% if c.source_slug %}
@@ -65,8 +93,13 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if c.evidence_image %}
 
 ![evidence]({{ c.evidence_image }})
-{% for d in claim_disclosures(c) if d.key == "anchor" %}{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}{% endfor %}
 {% endif %}
+{% for d in claim_disclosures(c) if d.key == "anchor" %}
+{% if not c.evidence_image %}
+
+{% endif %}
+{% if d.level == "warn" %}*⚠️ {{ d.text }}*{% else %}*{{ d.token }}*{% endif %}
+{% endfor %}
 {% endif %}
 {% if c.note %}
 
@@ -86,7 +119,16 @@ Reported as such — never filled in from memory.
 {% for section, items in gaps.items() %}
 - **{{ section }}** ({{ items|length }}):
 {% for c in items %}
-  - [{{ c.refs|join(', ') }}] {{ c.claim }}{% if c.note %} — *{{ c.note }}*{% endif %}
+  - {{ c.label }} · [{{ c.refs|join(', ') }}] {{ c.claim }}{% if c.note %} — *{{ c.note }}*{% endif +%}
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs", "claim_numbering") %}
+    - {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
+{% endfor %}
+{% for j in c.judgements %}
+    - `{{ j.source_slug }}` {{ j.origin }} — **{{ j.verdict }}**{% if j.source_page %} · p.{{ j.source_page }}{% endif %}{% if j.note %} — *{{ j.note }}*{% endif +%}
+{% for d in judgement_disclosures(j) %}
+      - {{ '⚠️ ' if d.level == 'warn' else '' }}{{ d.text }}
+{% endfor %}
+{% endfor %}
 {% endfor %}
 {% endfor %}
 {% if r.uncited %}
@@ -97,15 +139,15 @@ Statements that would normally carry a reference but don't. Not verified —
 flagged for you to weigh.
 
 {% for u in r.uncited %}
-- **[U{{ u.id }}]** {{ u.claim }}{% if u.location %} *({{ u.location }})*{% endif %}
+- **[U{{ u.id }}]** {{ u.quote or u.claim }}{% if u.location %} *({{ u.location }})*{% endif %}
 {% endfor %}
 {% endif %}
-{% if scout and (scout.newer or scout.overlooked or scout.error) %}
+{% if scout and (scout.newer or scout.overlooked or scout.same_year or scout.error) %}
 
 ## Literature scout — what the reference list doesn't know
 
 {% if scout.paper_title %}
-Paper identified as *{{ scout.paper_title }}* ({{ scout.paper_year or "year?" }}{% if scout.paper_doi %} · `{{ scout.paper_doi }}`{% endif %}) via {{ scout.resolved_via }} lookup on Europe PMC.
+Paper identified as *{{ scout.paper_title }}* ({{ scout.paper_year or "year?" }}{% if scout.paper_doi %} · `{{ scout.paper_doi }}`{% endif %}) via {{ scout.resolved_via }} lookup on Europe PMC{% if scout.paper_identity == 'confirmed' %}, and its title matches this paper{% elif scout.paper_identity == 'unverified' %} — **nobody established that this record is your paper**: there was too little title to compare, so read the two registers below with that in mind{% elif scout.paper_identity == 'mismatch' %} — **this record is not your paper**{% endif %}.
 {% endif %}
 {% if scout.error %}
 
@@ -127,12 +169,28 @@ What the paper could not have known — articles citing it, plus later keyword h
 
 ### Existed but uncited ({{ scout.overlooked|length }} candidates)
 
-In print by the paper's year and absent from its reference list (matched by
-DOI and first-author heuristics — verify against the reference list yourself).
+In print **before** the paper's year and absent from its reference list (matched
+by DOI and first-author heuristics — verify against the reference list yourself).
 
 | Year | Title | Journal | DOI |
 |------|-------|---------|-----|
 {% for h in scout.overlooked %}
+| {{ h.year or "?" }} | {{ h.title[:90] }} | {{ h.journal[:30] }} | {{ h.doi or "—" }} |
+{% endfor %}
+{% endif %}
+{% if scout.same_year %}
+
+### Same year as the paper ({{ scout.same_year|length }} candidates)
+
+Published in {{ scout.paper_year or "the paper's own year" }} and not cited.
+Held apart from the list above on purpose: a paper from the manuscript's own
+year may have appeared after it was submitted, so it is **not** evidence of
+something the authors should have known. It is also not literature published
+since. Judge each on its date.
+
+| Year | Title | Journal | DOI |
+|------|-------|---------|-----|
+{% for h in scout.same_year %}
 | {{ h.year or "?" }} | {{ h.title[:90] }} | {{ h.journal[:30] }} | {{ h.doi or "—" }} |
 {% endfor %}
 {% endif %}

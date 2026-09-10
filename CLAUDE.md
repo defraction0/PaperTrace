@@ -53,13 +53,26 @@ End-to-end smoke test — needs network and a logged-in `claude` CLI, ~5 min:
 
 ```bash
 python examples/demo/make_manuscript.py
-papertrace run examples/demo/demo_manuscript.pdf -c demo_case
-# expect: 2 supported · 2 contradicted · 1 not retrieved · 1 uncited assertion
+# --model is pinned so the committed showcase is reproducible: without it
+# `claude -p` takes the account default, which silently changed the judge
+# from opus to haiku between two regenerations of examples/demo/output/
+papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
+    --model claude-opus-5 --format terminal --png
+# expect: 1 supported · 2 contradicted · 1 not retrieved · 1 uncited assertion
+# 4 claims, not 5: the sentence citing [2] and [3] comes back as ONE
+# multi-source claim, because 0.5.0 asks extraction for the verbatim sentence.
+# Reproduced on both claude-opus-5 and claude-haiku-4-5, so it is the prompt
+# and not the model. Both planted contradictions, the paywalled [4] and the
+# uncited assertion are what actually matter and are unaffected.
 ```
 
-Install: `pip install -e ".[dev]"` for development (this is also exactly what CI
-installs — `full`/`docling`/`png` pull docling, torch and playwright, which must
-stay out of CI). `playwright install chromium` once, only for `--png`.
+Install: `pip install -e ".[dev]"` for development (this is also exactly what
+CI installs). **`docling` is a base dependency as of 0.5.0**, so CI installs it
+and torch with it — but never *runs* it: the ~500 MB layout models download on
+first use, not on install, and every test pins `backend="pymupdf"`
+(`check_claims` makes `backend` a required argument so none can forget).
+`playwright` must still stay out of CI; it is the `png` extra, needed only for
+`--png`, with `playwright install chromium` once.
 
 ## Architecture
 
@@ -71,19 +84,38 @@ there is no in-memory pipeline object:
 ingest → refs → scout → check → highlight → report
 ```
 
-- **`ingest/`** — two backends behind one contract: `pymupdf_.py` (always
-  available, flat text, tables linearized) and `docling_.py` (optional,
-  layout-aware, ~500 MB model download on first run). `backend="auto"` prefers
-  docling and falls back loudly. Everything downstream reads only
-  `source_map.json` and does not know which backend ran.
+- **`ingest/`** — two backends behind one contract: `pymupdf_.py` (flat text,
+  tables linearized) and `docling_.py` (layout-aware, ~500 MB model download on
+  first run). Both are installed; `--backend pymupdf` is a deliberate choice,
+  not a fallback for a missing package. `backend="auto"` resolves through the
+  shared `resolve_backend()` and falls back loudly. Everything downstream reads
+  only `source_map.json` and does not know which backend ran — except
+  `check._stale_ingest`, which compares the recorded `converter` so a source
+  map from an earlier run with the other backend is rebuilt rather than reused.
+  **Cited sources are ingested with the same backend as the paper** (0.5.0);
+  each source's converter travels in `RunResults.source_converters` and a
+  flat-read source is named in all three reports.
 - **`refs.py`** — resolves citations through legal open-access routes only
   (Crossref → Unpaywall → Europe PMC → arXiv), with a title sanity check that
   rejects a mismatched download rather than judging against the wrong paper.
-  Per-ref status from `REF_STATUSES`.
+  Per-ref status from `REF_STATUSES`. Also attaches **supplements** (0.6.0):
+  `_named_for` is the one token-match rule, `_provided_candidates` and
+  `_supplement_candidates` are that rule with `_SUPPLEMENT_RE` inverted, and a
+  supplement attaches only to an already-available reference — the orphan is
+  reported by `unused_provided`, never silently dropped.
+  **`identify_by_content` is the second pass**, for files the filename rule
+  cannot place: DOI first, then `titles_match` against a *short* title string.
+  Deliberately **not** `_title_check_text` — that counts a reference's words
+  across a whole page, which is right for vetoing a file the user already named
+  and measurably wrong for discovery (it verified one demo source against two
+  unrelated references). A non-unique match is refused, never ranked, and
+  `titles_match` returning `None` is not an accept: a filename carries the
+  user's assertion, content carries none.
 - **`check.py`** — the **only** module that calls a model, and only through the
   `_ask()` seam (`claude -p` subprocess; inherits the user's Claude Code login,
   no API key). Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per
-  source so context stays small. Also holds `coverage_audit()`, which is
+  **document** so context stays small — an article, each of its supplements,
+  and each of the audited paper's own are separate calls with separate verdicts. Also holds `coverage_audit()`, which is
   deliberately **mechanical and prompt-independent** — a regex
   (`_LABEL_GROUP`) over bracketed numeric labels, so a citation the extractor
   missed still surfaces. The module global `_LAST_MODEL` carries the judging
@@ -93,9 +125,14 @@ ingest → refs → scout → check → highlight → report
   them with PyMuPDF `page.search_for` and draws the boxes. Boxes are never
   model-placed or hand-placed.
 - **`models.py`** — the dataclasses *are* the wire format. `VERDICTS`,
-  `REF_STATUSES` and `BLOCK_TYPES` are the vocabularies; `to_json`/`from_json`
-  pairs must stay symmetric, and `from_json` uses `.get(...)` defaults so older
-  `results.json` files still load.
+  `REF_STATUSES`, `BLOCK_TYPES` and `DOCUMENT_KINDS` are the vocabularies;
+  `to_json`/`from_json` pairs must stay symmetric, and `from_json` uses
+  `.get(...)` defaults so older `results.json` files still load. **A judgement
+  target is a document, not a reference**: `RefManifest.document(slug)` /
+  `.documents()` resolve an article, a cited work's supplement or the audited
+  paper's own behind one interface, so no consumer hand-rolls
+  `next(e for e in entries if e.slug == slug)` — that shape can only ever find
+  an article, and every supplement would be invisible to it.
 - **`report.py`** — Jinja2 over `src/papertrace/templates/` (three templates:
   markdown, editor HTML, terminal HTML). Templates are **package data** loaded
   via `importlib.resources`, not a repo-relative path — an installed wheel has
@@ -119,24 +156,35 @@ Three decisions not to re-litigate:
   byte for byte.** `evals/align.py` reads `missing` as a list of label strings
   to decide whether an unmatched gold case is the tool's failure or the
   evaluator's; reshaping it would move that blame silently, with no test going
-  red. Everything occurrence-level is additive under `"schema": "coverage/2"`.
-  In particular `covered` is *not* "labels with ≥1 covered occurrence" — that
-  would push an all-uncertain label into `missing`.
+  red. Everything occurrence-level is additive; `"schema"` is `coverage/3`
+  since 0.5.0 and `coverage/2` files still validate. In particular `covered` is
+  *not* "labels with ≥1 covered occurrence" — that would push an all-uncertain
+  label into `missing`.
 - **`uncertain` is a third status, never folded into either.** An attribution
   the tool cannot make counts as *not covered*, and the uncertain count is
   always printed beside the ratio: when it is large the ratio is close to
-  meaningless, and a percentage alone hides that.
-- **Reading-order zipping is rejected.** `EXTRACT_PROMPT` asks for reading
-  order, so pairing claim *n* with occurrence *n* is tempting. The order is
-  unverified and degrades silently — one skipped claim shifts every later
-  pairing and manufactures confident, wrong attributions. Attribution is
-  location narrowing plus text similarity assigned globally best-first,
-  accepted only on `ratio ≥ 0.45` **and** `margin ≥ 0.10`; the margin is the
-  decisive test, since the question is only *which* occurrence.
+  meaningless, and a percentage alone hides that. Since 0.5.0 it has exactly
+  one cause: a claim cites a label and names none of that label's contexts, so
+  a claim reached one of them and nothing can say which.
+- **Attribution is a lookup, not a match** (`coverage/3`). `citation_occurrences()`
+  builds the inventory **before** the model call, `_render_inventory()` renders
+  it as `ctx_NNNN` into `EXTRACT_PROMPT`, and each claim comes back carrying
+  the ids it was taken from — resolved through the map built in that same pass,
+  in `extract_claims`, and stored in `ClaimResult.ctx_ids`. A `ctx` not in the
+  inventory is **dropped**, never repaired into "the first occurrence of that
+  label".
 
-The attributor duplicates ~10 lines of normalize-and-ratio with
-`evals/align.py` **on purpose**: `papertrace` cannot import `evals` (not in the
-wheel), and `evals` must not import a matcher from the thing it grades.
+  This replaced ~130 lines of similarity matching (`_attribute_label`,
+  `_normalize_for_match`, `_ratio`, `_location_matches`, `OCCURRENCE_MIN_RATIO`,
+  `OCCURRENCE_MIN_MARGIN`). Do not reintroduce a text-similarity fallback for
+  an unresolvable `ctx`: that is the confident-wrong-pointer failure the
+  redesign removed, and `uncertain` is the honest answer instead.
+- **Reading-order zipping is still rejected**, and `ctx_NNNN` is not a licence
+  to reintroduce it. The labels are *assigned* in reading order, but they are
+  resolved through the mapping built with them — never by re-deriving position
+  later. Any consumer that pairs the *n*th ctx with the *n*th occurrence of a
+  freshly recomputed list has rebuilt the bug: one dropped occurrence shifts
+  every id after it, silently.
 
 ## Non-negotiable gates
 
@@ -208,7 +256,10 @@ honest scope — when behaviour changes, that list changes with it. Specific
 current constraints documented there, worth not re-breaking: the coverage audit
 reads bracketed numeric labels only; batch mode judges a co-cited claim against
 every retrievable source and reports the most adverse verdict as the claim's
-headline; the model reads extracted text with page
+headline — where `not_addressed` is deliberately unranked and becomes the
+headline only when no source addressed the claim at all; a substantive verdict
+must name a page and a block that exist in the source's own map, so a verdict
+nobody can be shown is `unchecked`; the model reads extracted text with page
 markers, not page images.
 
 Update `CHANGELOG.md` for any user-visible change, and `README.md` when flags,

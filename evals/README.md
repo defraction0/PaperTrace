@@ -42,10 +42,13 @@ Compare repeated runs:
 python evals/runners/score_only.py --agreement evals/runs/<a> evals/runs/<b> evals/runs/<c>
 ```
 
-Reports the **intersection** (upper bound — only cases every run produced) and
-the **union** (lower bound — every case seen in any run, with the gaps charged
-to the model) side by side, and names which cases each run omitted. Runs from
-two different gold sets are refused outright rather than averaged.
+Reports the **complete-case** figure (only cases every run produced — a
+different population, not a bound in either direction) and the **penalized**
+figure (every case seen in any run, with the gaps charged to the model, which
+is a genuine lower bound) side by side, and names which cases each run omitted.
+Cases that were never eligible for scoring do not vote. Runs that differ in
+gold set, prompt fingerprint or ingest converter are refused outright rather
+than averaged.
 
 ## Run a live evaluation — costs money
 

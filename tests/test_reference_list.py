@@ -129,3 +129,57 @@ def test_a_differently_typed_run_does_not_resume_the_list():
     text, resumed = references_span(m)
     assert "supplementary consideration" not in text, text
     assert resumed is False
+
+
+# --- back matter is not a continued bibliography ----------------------------
+#
+# The first real audit of an Elsevier paper reported 46 references on a paper
+# citing 43. Blocks 120-162 were the references; block 163 was a `TABLE TITLES`
+# heading; blocks 164-166 were three `list` blocks holding the paper's own table
+# captions. The resume scan runs to the END of the document and accepted them,
+# because the only test it applied was the block *type*. Refs 44-46 were then
+# title-searched against Crossref, which answered with table-component DOIs from
+# unrelated papers, and the report published three works that do not exist.
+
+_TABLE_TITLES = _map(
+    ("sectionheader", 22, "REFERENCES"),
+    ("list", 22, "- G.C. Feuerriegel, R.P. Marcus, S. Sommer, Rotator cuff. Eur Radiol 2023."),
+    ("list", 22, "- D.A. Lansdown, S. Lee, C. Sam, A prospective quantitative study. 2017."),
+    ("list", 22, "- W.T. Dixon, Simple proton spectroscopic imaging, Radiology 153 (1984) 189-194."),
+    ("sectionheader", 26, "TABLE TITLES"),
+    ("list", 26, "- Table 1. Dataset characteristics"),
+    ("list", 26, "- Table 2. Accuracy and reliability of automated thresholding models"),
+    ("list", 26, "- Table 3. Diagnostic accuracy for clinical cutoffs of Goutallier"),
+)
+
+
+def test_table_captions_after_the_references_are_not_references():
+    """Three list blocks under `TABLE TITLES` share the reference list's block
+    type and nothing else. None carries a year, a DOI or an arXiv id."""
+    text, resumed = references_span(_TABLE_TITLES)
+
+    assert "Table 1." not in text, "the paper's own table captions became references"
+    assert "Table 2." not in text
+    assert "Table 3." not in text
+    assert resumed is False, "nothing was resumed, so nothing should be reported as resumed"
+    assert text.count("- ") == 3, text
+
+
+def test_the_real_references_survive_the_shape_test():
+    """The other half of the same assertion: rejecting back matter must not
+    reject the bibliography it follows."""
+    text, _ = references_span(_TABLE_TITLES)
+    for surname in ("Feuerriegel", "Lansdown", "Dixon"):
+        assert surname in text, f"{surname} was lost to the shape test"
+
+
+def test_a_genuine_continuation_still_resumes_when_one_entry_lacks_a_year():
+    """The shape test is applied to the RUN, not to each entry. `_SPLIT`'s
+    resumed run holds two dated references and one URL-only entry; requiring
+    every entry to be reference-shaped would undo the 0.4.0 fix over the one
+    entry that is a bare link."""
+    text, resumed = references_span(_SPLIT)
+
+    assert resumed is True
+    assert "Dean" in text and "Kitamura" in text
+    assert "Assess-AI" in text, "the year-less entry in a real run was dropped"

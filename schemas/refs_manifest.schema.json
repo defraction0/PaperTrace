@@ -102,6 +102,31 @@
               null
             ],
             "description": "Whether anyone established that the retrieved or provided file is the paper the reference names. 'unverifiable' (e.g. a scanned first page) is not 'verified' and must never be reported as a match."
+          },
+          "supplements": {
+            "type": "array",
+            "description": "Supplementary files the user supplied for this reference, each judged as its own document. Only ever non-empty when the reference itself is available: a supplement with no article behind it is set aside rather than allowed to stand in for the cited source. Absent on manifests written before 0.6.0, where it means none were supplied. Note that no supplement carries a title_check — a supplement's own title does not match its parent's, so the identity check that guards every article cannot apply, and these are attached on a filename match alone.",
+            "items": {
+              "type": "object",
+              "required": [
+                "slug",
+                "pdf_path"
+              ],
+              "properties": {
+                "slug": {
+                  "type": "string",
+                  "description": "The id this document is read, ingested and cropped under: ingest/<slug>/ and sources_resolved/<slug>.pdf. Derived from the file stem and never from an ordinal position in the folder, so removing one file cannot silently re-point another document's stored verdicts."
+                },
+                "pdf_path": {
+                  "type": "string",
+                  "description": "Local path to the supplementary PDF, as supplied by the user."
+                },
+                "verified": {
+                  "type": "boolean",
+                  "description": "Did anything establish that this file belongs to the reference it is attached to? True when the file's own title or DOI named that work. False when it was attached because its FILENAME carried the reference's tokens — a guess nobody checked. Absent on manifests written before 0.6.0, meaning false. The report distinguishes the two rather than warning about both equally."
+                }
+              }
+            }
           }
         }
       }
@@ -109,6 +134,50 @@
     "references_resumed": {
       "type": "boolean",
       "description": "True when the reference list was picked up again after an intervening section, so the entry numbering spans a boundary the parser chose to cross. Gated on block type and run length, but still a judgement — the reader should be able to check it."
+    },
+    "reference_source": {
+      "enum": [
+        "crossref",
+        "parsed"
+      ],
+      "description": "Which reading of the reference list these entries came from: the publisher's list deposited with Crossref, or the tool's own parse of the PDF text. Absent on manifests written before reconciliation, which are all parses."
+    },
+    "numbering_verified": {
+      "type": "boolean",
+      "description": "True when the chosen list accounts for exactly the labels the manuscript's body cites. The label is the join key between a claim and its source, so an unverified numbering means a verdict may be about a different paper than the label names. Absent on older manifests, which never checked."
+    },
+    "numbering_note": {
+      "type": "string",
+      "description": "Why the numbering was or was not confirmed, in the reader's terms — the counts each reading produced and what the body cites."
+    },
+    "unverified_from": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "The first citation label from which the numbering is in doubt, or null when it is not in doubt. 1 means 'from the very start', which is what a single unchecked reading warrants: one candidate gives no evidence about where it went wrong."
+    },
+    "manuscript_supplements": {
+      "type": "array",
+      "description": "Supplementary material belonging to the AUDITED paper, supplied with --supplement. Deliberately not an entry in `entries`: it answers for no citation label, so putting it there would inflate the reference total and let a claim citing a number be handed the paper's own appendix. Absent on manifests written before 0.6.0.",
+      "items": {
+        "type": "object",
+        "required": [
+          "slug",
+          "pdf_path"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "The id this document is read, ingested and cropped under, derived from the file stem."
+          },
+          "pdf_path": {
+            "type": "string",
+            "description": "Local path to the supplementary PDF, as supplied by the user."
+          }
+        }
+      }
     }
   }
 }

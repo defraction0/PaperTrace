@@ -109,10 +109,11 @@ def test_scout_registers_and_dedup(tmp_path):
     assert newer == {"A citing follow-up", "Newer keyword hit"}
     assert {h.via for h in res.newer} == {"citing", "search"}
 
-    # cited-by-DOI, cited-by-slug and the paper itself never reach overlooked;
-    # a same-year hit does (year ≤ paper year, plausibly knowable)
+    # cited-by-DOI, cited-by-slug and the paper itself never reach overlooked —
+    # and neither does a same-year hit, which has its own register
     overlooked = {h.title for h in res.overlooked}
-    assert overlooked == {"Old uncited candidate", "Same-year neighbour"}
+    assert overlooked == {"Old uncited candidate"}
+    assert {h.title for h in res.same_year} == {"Same-year neighbour"}
 
     # newest first
     assert [h.year for h in res.newer] == [2023, 2022]
@@ -154,7 +155,7 @@ def test_scout_json_roundtrip(tmp_path):
     res.to_json(out)
 
     data = json.loads(out.read_text())
-    assert data["counts"] == {"newer": 2, "overlooked": 2}
+    assert data["counts"] == {"newer": 2, "overlooked": 1, "same_year": 1}
     again = ScoutResults.from_json(out)
     assert again.paper_year == 2020
     assert {h.title for h in again.newer} == {h.title for h in res.newer}
@@ -164,7 +165,9 @@ def test_scout_json_roundtrip(tmp_path):
 def test_keywords_drop_stopwords():
     kws = _keywords("Towards a novel deep learning analysis of chest radiographs")
     assert "towards" not in kws and "novel" not in kws and "analysis" not in kws
-    assert kws[:3] == ["deep", "learning", "chest"]
+    # ranked by length rather than by position, so the specific words win
+    # wherever they sit in the title — `radiographs` over `deep`
+    assert kws[:2] == ["radiographs", "learning"], kws
 
 
 def test_email_fallback_old_env_var(monkeypatch):
@@ -175,3 +178,261 @@ def test_email_fallback_old_env_var(monkeypatch):
     assert _email(None) == "old@example.org"
     monkeypatch.setenv("PAPERTRACE_EMAIL", "new@example.org")
     assert _email(None) == "new@example.org"  # new name wins
+
+
+# --- a failure has to say which failure it was ------------------------------
+#
+# On a real audit the operator was told "paper not identified in Europe PMC —
+# pass --doi to pin it", so they found the DOI and re-ran with it. Same message.
+# They then curled Europe PMC by hand to establish what the tool already knew:
+# the paper is a Journal Pre-proof and simply is not indexed. `scout.json` also
+# recorded `"doi": ""`, so the artifact could not show what had been tried.
+
+
+def _no_hits(request):
+    return httpx.Response(200, json={"resultList": {"result": []}})
+
+
+def test_a_pinned_doi_that_finds_nothing_does_not_ask_for_a_doi(tmp_path):
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1016/j.ejrad.2026.113206",
+                     transport=httpx.MockTransport(_no_hits))
+
+    assert "--doi" not in res.error, res.error
+    assert "10.1016/j.ejrad.2026.113206" in res.error, res.error
+
+
+def test_a_pinned_doi_that_finds_nothing_says_the_paper_is_not_indexed(tmp_path):
+    """A DOI lookup returning nothing is a stronger fact than a failed title
+    heuristic, and a different one: absence of indexing, not absence of skill.
+    Zero candidates must not read as a clean literature search."""
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1016/j.ejrad.2026.113206",
+                     transport=httpx.MockTransport(_no_hits))
+
+    assert "not indexed" in res.error.lower(), res.error
+    assert res.newer == [] and res.overlooked == []
+
+
+def test_the_doi_that_was_tried_survives_into_the_artifact(tmp_path):
+    """`scout.json` carried an empty doi, so the null was uninterpretable from
+    the file alone."""
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1016/j.ejrad.2026.113206",
+                     transport=httpx.MockTransport(_no_hits))
+
+    assert res.paper_doi == "10.1016/j.ejrad.2026.113206"
+
+
+def test_without_a_doi_the_advice_to_pin_one_still_stands(tmp_path):
+    """The original message is right when no DOI was given — keep it."""
+    case = _case(tmp_path)
+    res = scout_case(case, transport=httpx.MockTransport(_no_hits))
+    assert "--doi" in res.error
+
+
+# --- the keyword query has to be about the subject ---------------------------
+#
+# A live audit of "Image registration improves inter-reader agreement of
+# objective response in CT assessment of pancreas adenocarcinoma" searched for
+# `image AND registration AND improves AND inter-reader`. Two faults in one
+# line: `improves` is a verb carrying no topic, and taking the FIRST four
+# content words never reaches the subject, which in this title sits at the end.
+# The register came back with a stroke conference abstract whose shouted title
+# contained "IMPROVES".
+
+_REAL_TITLE = (
+    "Image registration improves inter-reader agreement of objective response "
+    "in CT assessment of pancreas adenocarcinoma"
+)
+
+
+def test_the_keyword_query_reaches_the_subject_of_the_paper():
+    kws = _keywords(_REAL_TITLE)
+    assert "adenocarcinoma" in kws, kws
+    assert "registration" in kws, kws
+
+
+def test_a_title_verb_is_not_a_keyword():
+    """`improves` matched an unrelated abstract on the same verb."""
+    assert "improves" not in _keywords(_REAL_TITLE)
+
+
+def test_keyword_selection_does_not_depend_on_position_in_the_title():
+    """The subject is as often at the end of a title as the start."""
+    front = _keywords("Pancreas adenocarcinoma assessed by registration of CT")
+    back = _keywords("Registration of CT for assessment of pancreas adenocarcinoma")
+    assert "adenocarcinoma" in front and "adenocarcinoma" in back
+
+
+# --- a same-year paper is not an overlooked one ------------------------------
+
+
+def test_a_same_year_hit_is_not_filed_as_overlooked(tmp_path):
+    """"Existed but uncited" invites the reader to ask what the authors missed.
+    A paper from the manuscript's own year may have appeared after submission,
+    so holding it to that standard is unfair — and on a real 2026 paper every
+    one of the fifteen candidates was from 2026."""
+    case = _case(tmp_path)
+    res = scout_case(case, transport=_mock_transport())
+
+    assert "Same-year neighbour" not in {h.title for h in res.overlooked}
+
+
+def test_a_same_year_hit_is_kept_in_its_own_register(tmp_path):
+    """Not dropped either: a paper published early in the same year is exactly
+    the kind of thing a reviewer might legitimately raise. It is a third
+    status, and folding it into either neighbour states something false."""
+    case = _case(tmp_path)
+    res = scout_case(case, transport=_mock_transport())
+
+    assert "Same-year neighbour" in {h.title for h in res.same_year}
+    assert "Same-year neighbour" not in {h.title for h in res.newer}
+
+
+def test_the_same_year_register_round_trips(tmp_path):
+    """Gate 2 — a new field is a schema change and a round-trip test."""
+    from papertrace.models import ScoutResults
+
+    case = _case(tmp_path)
+    res = scout_case(case, transport=_mock_transport())
+    path = tmp_path / "scout.json"
+    res.to_json(path)
+
+    back = ScoutResults.from_json(path)
+    assert [h.title for h in back.same_year] == [h.title for h in res.same_year]
+    assert json.loads(path.read_text())["counts"]["same_year"] == len(res.same_year)
+
+
+def test_an_older_uncited_hit_is_still_overlooked(tmp_path):
+    """The register keeps its job — this is a narrowing, not a removal."""
+    case = _case(tmp_path)
+    res = scout_case(case, transport=_mock_transport())
+    assert "Old uncited candidate" in {h.title for h in res.overlooked}
+
+
+# --- Europe PMC returns escaped markup ---------------------------------------
+
+
+def test_markup_entities_in_a_title_are_decoded(tmp_path):
+    """Real hits arrived as `CTV&lt;sub&gt;boost&lt;/sub&gt;` and were rendered
+    verbatim into the report."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/citations" in url:
+            return httpx.Response(200, json={"citationList": {"citation": []}})
+        q = request.url.params.get("query", "")
+        if q.startswith('DOI:"') or q.startswith('TITLE:"'):
+            return httpx.Response(200, json={"resultList": {"result": [{
+                "id": "33333333", "source": "MED", "doi": "10.1000/PAPER",
+                "title": PAPER_TITLE, "pubYear": "2020",
+            }]}})
+        return httpx.Response(200, json={"resultList": {"result": [
+            _epmc_result("Improving CTV&lt;sub&gt;boost&lt;/sub&gt; delineation",
+                         2018, doi="10.1000/esc"),
+        ]}})
+
+    res = scout_case(_case(tmp_path), transport=httpx.MockTransport(handler))
+    titles = " ".join(h.title for h in res.overlooked)
+    assert "&lt;" not in titles, titles
+    assert "CTV<sub>boost</sub>" in titles
+
+
+def test_the_same_year_register_reaches_all_three_report_formats(tmp_path):
+    """A register the reader of one format cannot see is a register that does
+    not exist for them — the same rule the disclosure parity test enforces."""
+    from papertrace.models import RunResults, ScoutHit, ScoutResults
+    from papertrace.report import write_reports
+
+    scout = ScoutResults(
+        paper_title="A paper", paper_year=2026, date="2026-09-04",
+        # no apostrophe: the HTML looks autoescape their interpolations, so a
+        # literal assertion on the rendered page must not straddle an escape
+        same_year=[ScoutHit(title="A neighbour from the same publication year", year=2026,
+                            doi="10.1000/sy", via="search", journal="Eur J Radiol")],
+    )
+    out = tmp_path / "out"
+    write_reports(RunResults(manuscript="m.pdf"), None, out, png=False, scout=scout)
+
+    for name in ("report.md", "report_editor.html", "report_terminal.html"):
+        body = (out / name).read_text()
+        assert "A neighbour from the same publication year" in body, f"missing from {name}"
+        assert "same year" in body.lower(), f"unlabelled in {name}"
+
+
+# --- is the record behind the DOI this paper? --------------------------------
+#
+# `run` reads the DOI off page 1 and hands it to `scout`, and `_resolve_paper`
+# records `via="doi"` whenever a DOI is supplied — so the "wrong paper? pass
+# --doi" warning, which fires only on `via="title"`, stopped firing exactly when
+# the DOI became a guess. The provenance is not recoverable inside `scout`, and
+# it is the wrong question anyway: the answer is to check the record.
+
+
+def _other_paper_transport():
+    """Europe PMC answers the DOI query with a different paper entirely."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        q = request.url.params.get("query", "")
+        if q.startswith('DOI:"'):
+            return httpx.Response(200, json={"resultList": {"result": [{
+                "id": "77777777", "source": "MED", "doi": "10.1000/OTHER",
+                "title": "Maternal urinary fluoride and child neurobehavior at age three",
+                "pubYear": "2017",
+            }]}})
+        return httpx.Response(200, json={"resultList": {"result": []}})
+
+    return httpx.MockTransport(handler)
+
+
+def test_a_doi_resolving_to_another_paper_is_refused(tmp_path):
+    """A funder, data-availability or erratum DOI on page 1 anchors the whole
+    scan to somebody else's paper, and both registers then describe that paper.
+    The registers are the finding, so they must not be built from a record this
+    tool can see is not the paper."""
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1000/other", transport=_other_paper_transport())
+
+    assert res.paper_identity == "mismatch"
+    assert res.newer == [] and res.overlooked == [] and res.same_year == []
+    assert "not this paper" in res.error
+    assert "Maternal urinary fluoride" in res.error
+
+
+def test_a_confirmed_paper_scans_as_before(tmp_path):
+    """The check must not cost the scan its point."""
+    case = _case(tmp_path)
+    res = scout_case(case, doi="10.1000/paper", transport=_mock_transport())
+
+    assert res.paper_identity == "confirmed"
+    assert res.resolved_via == "doi"
+    assert res.newer, "the registers still get built"
+
+
+def test_an_identity_too_thin_to_check_is_disclosed_not_assumed(tmp_path):
+    """Same tri-state as everywhere else: a first page whose opening block is a
+    journal banner leaves too little to compare, and that is not a mismatch."""
+    case = _case(tmp_path)
+    smap_path = case / "ingest" / "manuscript" / "source_map.json"
+    smap = SourceMap.from_json(smap_path)
+    smap.blocks[0].text = "RESEARCH ARTICLE"          # the measured real shape
+    smap.blocks[1].text = "Short prose."
+    smap.to_json(smap_path)
+
+    res = scout_case(case, doi="10.1000/paper", transport=_mock_transport())
+    assert res.paper_identity == "unverified"
+    assert res.newer, "an unknown identity does not discard a usable scan"
+
+
+def test_scout_results_round_trip_the_identity(tmp_path):
+    """New field, so: schema vocabulary plus a round trip. An older scout.json
+    loads with `""` — not recorded, never "confirmed"."""
+    import json
+
+    res = ScoutResults(paper_title="X", paper_identity="mismatch")
+    p = tmp_path / "scout.json"
+    res.to_json(p)
+    assert ScoutResults.from_json(p).paper_identity == "mismatch"
+
+    p.write_text(json.dumps({"paper": {"title": "X"}, "newer": [], "overlooked": []}))
+    assert ScoutResults.from_json(p).paper_identity == ""

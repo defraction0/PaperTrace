@@ -1,11 +1,15 @@
 """Scout the literature around a paper — what its reference list doesn't know.
 
-Two registers, both candidates for the user's judgement, never accusations:
+Three registers, all candidates for the user's judgement, never accusations:
 
 - ``newer``      — appeared after the paper: articles that cite it, plus later
                    keyword hits. What the paper could not have known.
-- ``overlooked`` — existed by the paper's year but is absent from its
+- ``overlooked`` — in print *before* the paper's year and absent from its
                    reference list. What it could have cited.
+- ``same_year``  — the paper's own year. Split out because it answers neither
+                   question: it may have appeared after submission, so it is
+                   not a citation the authors owed, and it did not come after,
+                   so it is not literature published since.
 
 Search-based (Europe PMC) and therefore incomplete by construction — absence
 from these lists proves nothing. Network failures soft-fail: the error is
@@ -15,12 +19,20 @@ recorded in ``scout.json`` and the pipeline continues.
 from __future__ import annotations
 
 import datetime
+import html
 import re
 from pathlib import Path
 
 import httpx
 
-from .models import RefManifest, ScoutHit, ScoutResults, SourceMap
+from .models import (
+    RefManifest,
+    ScoutHit,
+    ScoutResults,
+    SourceMap,
+    paper_title,
+    titles_match,
+)
 from .refs import UA
 
 EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest"
@@ -31,6 +43,13 @@ _STOPWORDS = {
     "the", "and", "for", "with", "from", "into", "using", "based", "toward",
     "towards", "study", "analysis", "review", "novel", "between", "among",
     "their", "this", "that", "after", "before", "during", "versus",
+    # verbs and framing nouns that state what a paper CLAIMS, not what it is
+    # about. `improves` matched a stroke abstract shouting "IMPROVES" at a
+    # pancreatic-cancer paper, which is how this list grew.
+    "improve", "improves", "improved", "improving", "improvement",
+    "increase", "increases", "increased", "reduce", "reduces", "reduced",
+    "enhance", "enhances", "enhanced", "enables", "enabling",
+    "assessment", "evaluation", "comparison", "investigation",
 }
 
 
@@ -64,13 +83,35 @@ def _norm_title(title: str) -> str:
 
 
 def _keywords(title: str, n: int = 4) -> list[str]:
+    """The n most specific-looking words of a title, for the neighbour search.
+
+    Ranked by length, not by position. Taking the first n searched the opening
+    of the title and never reached its subject: "Image registration improves
+    inter-reader agreement ... in CT assessment of pancreas adenocarcinoma"
+    produced `image AND registration AND improves AND inter-reader`, so the
+    query described a method and omitted the disease entirely.
+
+    Length is a proxy for topical specificity and nothing more — `adenocarcinoma`
+    over `image`. It is a heuristic, but it is one rule rather than a word list
+    that has to grow with every title style. The stop list only holds words that
+    carry no topic in any paper; guessing at more is how a filter starts
+    dropping real subject terms.
+    """
     words = re.findall(r"[A-Za-z][A-Za-z\-]{3,}", title.lower())
-    return [w for w in words if w not in _STOPWORDS][:n]
+    seen: dict[str, int] = {}
+    for i, w in enumerate(words):
+        if w not in _STOPWORDS and w not in seen:
+            seen[w] = i
+    ranked = sorted(seen, key=lambda w: (-len(w), seen[w]))
+    return ranked[:n]
 
 
 def _hit(d: dict, via: str) -> ScoutHit:
+    # Europe PMC escapes the markup its titles carry, so `CTV<sub>boost</sub>`
+    # arrives as `CTV&lt;sub&gt;boost&lt;/sub&gt;` and was rendered verbatim
+    # into the report. Decoded once, here, where every hit is built.
     return ScoutHit(
-        title=" ".join((d.get("title") or "").split()).rstrip("."),
+        title=" ".join(html.unescape(d.get("title") or "").split()).rstrip("."),
         year=_year(d.get("pubYear")),
         doi=(d.get("doi") or "").lower(),
         via=via,
@@ -150,19 +191,15 @@ def _resolve_paper(client: httpx.Client, doi: str | None, title: str) -> dict | 
 
 
 def _title_from_case(case: Path) -> str:
-    """Best-effort paper title from the ingest output — the first substantial
-    section header, else the first substantial text block. `--doi` overrides."""
+    """The paper's title from the ingest output on disk. `--doi` overrides.
+
+    The rule itself lives in `models.paper_title`, because `refs` needs the same
+    title to ask whether a Crossref record is this paper.
+    """
     smap_path = case / "ingest" / "manuscript" / "source_map.json"
     if not smap_path.exists():
         return ""
-    smap = SourceMap.from_json(smap_path)
-    for b in smap.blocks:
-        if b.type == "sectionheader" and len(b.text.strip()) >= 15:
-            return " ".join(b.text.split())[:220]
-    for b in smap.blocks:
-        if b.type == "text" and len(b.text.strip()) >= 25:
-            return " ".join(b.text.split())[:220]
-    return ""
+    return paper_title(SourceMap.from_json(smap_path))
 
 
 # ---------------------------------------------------------------------------
@@ -189,15 +226,50 @@ def scout_case(
         with _client(email, transport) as client:
             paper = _resolve_paper(client, doi, _title_from_case(case))
             if paper is None:
-                res.error = (
-                    "paper not identified in Europe PMC — pass --doi to pin it "
-                    "(title heuristics can miss)"
-                )
+                # Which failure this was decides what the reader should do, and
+                # the two are not the same fact. Telling an operator who just
+                # passed --doi to pass --doi sent them to verify by hand what
+                # the tool already knew.
+                if doi:
+                    res.paper_doi = doi  # so the artifact shows what was tried
+                    res.error = (
+                        f"Europe PMC returned no record for DOI {doi}, so this paper is "
+                        "not indexed there — usual for an in-press or pre-proof article. "
+                        "Both registers below are empty for want of a starting point, "
+                        "which is absence of data, not a clean literature search"
+                    )
+                else:
+                    res.error = (
+                        "paper not identified in Europe PMC — pass --doi to pin it "
+                        "(title heuristics can miss)"
+                    )
                 return res
             res.paper_title = paper["title"]
             res.paper_doi = paper["doi"]
             res.paper_year = paper["year"]
             res.resolved_via = paper["via"]
+
+            # Is the record this paper? `resolved_via == "doi"` used to stand in
+            # for "identified reliably", and it stopped meaning that when `run`
+            # began reading the DOI off page 1 — a funder, data-availability or
+            # erratum DOI resolves to somebody else's paper, and both registers
+            # would then describe that paper while the artifact said `doi`.
+            own_title = _title_from_case(case)
+            identity = titles_match(own_title, paper["title"])
+            res.paper_identity = (
+                "confirmed" if identity else "mismatch" if identity is False else "unverified"
+            )
+            if identity is False:
+                # The registers ARE the finding, so they are not built from a
+                # record this tool can see is not the paper. Empty-and-disclosed,
+                # like every other unreadable source here.
+                res.error = (
+                    f"the DOI {doi} resolves to \u201c{paper['title']}\u201d, which is "
+                    "not this paper — nothing was scanned, because both registers would "
+                    "have described that paper instead. Check the DOI on the paper's "
+                    "first page, or pass the right one with --doi"
+                )
+                return res
 
             self_keys = {k for k in (paper["doi"], _norm_title(paper["title"])) if k}
             seen: set[str] = set()
@@ -225,13 +297,20 @@ def scout_case(
                         continue  # undatable → can't be placed honestly
                     if res.paper_year and h.year > res.paper_year:
                         res.newer.append(h)
-                    elif not _probably_cited(h, cited_dois, cited_slugs):
+                    elif _probably_cited(h, cited_dois, cited_slugs):
+                        continue
+                    elif res.paper_year and h.year == res.paper_year:
+                        # its own year is neither "since" nor "should have
+                        # known" — see ScoutResults for why it gets a register
+                        res.same_year.append(h)
+                    else:
                         res.overlooked.append(h)
 
-            res.newer.sort(key=lambda h: (-(h.year or 0), h.title))
-            res.overlooked.sort(key=lambda h: (-(h.year or 0), h.title))
+            for reg in (res.newer, res.overlooked, res.same_year):
+                reg.sort(key=lambda h: (-(h.year or 0), h.title))
             res.newer = res.newer[:NEWER_CAP]
             res.overlooked = res.overlooked[:OVERLOOKED_CAP]
+            res.same_year = res.same_year[:OVERLOOKED_CAP]
     except httpx.HTTPError as e:
         res.error = f"network: {type(e).__name__} — scan incomplete"
     return res

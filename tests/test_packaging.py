@@ -297,3 +297,29 @@ def test_wheel_target_unchanged():
         return False
 
     assert not _mentions_evals(WHEEL), f"wheel target mentions evals: {WHEEL}"
+
+
+# ---------------------------------------------------------------------------
+# the layout backend is part of the tool, not an upgrade to it
+# ---------------------------------------------------------------------------
+
+
+def test_docling_is_a_base_dependency():
+    """Cited sources are judged on their own text, and the evidence for a
+    subgroup claim is usually a table row — read flat, the row is gone. So the
+    layout backend cannot be optional: `pip install papertrace` must be able to
+    read a table in a cited source."""
+    names = [d.split(">")[0].split("[")[0].strip() for d in PYPROJECT["project"]["dependencies"]]
+    assert "docling" in names, "docling must be a base dependency, not an extra"
+
+
+def test_the_docling_and_full_extras_still_resolve():
+    """`pip install 'papertrace[docling]'` and `[full]` appear throughout the
+    0.4.x docs and in other people's notes. Deleting the extras would turn
+    those into an install error, so they stay as aliases — `[docling]` empty
+    because it is now redundant, `[full]` keeping only playwright."""
+    extras = PYPROJECT["project"]["optional-dependencies"]
+    assert "docling" in extras and extras["docling"] == []
+    full = [d.split(">")[0].strip() for d in extras["full"]]
+    assert "playwright" in full
+    assert "docling" not in full, "docling in [full] would install it twice over"

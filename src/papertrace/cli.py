@@ -12,12 +12,14 @@ import datetime
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import typer
 from rich.console import Console
 from rich.prompt import Prompt
 
+from . import __version__
 from .models import ClaimResult, RefManifest, RunResults, manuscript_fingerprint
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich", invoke_without_command=True)
@@ -112,7 +114,8 @@ def _stage_case(case: Path | None) -> Path:
     hint = (
         "  audits in this folder: " + ", ".join(f"[cyan]-c {n}[/cyan]" for n in found[:8])
         if found
-        else "  no case folder found here — `papertrace run <paper.pdf>` makes one."
+        else "  no case folder found in the current directory — "
+        "`papertrace run <paper.pdf>` makes one."
     )
     console.print(f"[red]which audit? this step needs [bold]-c <case folder>[/bold].[/red]\n{hint}")
     raise typer.Exit(2)
@@ -134,6 +137,19 @@ def _case_conflict(case: Path, manuscript: Path) -> tuple[str | None, str]:
     # a legacy manifest genuinely holds no better information than the name
     same = previous.manuscript == manuscript.name
     return (None if same else previous.manuscript), "name"
+
+
+def _manuscript_slot_owner(out: Path) -> Path | None:
+    """The case folder whose manuscript slot `out` is, or None.
+
+    `<case>/ingest/manuscript` is the one output path that stands for the
+    audited paper itself. Recognised by shape rather than by flag, so `--out`
+    cannot walk in behind `-c`'s back.
+    """
+    out = Path(out)
+    if out.name != "manuscript" or out.parent.name != "ingest":
+        return None
+    return out.parent.parent
 
 
 def _guard_case(case: Path, manuscript: Path) -> str:
@@ -161,8 +177,9 @@ def _guard_case(case: Path, manuscript: Path) -> str:
         # uninformed and less usable, and `refs` re-ingests to make it true
         console.print(
             "[yellow]⚠ this case folder predates content hashing, so its identity is "
-            "unverified — only the file name was compared. Re-reading the paper from "
-            "scratch so the manifest and its hash describe the same file.[/yellow]"
+            "unverified — only the file name was compared, and two different papers "
+            "are routinely both called the same thing. The paper is re-read from "
+            "scratch rather than trusted from cache.[/yellow]"
         )
     return basis
 
@@ -260,9 +277,10 @@ def _provenance_line(converter: str) -> str:
     """Which backend read the manuscript, and how the sources were read.
 
     Both halves matter. The manuscript's backend decides whether tables and
-    figures exist at all. The sources are ingested flat-text *always* and on
-    purpose (`check.py` passes `backend="pymupdf"`), which no reader can infer
-    from a line that names docling — so it is said rather than assumed.
+    figures exist at all, and the cited sources are now read with the *same*
+    backend — so the one name covers both, which is exactly why it has to say
+    so. This line used to promise the opposite ("sources are always read as
+    flat text"), and a stale reassurance is worse than none.
     """
     flat = converter.startswith("pymupdf")
     manuscript = (
@@ -272,8 +290,8 @@ def _provenance_line(converter: str) -> str:
     )
     return (
         f"  read with: {manuscript}\n"
-        f"  [dim]cited sources are always read as flat text — text anchors are what "
-        f"verdicts and crops need[/dim]"
+        f"  [dim]cited sources are read with the same backend — the report names any "
+        f"that fell back to flat text[/dim]"
     )
 
 
@@ -299,8 +317,27 @@ def _email(cli_value: str | None) -> str:
     return email
 
 
+def _version(value: bool) -> None:
+    """Print the installed version and stop.
+
+    Read from `papertrace.__version__`, which `docs/RELEASING.md` names as the
+    version's one home — a literal here would drift at the next release and
+    answer confidently wrong, which is the failure this codebase exists to
+    refuse.
+    """
+    if value:
+        console.print(f"papertrace {__version__}")
+        raise typer.Exit(0)
+
+
 @app.callback()
-def _root(ctx: typer.Context) -> None:
+def _root(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        None, "--version", "-V", callback=_version, is_eager=True,
+        help="Print the installed version and exit",
+    ),
+) -> None:
     """Fact-check a paper's citations against the actual cited sources.
 
     New here? Run [bold]papertrace[/bold] with no arguments and answer the
@@ -330,8 +367,19 @@ def start() -> None:
 
 
 @app.command(rich_help_panel="Utilities")
-def init(case: Path = typer.Argument(Path("case"), help="Case folder to create")) -> None:
+def init(
+    case: Path = typer.Argument(None, help="Case folder to create (default: ./case)"),
+    manuscript: Path = typer.Option(
+        None, "--for", exists=True,
+        help="Name the folder the way `run`/`refs` would for this paper, so a plain "
+        "follow-up run finds it on its own instead of leaving ./case/ orphaned",
+    ),
+) -> None:
     """Create a case folder skeleton (gitignored by design — keep manuscripts local)."""
+    # an explicit folder name always wins; --for only fills in what an
+    # unnamed default would otherwise have to guess
+    if case is None:
+        case = default_case(manuscript) if manuscript else Path("case")
     _open_case(case)
     for sub in ("sources", "form", "ingest", "out/evidence"):
         (case / sub).mkdir(parents=True, exist_ok=True)
@@ -339,28 +387,46 @@ def init(case: Path = typer.Argument(Path("case"), help="Case folder to create")
     console.print(f"case folder ready: [cyan]{case}/[/cyan]")
     console.print("  put reference PDFs you already have into [cyan]sources/[/cyan]")
     console.print("  put your questions or form-field screenshots into [cyan]form/[/cyan]")
-    # `run` and `refs` name their own folder after the paper, so a hand-made one
-    # is only used if it is passed - saying so here beats orphaned sources/
-    console.print(f"  [dim]hand this folder to every step: [cyan]-c {case}[/cyan][/dim]")
+    if manuscript:
+        console.print(
+            f"  [dim]papertrace run {manuscript} will find this folder automatically[/dim]"
+        )
+    else:
+        # `run` and `refs` name their own folder after the paper, so a hand-made
+        # one is only used if it is passed - saying so here beats orphaned sources/
+        console.print(f"  [dim]hand this folder to every step: [cyan]-c {case}[/cyan][/dim]")
 
 
-@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
-def ingest(
-    pdf: Path = typer.Argument(..., exists=True, help="PDF to convert"),
-    out: Path = typer.Option(None, "--out", "-o", help="Output dir (default <case>/ingest/<stem>)"),
-    case: Path = typer.Option(
-        None, "--case", "-c",
-        help="Case folder; writes <case>/ingest/<stem>. Ignored when --out is given",
-    ),
-    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+def _ingest_pipeline(
+    *,
+    pdf: Path,
+    out: Path | None = None,
+    case: Path | None = None,
+    backend: str = "auto",
 ) -> None:
-    """PDF → clean.md + annotated.md + source_map.json (page + bbox provenance)."""
+    """PDF → clean.md + annotated.md + source_map.json (page + bbox provenance).
+
+    Keyword-only and plain-default on purpose: `ingest()` below is a Typer
+    command, and Typer's declared defaults are `OptionInfo` objects rather than
+    the values the help screen shows — calling it directly (as `run()` and the
+    tests do) with a shifted or missing argument used to take that sentinel as
+    the value. This function is what they actually call; `ingest()` is a thin
+    CLI adapter over it.
+    """
     from .ingest import ingest_pdf
 
     # -c means the same thing here as in every other subcommand; `papertrace
     # ingest -c foo` used to fail with "No such option: -c" while its
     # neighbours all took it. --out stays authoritative and unchanged.
     out = out or (case or default_case(pdf)) / "ingest" / pdf.stem
+    # the guard is about the manuscript SLOT, not the folder. A cited source
+    # ingested into <case>/ingest/<slug> is not the audited paper and must stay
+    # ingestable — `check` does exactly that. But <case>/ingest/manuscript is
+    # what `refs` filled and `coverage_audit` reads, so a different paper
+    # landing there is the mixing `_guard_case` exists to prevent, reached by a
+    # command that never asked it.
+    if (owner := _manuscript_slot_owner(out)) is not None:
+        _guard_case(owner, pdf)
     smap = ingest_pdf(pdf, out, backend=backend)
     by_type = {t: sum(1 for b in smap.blocks if b.type == t) for t in
                ("sectionheader", "text", "table", "picture", "list")}
@@ -389,25 +455,84 @@ def ingest(
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
-def refs(
-    manuscript: Path = typer.Argument(..., exists=True),
+def ingest(
+    pdf: Path = typer.Argument(..., exists=True, help="PDF to convert"),
+    out: Path = typer.Option(None, "--out", "-o", help="Output dir (default <case>/ingest/<stem>)"),
     case: Path = typer.Option(
         None, "--case", "-c",
-        help="Case folder (default: a folder named after the paper, beside the paper)",
+        help="Case folder; writes <case>/ingest/<stem>. Ignored when --out is given",
     ),
-    provided: Path = typer.Option(
-        None, "--provided",
-        help="Folder of reference PDFs you already have; files match by name "
-             "<firstauthor>-<year>.pdf (e.g. pyrros-2023.pdf)",
-    ),
-    email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
-    parse_only: bool = typer.Option(False, "--parse-only", help="List references, no network"),
     backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
 ) -> None:
-    """Parse the References section, then retrieve open-access copies with an honest manifest."""
+    """PDF → clean.md + annotated.md + source_map.json (page + bbox provenance)."""
+    _ingest_pipeline(pdf=pdf, out=out, case=case, backend=backend)
+
+
+def _body_citation_labels(smap, citation_labels, is_references_heading) -> set[str]:
+    """The `[N]` markers the manuscript's body actually cites.
+
+    Read from the source map and stopped at the bibliography, matching what
+    `coverage_audit` counts — the two readings are only worth comparing because
+    they come from one rule in `models.py`. Passed its two functions rather than
+    importing them, so this stays a pure function of the map.
+
+    Table blocks are skipped: a 95% CI column like `[51, 77]` matches the same
+    bracket-and-comma syntax as a citation group `[7,8]`, and a table's own
+    numbers are never citations.
+    """
+    body: list[str] = []
+    for b in smap.blocks:
+        if is_references_heading(b.type, b.text):
+            break
+        if b.type != "table":
+            body.append(b.text)
+    return citation_labels("\n".join(body))
+
+
+def _detected_doi(manuscript: Path) -> str | None:
+    """The DOI printed on the paper's own front matter, or None.
+
+    Imported lazily: `wizard` pulls in pymupdf and the interactive stack, and
+    `refs` should not pay for that to look up one string.
+    """
+    from .wizard import detect_doi
+
+    return detect_doi(manuscript)
+
+
+def _refs_pipeline(
+    *,
+    manuscript: Path,
+    case: Path | None = None,
+    provided: Path | None = None,
+    email: str | None = None,
+    parse_only: bool = False,
+    backend: str = "auto",
+    doi: str | None = None,
+    supplement: list[Path] | None = None,
+) -> None:
+    """Parse the References section, then retrieve open-access copies with an honest manifest.
+
+    Keyword-only and plain-default on purpose: `refs()` below is a Typer
+    command, and Typer's declared defaults are `OptionInfo` objects rather than
+    the values the help screen shows — calling it directly (as `run()` and the
+    tests do) with a shifted or omitted argument used to take that sentinel as
+    the value. This function is what they actually call; `refs()` is a thin CLI
+    adapter over it.
+    """
     from .ingest import ingest_pdf, references_span
-    from .models import SourceMap
-    from .refs import parse_references, resolve_all
+    from .models import SourceMap, citation_labels, is_references_heading, paper_title
+    from .refs import (
+        _client,
+        crossref_deposit,
+        deposit_corroborates,
+        deposit_is_this_paper,
+        manuscript_supplements,
+        parse_references,
+        reconcile,
+        resolve_all,
+        unused_provided,
+    )
 
     case = _resolve_case(case, manuscript)  # named after the paper unless -c said otherwise
     # identity first — the cached source map below is a manuscript-derived
@@ -422,6 +547,13 @@ def refs(
     # to share this one's name, so re-read the paper we were actually given
     if cached.exists() and basis != "name":
         smap = SourceMap.from_json(cached)
+    elif parse_only:
+        # --parse-only is an inspection: "List references, no network". It must
+        # not rewrite the case's manuscript slot and then return before the
+        # manifest catches up, which left the source map describing one paper
+        # and the manifest another. Read the paper somewhere disposable instead.
+        with tempfile.TemporaryDirectory() as scratch:
+            smap = ingest_pdf(manuscript, Path(scratch), backend=backend)
     else:
         smap = ingest_pdf(manuscript, ingest_dir, backend=backend)
 
@@ -431,6 +563,95 @@ def refs(
         console.print("[red]No numbered references found — is there a References section?[/red]")
         raise typer.Exit(1)
     console.print(f"parsed [bold]{len(entries)}[/bold] numbered references")
+
+    # The manuscript's own [N] markers arbitrate. Free, offline, and the only
+    # one of the three readings that is definitionally right about what the
+    # paper cites — the parse and the deposit are both candidates measured
+    # against it. --parse-only stays offline, so it gets no second candidate.
+    body_labels = _body_citation_labels(smap, citation_labels, is_references_heading)
+    crossref_entries, absent, identity_note = None, "", ""
+    if not parse_only:
+        doi = doi or _detected_doi(manuscript)
+        with _client() as client:
+            deposit = crossref_deposit(client, doi, _email(email))
+        absent = deposit.absent
+        # Is the record behind that DOI this paper at all? The DOI is typed by
+        # hand or scraped off page 1, and this is the one retrieval route in
+        # `refs` that can replace the *entire* reference list — every other one
+        # has been title-checked since a wrong download was judged as a source.
+        identity = (
+            deposit_is_this_paper(paper_title(smap), deposit.title)
+            if deposit.entries else None
+        )
+        if deposit.unrenderable:
+            # the tool's shortfall, named as the tool's. A list this one could
+            # only half read must not be mapped onto [1]..[n] — that would drop
+            # the rest silently — but the reader is told whose limitation it is
+            absent = (
+                f"{deposit.publisher or 'the publisher'} deposited {deposit.deposited} "
+                f"references and this tool could only read {len(deposit.entries)} of "
+                "them, so the deposit was set aside rather than used to renumber the "
+                "list. The gap is this tool's, not the publisher's"
+            )
+        elif identity is False:
+            absent = (
+                f"the DOI used ({doi}) belongs to a Crossref record titled "
+                f"\u201c{deposit.title}\u201d, which is not this paper, so the "
+                f"{len(deposit.entries)} references it deposited were not used to "
+                "renumber this list"
+            )
+            console.print(
+                f"[yellow]⚠ the DOI {doi} resolves to a different paper[/yellow] — "
+                f"“{deposit.title[:70]}”. Its reference list was not used."
+            )
+        elif deposit.entries:
+            crossref_entries = deposit.entries
+            # A title this tool cannot read is common — an article-type banner
+            # where the title should be, and no metadata behind it. The paper's
+            # own bibliography settles it instead: two readings of one reference
+            # list agree about the works, and no other paper's list does.
+            corroboration = (
+                deposit_corroborates(deposit.entries, entries) if identity is None else None
+            )
+            # a verified identity is worth as much as the count match it licenses,
+            # and an unverifiable one must not be read as either
+            if identity:
+                identity_note = f". The DOI {doi} was confirmed as this paper by title"
+            elif corroboration and corroboration.confirms:
+                identity_note = (
+                    f". The paper's title could not be compared with the record's, but "
+                    f"{corroboration.found} of the {corroboration.total} references the "
+                    "DOI's record deposited appear in the list printed in this paper, "
+                    "which another paper's bibliography would not"
+                )
+            else:
+                identity_note = (
+                    f". The DOI {doi} could not be confirmed as this paper — too little "
+                    "title to compare, and "
+                    + ("too few references to compare either"
+                       if corroboration and corroboration.too_few
+                       else f"only {corroboration.found} of the {corroboration.total} "
+                            "references it deposited appear in this paper's own list"
+                            if corroboration else "no deposit to compare")
+                    + ", so the identity behind this list is unverified"
+                )
+            console.print(
+                f"crossref: [bold]{len(deposit.entries)}[/bold] references deposited by "
+                f"{deposit.publisher or 'the publisher'} "
+                f"[dim](DOI {doi}; identity "
+                f"{'confirmed by title' if identity else 'confirmed by bibliography' if corroboration and corroboration.confirms else 'unverified'})[/dim]"
+            )
+
+    entries, rec = reconcile(body_labels, crossref_entries, entries, crossref_absent=absent)
+    if rec.source == "crossref" and identity_note:
+        # the note is what a reader of `refs_manifest.json` gets, so a list taken
+        # from a publisher's record says on whose authority it was adopted
+        rec.note += identity_note
+    if rec.verified:
+        console.print(f"[green]✓ numbering confirmed[/green] — {rec.note}")
+    else:
+        console.print(f"[yellow]⚠ numbering unconfirmed[/yellow] — {rec.note}")
+
     if references_resumed:
         # a list interrupted by another section used to end at the interruption:
         # 9 of 15 references parsed, and the last 6 never retrieved or checked
@@ -462,14 +683,39 @@ def refs(
         mark = STATUS_MARK.get(e.status, "?")
         via = f" via {e.resolver}" if e.resolver else ""
         console.print(f"  {mark} [{e.num:>3}] {e.status:<10}{via:<16} {e.reason}")
+        if e.supplements:
+            n = len(e.supplements)
+            names = ", ".join(s.slug for s in e.supplements)
+            console.print(
+                f"        [cyan]+ {n} supplement{'' if n == 1 else 's'}[/cyan] "
+                f"[dim]{names} — judged as separate documents[/dim]"
+            )
 
-    resolve_all(entries, dest, _email(email), provided_dir=provided, progress=tick)
+    # the paper's own supplements claim their slugs FIRST, then `resolve_all`
+    # works around them: one namespace, because both end up as `ingest/<slug>/`
+    # and `sources_resolved/<slug>.pdf`
+    taken: set[str] = {e.slug for e in entries if e.slug}
+    own = manuscript_supplements(list(supplement or []), taken)
+    for s in own:
+        console.print(f"  [cyan]+[/cyan] {Path(s.pdf_path).name} → this paper's own supplement")
+
+    resolve_all(entries, dest, _email(email), provided_dir=provided, progress=tick, taken=taken)
+
+    # a file the user deliberately put in the folder that then did nothing is the
+    # quietest possible failure — they would go on believing it had been read
+    for pdf, why in unused_provided(entries, provided):
+        console.print(f"  [yellow]⚠ {pdf.name} set aside — {why}[/yellow]")
 
     manifest = RefManifest(
         manuscript=manuscript.name,
         entries=entries,
+        manuscript_supplements=own,
         manuscript_sha256=manuscript_fingerprint(manuscript),  # identity, not the name
         references_resumed=references_resumed,
+        reference_source=rec.source,
+        numbering_verified=rec.verified,
+        numbering_note=rec.note,
+        unverified_from=rec.unverified_from,
     )
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)
@@ -480,6 +726,38 @@ def refs(
     )
     console.print("[dim]not obtainable is a recorded result — those claims will be reported as"
                   " unverifiable, never guessed.[/dim]")
+
+
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
+def refs(
+    manuscript: Path = typer.Argument(..., exists=True),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder (default: a folder named after the paper, beside the paper)",
+    ),
+    provided: Path = typer.Option(
+        None, "--provided",
+        help="Folder of reference PDFs you already have; files match by name "
+             "<firstauthor>-<year>.pdf (e.g. pyrros-2023.pdf)",
+    ),
+    email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
+    parse_only: bool = typer.Option(False, "--parse-only", help="List references, no network"),
+    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+    doi: str = typer.Option(
+        None, "--doi",
+        help="DOI of the paper itself — fetches the publisher's own reference list to "
+             "check the parsed numbering against (default: the DOI printed on page 1)",
+    ),
+    supplement: list[Path] = typer.Option(
+        None, "--supplement", exists=True,
+        help="Supplementary material for THIS paper (repeatable). A cited work's "
+             "supplement needs no flag — drop it in the sources folder named after "
+             "the reference, e.g. pyrros-2023-supplement.pdf",
+    ),
+) -> None:
+    """Parse the References section, then retrieve open-access copies with an honest manifest."""
+    _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
+                    parse_only=parse_only, backend=backend, doi=doi, supplement=supplement)
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
@@ -507,10 +785,18 @@ def scout(
     if res.error:
         console.print(f"[yellow]⚠ scout incomplete: {res.error}[/yellow]")
     if res.paper_title:
+        # `via doi` stopped meaning "identified reliably" when `run` began
+        # reading the DOI off page 1, so the warning turns on the identity check
+        # rather than on which query happened to answer
+        caveat = {
+            "confirmed": "",
+            "unverified": " — identity unverified, check this is your paper",
+            "mismatch": " — NOT this paper",
+        }.get(res.paper_identity, " — wrong paper? pass --doi")
         console.print(
             f"paper: [bold]{res.paper_title[:80]}[/bold] ({res.paper_year or '?'})"
-            f" · [dim]identified via {res.resolved_via}"
-            f"{' — wrong paper? pass --doi' if res.resolved_via == 'title' else ''}[/dim]"
+            f" · [dim]identified via {res.resolved_via}, identity "
+            f"{res.paper_identity or 'not recorded'}{caveat}[/dim]"
         )
     console.print(f"[green]▸[/green] published since: [bold]{len(res.newer)}[/bold] candidates")
     for h in res.newer[:5]:
@@ -524,21 +810,36 @@ def scout(
         console.print(f"    [cyan]{h.year or '?'}[/cyan] {h.title[:76]}")
     if len(res.overlooked) > 5:
         console.print(f"    [dim]… {len(res.overlooked) - 5} more in scout.json[/dim]")
+    if res.same_year:
+        console.print(
+            f"[yellow]▸[/yellow] same year as the paper: [bold]{len(res.same_year)}[/bold]"
+            " candidates [dim]— may postdate submission, so neither newer nor owed[/dim]"
+        )
+        for h in res.same_year[:5]:
+            console.print(f"    [cyan]{h.year or '?'}[/cyan] {h.title[:76]}")
+        if len(res.same_year) > 5:
+            console.print(f"    [dim]… {len(res.same_year) - 5} more in scout.json[/dim]")
     console.print(
         "[dim]search-based — absence from these lists proves nothing; presence is a"
         " candidate for your judgement, not an accusation.[/dim]"
     )
 
 
-@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
-def check(
-    case: Path = typer.Option(
-        None, "--case", "-c",
-        help="Case folder holding the audit (required unless ./case exists)",
-    ),
-    model: str = typer.Option(None, "--model", help="Model override for claude -p"),
+def _check_pipeline(
+    *,
+    case: Path | None = None,
+    model: str | None = None,
+    backend: str = "auto",
 ) -> None:
-    """Extract citation-backed claims and judge each against its cited source (claude -p)."""
+    """`check`'s work, with ordinary Python defaults.
+
+    Keyword-only for the reason the other pipeline functions are: an omitted
+    argument to the Typer command is an `OptionInfo`, not the default `--help`
+    shows. `backend` is what made this split necessary — it reaches
+    `ingest_pdf`, which refuses an unrecognised value loudly, so a sentinel
+    arriving here would fail an audit at the judging step after the retrieval
+    work was already done.
+    """
     from .check import Truncations, check_claims, claude_available, extract_claims
 
     case = _stage_case(case)
@@ -572,7 +873,7 @@ def check(
     with console.status("reading claims against their cited pages…"):
         check_claims(
             claims, manifest, case, model, progress=tick, on_error=fail,
-            truncations=truncations,
+            truncations=truncations, backend=backend,
         )
 
     from .check import coverage_audit
@@ -581,6 +882,14 @@ def check(
     coverage = coverage_audit(case, claims)
     smap_path = case / "ingest" / "manuscript" / "source_map.json"
     converter = SourceMap.from_json(smap_path).converter if smap_path.exists() else "pymupdf"
+    # how each cited source was read, recorded per slug. The manuscript's
+    # converter above says nothing about them, and until this was carried the
+    # markdown and HTML reports said nothing about them either.
+    source_converters: dict[str, str] = {}
+    for doc in manifest.documents():
+        sp = case / "ingest" / doc.slug / "source_map.json"
+        if sp.exists() and doc.slug not in source_converters:
+            source_converters[doc.slug] = SourceMap.from_json(sp).converter
 
     from .check import last_model
 
@@ -591,6 +900,7 @@ def check(
         refs_total=len(manifest.entries),
         refs_available=len(manifest.retrieved),
         converter=converter,
+        source_converters=source_converters,
         claims=claims,
         uncited=uncited,
         coverage=coverage,
@@ -623,6 +933,45 @@ def check(
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
+def check(
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder holding the audit (required unless ./case exists)",
+    ),
+    model: str = typer.Option(None, "--model", help="Model override for claude -p"),
+    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+) -> None:
+    """Extract citation-backed claims and judge each against its cited source (claude -p)."""
+    _check_pipeline(case=case, model=model, backend=backend)
+
+
+def _downgrade_unshowable(anchor) -> bool:
+    """A substantive verdict with no evidence image stops being a verdict.
+
+    `check` validates page and block against the source map, which is what
+    normally guarantees a crop. This is the same rule enforced against reality:
+    the PDF can be absent from `sources_resolved/`, and a source map can
+    disagree with the PDF it was built from. `not_addressed` is exempt — it
+    never claimed a passage, so it owes no picture.
+
+    Returns True when it downgraded, so the caller can say so on the console.
+    """
+    substantive = ("supported", "partial", "contradicted")
+    if anchor.verdict not in substantive or anchor.evidence_image:
+        return False
+    anchor.verdict = "unchecked"
+    anchor.note = (
+        "no evidence image could be produced for the passage this verdict rests on "
+        f"(page {anchor.source_page}"
+        + (f", {anchor.source_block}" if anchor.source_block else "")
+        + ") — the source PDF is missing from sources_resolved/, or its pages no "
+        "longer match the source map it was ingested from. Re-run "
+        "`papertrace refs` and `papertrace check` for this source."
+    )
+    return True
+
+
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def highlight(
     case: Path = typer.Option(
         None, "--case", "-c",
@@ -646,11 +995,14 @@ def highlight(
         for a in c.judgements or [c]:
             img = crop_for_anchor(a, c.id, case / "sources_resolved", case / "ingest", out_dir)
             if img is None and a.source_slug:
-                # sources provided by the user live elsewhere — try the manifest path
+                # sources provided by the user live elsewhere — try the manifest
+                # path. `document()` and not a scan of `entries`: a supplement is
+                # never in `entries`, so scanning them left every supplement
+                # verdict with no crop and no reason given.
                 manifest = RefManifest.from_json(case / "refs_manifest.json")
-                entry = next((e for e in manifest.entries if e.slug == a.source_slug), None)
-                if entry and entry.pdf_path:
-                    src = Path(entry.pdf_path)
+                doc = manifest.document(a.source_slug)
+                if doc and doc.pdf_path:
+                    src = Path(doc.pdf_path)
                     tmp = case / "sources_resolved" / f"{a.source_slug}.pdf"
                     if src.exists() and not tmp.exists():
                         tmp.parent.mkdir(parents=True, exist_ok=True)
@@ -662,12 +1014,22 @@ def highlight(
             if img:
                 a.evidence_image = str(Path(img).relative_to(case / "out"))
                 done += 1
-                if a.anchor_located:
+                # `is True` / `is False` / `is None` — never truthiness. None
+                # means nothing was ever searched for, and calling that "not
+                # found on the page" asserts a search that did not happen.
+                if a.anchor_located is True:
                     console.print(f"  [green]✓[/green] {tag}: {a.evidence_image}")
+                elif a.anchor_located is False:
+                    console.print(
+                        f"  [yellow]○ {tag}: {a.evidence_image} — the anchor phrase "
+                        f"was searched for and not found on the page; crop written "
+                        f"unboxed[/yellow]"
+                    )
                 else:
                     console.print(
                         f"  [yellow]○ {tag}: {a.evidence_image} — no anchor phrase "
-                        f"found on the page; crop written unboxed[/yellow]"
+                        f"was offered, so none was searched for; crop written "
+                        f"unboxed[/yellow]"
                     )
             elif a.source_slug and a.source_page:
                 # a page the source does not have is not the same as a page that
@@ -679,11 +1041,58 @@ def highlight(
                         f"but {a.source_slug} has {n} — no page to read, so no crop "
                         f"and no anchor claim[/yellow]"
                     )
+            if _downgrade_unshowable(a):
+                console.print(
+                    f"  [yellow]⚠ {tag}: {a.note}[/yellow]"
+                )
         # the claim-level evidence_image must follow the deciding judgement, or
         # the crop shown beside the headline belongs to a different source
         c.apply_headline()
     results.to_json(case / "out" / "results.json")
     console.print(f"[bold]{done}[/bold] evidence crops written")
+
+
+def _report_pipeline(
+    *,
+    case: Path | None = None,
+    png: bool = False,
+    formats: list[str] | None = None,
+) -> None:
+    """`report`'s work, with ordinary Python defaults.
+
+    Keyword-only so `run()` and the tests calling it directly cannot silently
+    receive a Typer `OptionInfo` in place of a value — the flaw that has shipped
+    twice here already. `formats` is the parameter that made this split
+    necessary: `run()` used to call `report(case=..., png=...)`, so a new
+    option would have arrived as a truthy sentinel and rendered whatever that
+    happened to mean.
+    """
+    from .models import ScoutResults
+    from .report import FORMATS, write_reports
+
+    # a mistyped flag is user error, answered before the results are loaded so
+    # it cannot half-write a report folder — and with a line, not a traceback
+    if bad := [f for f in (formats or []) if f not in FORMATS]:
+        console.print(
+            f"[red]unknown --format {', '.join(bad)}[/red] — "
+            f"expected any of {', '.join(f'[cyan]{f}[/cyan]' for f in FORMATS)}"
+        )
+        raise typer.Exit(2)
+
+    case = _stage_case(case)
+    results = RunResults.from_json(case / "out" / "results.json")
+    manifest_path = case / "refs_manifest.json"
+    manifest = RefManifest.from_json(manifest_path) if manifest_path.exists() else None
+    scout_path = case / "out" / "scout.json"
+    scout_res = ScoutResults.from_json(scout_path) if scout_path.exists() else None
+    # how the paper was read, restated where it can be seen. `ingest` says this
+    # once, minutes earlier and above a wall of model-loading logs; a standalone
+    # `papertrace report` never said it at all.
+    console.print(_provenance_line(results.converter))
+    paths = write_reports(results, manifest, case / "out", png=png, scout=scout_res,
+                          formats=formats or ["md"])
+    for p in paths:
+        console.print(f"  [green]✓[/green] {p.relative_to(case)}")
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
@@ -696,24 +1105,13 @@ def report(
         False, "--png/--no-png",
         help="Also export PNG images of the report looks (one-time: playwright install chromium)",
     ),
+    formats: list[str] = typer.Option(
+        None, "--format", "-f",
+        help="Extra looks to render beside report.md: editor | terminal (repeatable)",
+    ),
 ) -> None:
-    """Render report.md + the editor/terminal looks from results.json."""
-    from .models import ScoutResults
-    from .report import write_reports
-
-    case = _stage_case(case)
-    results = RunResults.from_json(case / "out" / "results.json")
-    manifest_path = case / "refs_manifest.json"
-    manifest = RefManifest.from_json(manifest_path) if manifest_path.exists() else None
-    scout_path = case / "out" / "scout.json"
-    scout_res = ScoutResults.from_json(scout_path) if scout_path.exists() else None
-    # how the paper was read, restated where it can be seen. `ingest` says this
-    # once, minutes earlier and above a wall of model-loading logs; a standalone
-    # `papertrace report` never said it at all.
-    console.print(_provenance_line(results.converter))
-    paths = write_reports(results, manifest, case / "out", png=png, scout=scout_res)
-    for p in paths:
-        console.print(f"  [green]✓[/green] {p.relative_to(case)}")
+    """Render report.md — and the editor/terminal looks on request — from results.json."""
+    _report_pipeline(case=case, png=png, formats=formats)
 
 
 @app.command(rich_help_panel="Start here")
@@ -739,7 +1137,21 @@ def run(
         True, "--scout/--no-scout",
         help="Also scan Europe PMC for newer + uncited literature",
     ),
-    doi: str = typer.Option(None, "--doi", help="DOI of the paper itself, for the scout step"),
+    doi: str = typer.Option(
+        None, "--doi",
+        help="DOI of the paper itself — checks the reference numbering against the "
+             "publisher's deposited list, and pins the scout's literature search",
+    ),
+    formats: list[str] = typer.Option(
+        None, "--format", "-f",
+        help="Extra looks to render beside report.md: editor | terminal (repeatable)",
+    ),
+    supplement: list[Path] = typer.Option(
+        None, "--supplement", exists=True,
+        help="Supplementary material for THIS paper (repeatable). A cited work's "
+             "supplement needs no flag — drop it in the sources folder named after "
+             "the reference, e.g. pyrros-2023-supplement.pdf",
+    ),
 ) -> None:
     """Full pipeline: ingest → refs → scout → check → highlight → report."""
     console.print(BANNER)
@@ -749,22 +1161,33 @@ def run(
     case = _resolve_case(case, manuscript)
     _guard_case(case, manuscript)  # one case folder per paper — never mix two audits
     _open_case(case)
-    # KEYWORDS ONLY, deliberately. These stages are Typer commands called as
-    # plain functions, and Typer's declared defaults are OptionInfo objects
-    # rather than the values they display. A positional call therefore breaks
-    # silently the moment any stage gains a parameter: the arguments shift, the
-    # shifted-in default is an OptionInfo that equals none of the expected
-    # strings, and the stage takes a fallback branch. Adding `--case` to
-    # `ingest` did exactly that — the backend became an OptionInfo and every
-    # audit ingested as flat text while claiming layout-aware ingest.
-    ingest(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
-    refs(manuscript=manuscript, case=case, provided=provided, email=email,
-         parse_only=False, backend=backend)
+    # KEYWORDS ONLY, deliberately, for every stage below still called through its
+    # Typer command. Typer's declared defaults are OptionInfo objects rather than
+    # the values they display, so a positional call breaks silently the moment a
+    # stage gains a parameter: the arguments shift, the shifted-in default is an
+    # OptionInfo that equals none of the expected strings, and the stage takes a
+    # fallback branch. Adding `--case` to `ingest` did exactly that — the backend
+    # became an OptionInfo and every audit ingested as flat text while claiming
+    # layout-aware ingest. `_ingest_pipeline`, `_refs_pipeline`,
+    # `_check_pipeline` and `_report_pipeline` below are split out of their
+    # Typer commands specifically to make that mistake impossible rather than
+    # just avoided by convention — `scout` and `highlight` are still
+    # convention-only, and each should be split the next time it gains a
+    # parameter.
+    _ingest_pipeline(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
+    # detected once, here, and handed to both consumers. `refs` detects for
+    # itself when called alone, so forwarding the raw option left the scout
+    # guessing by title on the very runs where the paper's DOI was sitting on
+    # page 1 — and a wrong title match anchors the whole scan to another paper
+    # without erroring.
+    doi = doi or _detected_doi(manuscript)
+    _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
+                    parse_only=False, backend=backend, doi=doi, supplement=supplement)
     if with_scout:
         scout(case=case, doi=doi, email=email)
-    check(case=case, model=model)
+    _check_pipeline(case=case, model=model, backend=backend)
     highlight(case=case, claim=None)
-    report(case=case, png=png)
+    _report_pipeline(case=case, png=png, formats=formats)
     # a four-minute run should not need scrolling to learn how the paper was
     # read, so the backend rides on the last line too
     smap_path = case / "ingest" / "manuscript" / "source_map.json"

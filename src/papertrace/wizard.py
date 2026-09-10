@@ -25,9 +25,9 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
 from . import config
-from .check import _LABEL_GROUP, ASK_ATTEMPTS, _expand_label_group, claude_available
+from .check import ASK_ATTEMPTS, claude_available
 from .ingest import _docling_available as docling_available
-from .models import is_references_heading
+from .models import _LABEL_GROUP, _expand_label_group, is_references_heading
 from .refs import DOI_RE
 
 console = Console()
@@ -107,12 +107,13 @@ def preflight() -> list[Check]:
             fatal=False,
             label="layout-aware ingest",
             detail=(
-                "docling found — tables and figures are read as structure"
+                "docling found — the paper and its cited sources are read as structure"
                 if docling_available()
-                else "flat-text ingest only: tables are linearized and figures "
-                "are invisible, and every report says so"
+                else "docling is a required dependency but did not import, so this "
+                "install is broken: flat-text ingest only, tables linearized and "
+                "figures invisible, in the sources as well as the paper"
             ),
-            fix="pip install 'papertrace[docling]'",
+            fix="reinstall: pip install --force-reinstall papertrace",
         ),
         Check(
             key="png",
@@ -224,6 +225,27 @@ def workload(pdf: Path) -> dict:
     }
 
 
+def supplement_workload(provided_dir: Path | None, supplement: list[Path]) -> int:
+    """How many extra judging calls the supplements on hand will cost.
+
+    One per supplementary *document*, not per claim: `check_claims` groups every
+    claim for a document into a single call. An upper bound like the rest of
+    this estimate — a supplement whose reference no claim cites is never opened,
+    and one whose article turns out to be unavailable is set aside entirely.
+
+    Counted from the folder rather than from the manifest because this runs
+    before `refs` does. The alternative is to state a price that leaves the
+    supplements out, and check.py's own comment on ASK_ATTEMPTS is the rule
+    here: a cost ceiling that gets exceeded is a false promise about money.
+    """
+    from .refs import _SUPPLEMENT_RE
+
+    n = len(supplement or [])
+    if provided_dir and provided_dir.is_dir():
+        n += sum(1 for p in provided_dir.glob("*.pdf") if _SUPPLEMENT_RE.search(p.stem))
+    return n
+
+
 def equivalent_command(
     *,
     manuscript: Path,
@@ -233,6 +255,7 @@ def equivalent_command(
     with_scout: bool,
     provided: Path | None,
     email: str | None = None,
+    supplement: list[Path] | None = None,
 ) -> str:
     """The `papertrace run` line this session amounts to.
 
@@ -246,6 +269,8 @@ def equivalent_command(
     argv = ["papertrace", "run", str(manuscript), "-c", str(case)]
     if provided:
         argv += ["--provided", str(provided)]
+    for s in supplement or []:
+        argv += ["--supplement", str(s)]
     if doi:
         argv += ["--doi", doi]
     if email:
@@ -280,6 +305,74 @@ def _ask_paper() -> Path:
             console.print(f"  [red]{path.suffix or 'that'} is not a PDF or DOCX.[/red]")
             continue
         return path
+
+
+def _ask_sources(case: Path) -> Path | None:
+    """The folder of reference PDFs the user already holds.
+
+    Never asked before this: `run_wizard` passed `provided=None`, so the guided
+    path could not reach a flag the CLI has had all along, and a first-time user
+    following the wizard silently got open-access retrieval only.
+    """
+    default = case / "sources"
+    # the folder's contents answer this better than any fixed default can: a
+    # user whose PDFs are already sitting there should not skip them by pressing
+    # return, and a user with none should not be handed a path prompt at all
+    waiting = default.is_dir() and any(default.glob("*.pdf"))
+    if not Confirm.ask(
+        "\n[bold]Do you have any of the cited PDFs already?[/bold]"
+        + (f"\n  [dim]{default} looks like it holds some.[/dim]" if waiting else ""),
+        default=waiting,
+    ):
+        return None
+    console.print(
+        "  [dim]Point me at a folder. Names do not have to be tidy — each PDF is "
+        "identified\n  by its own title or DOI, so a publisher download works as is. A "
+        "file named for\n  its reference ([cyan]pyrros-2023.pdf[/cyan]) is taken at your "
+        "word instead.\n  Supplementary material for a cited paper goes in the same "
+        "folder; each is\n  judged as its own document, and anything I cannot place I "
+        "will name.[/dim]"
+    )
+    raw = Prompt.ask("  folder", default=str(default)).strip()
+    if not raw:
+        return None
+    path = clean_path(raw)
+    if not path.is_dir():
+        console.print(f"  [dim]No folder at {path} — continuing without one.[/dim]")
+        return None
+    n = len(list(path.glob("*.pdf")))
+    console.print(f"  [green]✓[/green] {n} PDF{'' if n == 1 else 's'} in {path}")
+    return path
+
+
+def _ask_supplements() -> list[Path]:
+    """Supplementary material belonging to the paper under audit.
+
+    Asked separately because the sources folder is matched against *reference*
+    slugs, and the audited paper has none for a filename to key on.
+    """
+    if not Confirm.ask(
+        "\n[bold]Does this paper have supplementary material of its own?[/bold]",
+        default=False,
+    ):
+        return []
+    console.print(
+        "  [dim]A claim that points at Table S3 or eFigure 2 is read against these; "
+        "with\n  nothing supplied it is reported as not retrieved, never guessed.[/dim]"
+    )
+    out: list[Path] = []
+    while True:
+        raw = Prompt.ask(
+            "  path (blank when done)" if out else "  path (blank to skip)", default=""
+        ).strip()
+        if not raw:
+            return out
+        path = clean_path(raw)
+        if not path.is_file():
+            console.print(f"  [red]No file at {path}[/red] — try again, or drag it in.")
+            continue
+        out.append(path)
+        console.print(f"  [green]✓[/green] {path.name}")
 
 
 def _ask_email() -> str:
@@ -376,6 +469,8 @@ def run_wizard() -> None:
         Prompt.ask("\n[bold]Where should I keep this audit?[/bold]\n  folder",
                    default=_suggest_case(paper))
     )
+    provided = _ask_sources(case)
+    supplement = _ask_supplements()
     doi, with_scout = _ask_doi(paper)
     email = _ask_email()
 
@@ -383,14 +478,26 @@ def run_wizard() -> None:
     if png_available:
         png = Confirm.ask("\n  Also export PNG pictures of the reports?", default=False)
 
+    # each supplement is one more document, so one more judging call. Folded in
+    # here rather than in `workload()` because it is not known until the sources
+    # folder has been named, which happens after the paper is measured.
+    extra = supplement_workload(provided, supplement)
+    calls = w["model_calls"] + extra
+    calls_max = w["model_calls_max"] + ASK_ATTEMPTS * extra
+
     console.print("\n[bold]Ready.[/bold]")
     console.print(
         "  This makes live requests to Crossref, Unpaywall"
         + (" and Europe PMC" if with_scout else "")
-        + f", and about [bold]{w['model_calls']}[/bold] model calls through `claude -p`"
-        + (f" — up to [bold]{w['model_calls_max']}[/bold] if calls have to be retried."
-           if w["model_calls_max"] != w["model_calls"] else ".")
+        + f", and about [bold]{calls}[/bold] model calls through `claude -p`"
+        + (f" — up to [bold]{calls_max}[/bold] if calls have to be retried."
+           if calls_max != calls else ".")
     )
+    if extra:
+        console.print(
+            f"  [dim]{_n(extra, 'supplementary document')} included — each is judged "
+            "separately from the article it accompanies.[/dim]"
+        )
     if w["multi"]:
         console.print(
             f"  [dim]{w['multi']} of {w['places']} citation places cite several sources, "
@@ -403,15 +510,21 @@ def run_wizard() -> None:
 
     cmd = equivalent_command(
         manuscript=paper, case=case, doi=doi, png=png,
-        with_scout=with_scout, provided=None, email=email,
+        with_scout=with_scout, provided=provided, email=email, supplement=supplement,
     )
     console.print(f"\n[dim]Same thing as one command, for next time:[/dim]\n  [cyan]{cmd}[/cyan]\n")
 
     from .cli import run as run_cmd
 
+    # every parameter `run` declares is named here, including the ones taking
+    # their default: `run` is a Typer command, so an omitted argument arrives as
+    # an OptionInfo sentinel rather than the default the help screen shows.
+    # `formats=None` means report.md alone — the PNG answer above already pulls
+    # in the HTML looks when it needs them, since a PNG is a shot of one.
     run_cmd(
-        manuscript=paper, case=case, provided=None, email=email, model=None,
-        png=png, backend="auto", with_scout=with_scout, doi=doi,
+        manuscript=paper, case=case, provided=provided, email=email, model=None,
+        png=png, backend="auto", with_scout=with_scout, doi=doi, formats=None,
+        supplement=supplement,
     )
 
 
@@ -422,5 +535,6 @@ __all__ = [
     "equivalent_command",
     "preflight",
     "run_wizard",
+    "supplement_workload",
     "workload",
 ]

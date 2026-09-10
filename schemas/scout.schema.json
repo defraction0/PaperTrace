@@ -3,43 +3,114 @@
   "title": "scout",
   "description": "Post-publication literature scan around one paper. Search-based and incomplete by construction: absence from the registers proves nothing; a non-empty error means the scan soft-failed.",
   "type": "object",
-  "required": ["paper", "newer", "overlooked"],
+  "required": [
+    "paper",
+    "newer",
+    "overlooked"
+  ],
   "properties": {
     "paper": {
       "type": "object",
       "properties": {
-        "title": { "type": "string" },
-        "doi": { "type": "string" },
-        "year": { "type": ["integer", "null"] },
-        "resolved_via": { "type": "string", "enum": ["doi", "title", ""] }
+        "title": {
+          "type": "string"
+        },
+        "doi": {
+          "type": "string"
+        },
+        "year": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "identity": {
+          "type": "string",
+          "description": "did anyone establish that the record found is this paper? Compared on the record's title and the paper's own. `resolved_via` cannot answer it: a DOI read off page 1 also resolves `via: doi`. Absent on scout.json written before the check; absent and \"\" mean not recorded, never confirmed.",
+          "enum": [
+            "confirmed",
+            "unverified",
+            "mismatch",
+            ""
+          ]
+        },
+        "resolved_via": {
+          "type": "string",
+          "enum": [
+            "doi",
+            "title",
+            ""
+          ]
+        }
       }
     },
-    "query": { "type": "string" },
-    "date": { "type": "string" },
+    "query": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string"
+    },
     "counts": {
       "type": "object",
       "properties": {
-        "newer": { "type": "integer" },
-        "overlooked": { "type": "integer" }
+        "newer": {
+          "type": "integer"
+        },
+        "overlooked": {
+          "type": "integer"
+        },
+        "same_year": {
+          "type": "integer"
+        }
       }
     },
-    "newer": { "$ref": "#/$defs/hits" },
-    "overlooked": { "$ref": "#/$defs/hits" },
-    "error": { "type": "string" }
+    "newer": {
+      "$ref": "#/$defs/hits"
+    },
+    "overlooked": {
+      "$ref": "#/$defs/hits"
+    },
+    "error": {
+      "type": "string"
+    },
+    "same_year": {
+      "$ref": "#/$defs/hits"
+    }
   },
   "$defs": {
     "hits": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["title"],
+        "required": [
+          "title"
+        ],
         "properties": {
-          "title": { "type": "string" },
-          "year": { "type": ["integer", "null"] },
-          "doi": { "type": "string" },
-          "via": { "type": "string", "enum": ["citing", "search"] },
-          "journal": { "type": "string" },
-          "authors": { "type": "string" }
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "doi": {
+            "type": "string"
+          },
+          "via": {
+            "type": "string",
+            "enum": [
+              "citing",
+              "search"
+            ]
+          },
+          "journal": {
+            "type": "string"
+          },
+          "authors": {
+            "type": "string"
+          }
         }
       }
     }

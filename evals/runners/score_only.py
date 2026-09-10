@@ -73,25 +73,34 @@ def score_one(gold_path: Path, results_path: Path, out_root: Path,
 def score_agreement(run_dirs: list[Path], out_root: Path) -> Path:
     """Compare repeated runs of the SAME gold set.
 
-    The version this replaces filtered to the intersection with a bare
+    The version this replaces filtered to the complete-case set with a bare
     `if len(v) == n`, silently dropping every case one run never produced —
     defeating `agreement.py`'s own documented contract, in the direction that
-    flatters the model. Both bounds are now reported and the omissions named.
+    flatters the model. Both populations are now reported and the omissions
+    named, with only the penalized one called a bound.
     """
-    labels, set_ids, per_run = [], [], []
+    labels, set_ids, provenances, per_run = [], [], [], []
     for d in run_dirs:
         record = json.loads((Path(d) / "eval.json").read_text())
         labels.append(Path(d).name)
         set_ids.append((record.get("gold") or {}).get("set_id"))
+        provenances.append(record.get("provenance") or {})
+        # `per_case` carries excluded rows on purpose — they are rendered in
+        # their own section. They must not therefore vote here: a case that was
+        # never scoreable cannot be evidence of the model disagreeing with
+        # itself, and an unresolved gold label is the harness's gap, not the
+        # model's instability. `.get("eligible", True)` so a record written
+        # before the flag existed still counts every row, as it used to.
         per_run.append({row["case_id"]: row.get("predicted") or UNMATCHED
-                        for row in record["per_case"]})
+                        for row in record["per_case"]
+                        if row.get("eligible", True)})
 
     n = len(run_dirs)
     all_cases = sorted({c for run in per_run for c in run})
     # a case missing from a run is ABSENT — the harness never asked — which is
     # a different fact from UNMATCHED, where it asked and the aligner failed
     vectors = {c: [run.get(c, ABSENT) for run in per_run] for c in all_cases}
-    result = agreement_report(vectors, n, labels, set_ids)
+    result = agreement_report(vectors, n, labels, set_ids, provenances)
 
     out = out_root / f"agg__{_stamp()}"
     out.mkdir(parents=True, exist_ok=True)
@@ -105,26 +114,29 @@ def _fmt(value: float | None, spec: str) -> str:
 
 
 def _agreement_md(r: dict) -> str:
+    names = {"complete_case": "complete-case", "penalized": "penalized"}
     lines = [
         f"# Repeated-run agreement — {r['set_id'] or 'unknown set'}", "",
         f"{r['runs']} runs: {', '.join(f'`{x}`' for x in r['run_labels'])}.", "",
-        "Two bounds, because neither is the answer alone. The intersection",
-        "drops cases the harness never asked some run about; the union charges",
-        "those gaps to the model.", "",
+        "Two populations, because neither answers the question alone. The",
+        "complete-case figure covers only the cases every run answered; the",
+        "penalized figure covers every case seen in any run and scores the gaps",
+        "as disagreement. Only the penalized figure is a bound.", "",
         "| | Cases | Modal agreement | Unanimous | Fleiss' kappa |",
         "|---|---|---|---|---|",
     ]
-    for key in ("intersection", "union"):
+    for key, label in names.items():
         b = r[key]
+        qualifier = f" ({b['bound']} bound)" if b["bound"] else " (not a bound)"
         lines.append(
-            f"| **{key} ({b['bound']} bound)** | {b['cases']} | "
+            f"| **{label}{qualifier}** | {b['cases']} | "
             f"{_fmt(b['modal_agreement'], '.2f')} | "
             f"{_fmt(b['unanimous_rate'], '.0%')} | "
             f"{_fmt(b['fleiss'].get('value'), '.2f')}"
             f" ({b['fleiss'].get('reason', b['fleiss'].get('note', ''))}) |"
         )
-    lines += ["", f"- *intersection* — {r['intersection']['bound_note']}",
-              f"- *union* — {r['union']['bound_note']}", ""]
+    lines += ["", f"- *complete-case* — {r['complete_case']['bound_note']}",
+              f"- *penalized* — {r['penalized']['bound_note']}", ""]
     if r["n_omitted"]:
         lines += ["## Cases the harness never asked about", "",
                   "Not model disagreement — an operator gap, named so it is not",

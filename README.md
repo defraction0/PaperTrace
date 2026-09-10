@@ -36,10 +36,12 @@ A missed citation is reported, not silently skipped.</b></p>
 > **See the result first — no install needed.** The demo report committed at
 > [`examples/demo/output/report.md`](examples/demo/output/report.md) audits a
 > fictional mini-review with planted citation errors and real, published
-> references: **2 supported · 2 contradicted · 1 not retrieved · 1 uncited
+> references: **1 supported · 2 contradicted · 1 not retrieved · 1 uncited
 > assertion** — the planted errors, and exactly them, *in that run*. Extraction
 > and judgement are model steps, so the committed report is an inspectable
-> artefact, not a guaranteed re-run.
+> artefact, not a guaranteed re-run: the same demo audited under 0.4.1 returned
+> *2* supported, because extraction split one sentence citing two references
+> into two claims instead of keeping it whole. Same defects found either way.
 
 Pick a paper that matters to you — the landmark your project builds on, the
 method paper you are about to adopt, your own published work. PaperTrace
@@ -58,44 +60,128 @@ went uncited?**
   distinctive words on the retrieved first page; a first page that is **empty
   or unreadable** (scanned, image-only) **passes** — unverifiable is not the
   same as wrong, so a scanned source is checked rather than silently discarded.
+- Judge the manuscript's **own sentence**, not a summary of it. Extraction
+  returns the verbatim sentence carrying each citation alongside a short
+  paraphrase, and the verbatim sentence is what the source is checked against —
+  because the population, the effect size, the confidence interval and the
+  hedging are exactly what decide whether a citation supports a statement, and
+  they are the first things a summary loses. The quote appears in the report
+  above each verdict, so you can see what was actually judged. Where extraction
+  returns no quote the paraphrase is judged instead, and the report shows that
+  is what happened.
 - Attempt to extract **every** citation-backed claim, then judge each against
-  the text of its cited source, with page-level provenance for every verdict.
+  the text of its cited source. Every `supported`, `partial` or `contradicted`
+  verdict carries a page **and** the source block it rests on, both checked
+  against that source's own ingest — a verdict naming a page or block the
+  source does not have is reported `⚠ not checked`, not published. `◌ does not
+  address the claim` carries no page by design: the source was read and says
+  nothing, so there is no passage to point at.
   Extraction is a model step, so it is an attempt, not a guarantee — which is
   why the coverage audit below exists.
 - Show the evidence: real page crops with the matched text boxed in red.
   Claude proposes the page, the block and verbatim anchor phrases; Python then
   finds those phrases in the PDF and draws the boxes — placed by text search,
-  never by hand, and never by the model. A crop whose anchor matched nothing
-  is shown unboxed and labelled as such.
+  never by hand, and never by the model. The crop region comes from the source
+  block the verdict names, so a crop whose anchor phrase matched nothing is
+  still shown — unboxed, and captioned as unboxed. Where no anchor phrase was
+  offered at all, the caption says that instead: "searched and not found" and
+  "never searched for" are different facts and are never merged.
 - Preserve unavailable sources as explicit gaps: a claim whose source
   couldn't be retrieved is `⊘ not retrieved` — recorded, never guessed.
+- **Check its own reference numbering before trusting it.** The citation label
+  is the join key between a claim and the source it is judged against, so a
+  list off by one produces a confident audit of the *wrong papers*. Two
+  independent readings are taken — the tool's parse of the printed list, and
+  the reference list the publisher deposited with Crossref (`refs --doi`,
+  defaulting to the DOI printed on page 1) — and the manuscript's own `[N]`
+  markers arbitrate between them. A reading is used only if it accounts for
+  exactly the labels the body cites. When neither does, the audit continues,
+  the report says the numbering is unconfirmed, and every verdict on a claim
+  citing a doubtful label carries that caveat beside it. Crossref is a second
+  reading, **not** an oracle. A deposit this tool can only partly read is set
+  aside rather than used to renumber a longer list, and the shortfall is
+  reported as the tool's own, not the publisher's. A deposit can also be
+  genuinely short — one record in this project's spread carries 2 references
+  for a paper citing about 40 — and nothing in the payload gives that away,
+  because Crossref's own count field counts what was deposited. The
+  manuscript's labels are what catch it. And the DOI is checked against the
+  paper before its record is trusted: a deposit whose Crossref record is titled
+  as some other paper is set aside. The paper's title is taken from the PDF's
+  own metadata where it states one, since the largest heading on a first page
+  is often the article-type banner rather than the title. Where the titles
+  cannot be compared, the paper's own bibliography settles it — the works the
+  publisher deposited are looked for in the reference list printed in the
+  paper — and where neither can, the list is used and the manifest says the
+  identity behind it was never confirmed.
 - Report every citation **occurrence** — each bracketed marker at its own place
   in the text — that no extracted claim reached, so a second sentence citing an
   already-checked reference is not silently counted as covered. It also
   registers assertions carrying no citation at all. **Detection** is mechanical
   and prompt-independent (a regex over bracketed numeric labels): if extraction
-  skipped a citation, it shows up here. **Attribution** of a claim to a specific
-  occurrence is a text match the tool can get wrong; an attribution it cannot
-  make is reported as *uncertain* and counted as **not** covered, never as
-  covered.
+  skipped a citation, it shows up here. **Attribution** of a claim to a
+  specific occurrence is a *lookup*, not a guess: extraction is handed that
+  same mechanical inventory of citation places and returns which ones each
+  claim came from. It is still a model step and can name the wrong place, but
+  it is no longer a text comparison between a paraphrase and a sentence. A
+  claim that names no place is reported as *uncertain* and counted as **not**
+  covered, never as covered.
 - Judge a co-cited claim against **every** cited source it could retrieve, one
   model call each, and show the passage behind each verdict. Co-citation is an
   offer of support, so each source is checked on its own text: a claim citing
   four references gets four verdicts, four notes and four evidence crops, with a
   count beside it (*"4 cited sources checked: 2 fully support it; 1 partially
   supports it; 1 contradicts it"*). The claim's headline is the **most adverse**
-  verdict any of them gave, so one dissenting source is never averaged away.
-  A source that turns out to say nothing about the claim is `◌ does not address
+  verdict any of them gave, so one dissenting source is never averaged away —
+  and on a multi-source claim the headline says so on its own line
+  (*"❌ contradicted — most adverse of 4 cited sources"*), because a compound
+  sentence may legitimately draw different parts from different references, and
+  one citation conflicting is not the same finding as the statement being
+  wrong. A source that turns out to say nothing about the claim is `◌ does not address
   the claim` — an inapt citation, distinct from a contradiction and from a
-  retrieval gap.
+  retrieval gap. It is deliberately **not ranked** among the three: while any
+  source actually spoke to the claim, that source decides the headline, and
+  `◌` becomes the headline only when no available source addressed the claim
+  at all. The per-source breakdown beside the headline is where an inapt
+  citation stays visible.
 - Disclose its ingest fidelity: every report — markdown, editor and terminal —
-  names the converter that read the **audited paper**, and a flat-text fallback
-  says so loudly. Cited sources are ingested separately (see *Tables and
-  figures are evidence too*).
+  names the converter that read the audited paper, and a flat-text fallback
+  says so loudly. The cited sources get the **same** backend, and any source
+  that was nonetheless read as flat text is named by slug in all three reports
+  — a verdict resting on a linearized table is weaker than one resting on the
+  table (see *Tables and figures are evidence too*).
+- **Identify a reference PDF from the file itself**, not from what it is
+  called. A folder of publisher-named downloads (`s41467-023-39631-x.pdf`,
+  `mmc1.pdf`) is matched by each file's own DOI, else by its own title against
+  the reference list. A file named for its reference is still taken at your
+  word first. Anything that cannot be placed — unrecognisable, or matching two
+  references equally — is listed with the reason rather than skipped.
+- Read **supplementary material** you supply, as its own document. A cited
+  reference may carry several — dropped in the sources folder named after the
+  reference — and the audited paper's own are named with `--supplement`. Each
+  gets its own model call, verdict, page anchor and evidence crop, and a claim's
+  headline is the most adverse across all of them, so a contradiction that lives
+  only in an appendix is still reported. A supplement never stands in for the
+  article: one whose article could not be obtained is named and set aside.
 - Keep the human responsible for interpretation — it prepares evidence and
   drafts; the conclusions are yours.
 
 **PaperTrace does not**
+
+- **Always** establish that a supplement belongs to the work it was attached
+  to. Where its own title or DOI names that work, it does; where only its
+  filename matched, nothing read it, and the audited paper's own are whatever
+  you passed to `--supplement`. That last case is the thinnest provenance
+  anything here carries, and all three reports name which files it applies to
+  rather than warning about every supplement equally.
+- **Guarantee** it can place every PDF you supply. Identification needs a
+  readable title or a DOI on the first page, so a scanned copy with no text
+  layer is unplaceable — and a title matching two references is refused rather
+  than guessed. Either way the file is listed with the reason, never skipped in
+  silence.
+- Count a citation that appears **only inside a supplement**. The coverage audit
+  reads the manuscript, so a reference cited nowhere but in supplementary
+  material is absent from the labels rather than reported as uncovered. Stated
+  in the report whenever supplements were read.
 
 - Bypass paywalls — what it can't get legally, it reports as not obtainable.
 - Treat model memory as evidence — verdicts come only from retrieved or
@@ -109,6 +195,18 @@ went uncited?**
   labels only — `[12]`, `[7,8]`, `[9-11]`. Author-year, parenthetical and
   bare-superscript styles are not audited, and the report says
   *"coverage not audited"* rather than quietly reporting zero gaps.
+  This is not a rare corner: superscript numerals lose their superscript when a
+  PDF is flattened to text, so `burnout.<sup>1</sup>` arrives as `burnout. 1`
+  and is indistinguishable from prose. Three of the seven papers in this
+  project's test spread — Wiley, AMA and one Elsevier journal — cite that way.
+  For those papers the numbering has no arbiter either, so the reference list
+  is reported as unconfirmed rather than presented as checked.
+- Count a mixed claim as mixed in the **totals**. The per-claim headline is
+  qualified and the per-source breakdown sits beside it, but the run's summary
+  counts (and `results.json`) tally each claim once, under its headline — so a
+  claim whose four sources split 2 support / 1 partial / 1 contradict appears in
+  the `contradicted` total and nowhere else. Read the totals as *"claims with at
+  least one contradicting source"*, not as *"claims that are wrong"*.
 - Read the source pages as images. In batch mode the model receives the cited
   source as extracted text with `page / block` provenance markers — the page
   picture is for you, in the evidence crop, not for the judge.
@@ -138,9 +236,13 @@ went uncited?**
 ### Guided — `papertrace`, and answer the questions
 
 ```bash
+git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
 pip install -e ".[full]"     # standard install — layout-aware ingest
 papertrace                   # asks for the paper, the DOI and your email
 ```
+
+*(PaperTrace is not on PyPI yet, so the clone is not optional — `pip install -e .`
+installs the checkout you are standing in.)*
 
 Nothing to memorise. It checks your setup first — so a missing `claude` CLI is
 a sentence before you type anything, not a traceback twenty minutes in — then
@@ -156,7 +258,7 @@ terminal — a pipe, a CI job — bare `papertrace` prints help instead of waiti
 on stdin.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, a DOI found on the first page offered for confirmation, a contact email it offers to remember — and finally the cost stated as up to 25 model calls before asking permission to start.">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, whether any cited PDFs are already to hand, whether the paper has supplementary material of its own, a DOI found on the first page offered for confirmation, a contact email it offers to remember — and finally the cost stated as a number of model calls before asking permission to start.">
 </p>
 
 ### Interactive — the `/review` skill (deepest mode)
@@ -169,7 +271,7 @@ claude                       # start Claude Code here
 ```
 
 *(First run of the layout backend downloads docling's models — ~500 MB, once.
-On a constrained machine, `pip install -e .` gives the light flat-text core.)*
+On a constrained machine, `--backend pymupdf` skips it and takes flat text.)*
 
 The interactive audit interviews you: the paper's PDF, any reference PDFs you
 already have — and, if you are using it for peer review, screenshots of your
@@ -180,6 +282,7 @@ and batching its questions.
 ### Batch — one command, scriptable
 
 ```bash
+git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
 pip install -e ".[full]"        # standard install (see matrix below)
 export PAPERTRACE_EMAIL="you@example.org"     # Unpaywall asks for a contact
 papertrace run paper.pdf --provided ./my_pdfs      # case folder: ./paper/ beside the PDF
@@ -189,58 +292,145 @@ Install options:
 
 | Command | What you get |
 |---|---|
-| `pip install -e ".[full]"` | ⭐ **standard install** — layout-aware ingest (real tables, figures, lists) + PNG rendering. Pulls torch; first run downloads docling's layout models (~500 MB, once) |
-| `pip install -e ".[docling]"` | layout-aware ingest only |
-| `pip install -e ".[png]"` | PNG report rendering only |
+| `pip install -e .` | ⭐ **standard install** — layout-aware ingest of the paper **and its cited sources** (real tables, figures, lists). **~1.4 GB installed** (torch 591 MB, opencv, transformers, scipy), plus a ~500 MB one-time download of docling's layout models on first run |
+| `pip install -e ".[png]"` | the above plus PNG rendering of the report looks |
 | `pip install -e ".[dev]"` | the test and lint tooling — `pytest`, `ruff`, `jsonschema`. This is what CI installs |
-| `pip install -e ".[dev,full]"` | everything: run audits **and** run the suite |
-| `pip install -e .` | minimal core — flat-text ingest. For CI and constrained machines; every report will carry a "tables linearized" warning |
+| `pip install -e ".[dev,png]"` | everything: run audits, export PNGs **and** run the suite |
 
-> **`[full]` does not include the test tooling.** The extras are independent:
-> `full` is user features, `dev` is `pytest` + `ruff`. Installing `[full]` and
-> then running `pytest` finds whatever `pytest` happens to be on your `PATH` —
-> usually a system one, with none of this project's dependencies — and fails
-> with `ModuleNotFoundError: No module named 'pymupdf'`. If you intend to run
-> the suite, install `".[dev,full]"` and invoke it as `python -m pytest`, which
-> fails loudly instead of silently using the wrong interpreter.
+Confirm what you got with `papertrace --version`.
 
-`--backend auto` (default) uses docling when installed and falls back to flat
-text otherwise — and the report always says which one ran, because a
-linearized table is a degradation worth disclosing.
+**As of 0.5.0 the layout backend is not optional.** It was an extra through
+0.4.x, and a plain `pip install papertrace` got flat-text ingest. It is now a
+base dependency, because the cited sources are read with it too: the evidence
+for a subgroup claim is usually a table row, and a linearized table has lost
+the row. Spending layout fidelity on the paper but not on the papers it is
+judged against had the asymmetry backwards.
 
-**`--provided` matches by filename**, so the name decides which file stands for
-a reference. Files must contain the reference's author and year (`pyrros-2023`
-matches `pyrros-2023.pdf` and `pyrros-et-al-2023-chest-radiographs.pdf`), and
-where several match, an exact `<author>-<year>.pdf` wins, else the shortest
-name. A filename that reads as supplemental material — `supplement`, `appendix`,
-`supporting information`, `ESM`, `online only` — is **not** used as the source,
-and if it is the only match the reference is left to the online resolver
-instead: a supplement is not the paper it accompanies. Rename it to the plain
-`<author>-<year>.pdf` if you do mean it to stand in. Provided files are
-title-checked like downloaded ones, but a mismatch is recorded in the manifest
-rather than refused — you named the file, so it is used and the doubt is
-disclosed.
+That is a real cost and it is stated rather than buried: a clean virtualenv
+measures **1.4 GB** after `pip install papertrace`, almost all of it torch and
+its dependencies. If that is unacceptable on your machine, `--backend pymupdf`
+still takes the flat path for both the paper and its sources, and every report
+names each source it read that way.
 
-Output in `case/out/`: `report.md` with inline evidence images, the same
-report as a dark **editor-window** page and as a **terminal-run** page
-(`report_editor.html`, `report_terminal.html`), plus machine-readable
+`[docling]` and `[full]` still resolve — `[docling]` is now empty and `[full]`
+is just `png` — so install commands written against 0.4.x do not break.
+
+> **`[png]` does not include the test tooling.** The extras are independent:
+> `dev` is `pytest` + `ruff`. Installing without it and then running `pytest`
+> finds whatever `pytest` happens to be on your `PATH` — usually a system one,
+> with none of this project's dependencies — and fails with
+> `ModuleNotFoundError: No module named 'pymupdf'`. If you intend to run the
+> suite, install `".[dev]"` and invoke it as `python -m pytest`, which fails
+> loudly instead of silently using the wrong interpreter.
+
+`--backend auto` (default) uses docling; `--backend pymupdf` chooses flat text
+deliberately, for speed or on a constrained machine. The report always says
+which one ran — for the paper, and by name for any cited source that was read
+flat — because a linearized table is a degradation worth disclosing.
+
+**`--provided` reads the PDFs, so their names do not have to be tidy.** Drop a
+folder in as it came off the publisher's site. Each unrecognised file is
+identified from **its own DOI**, and failing that from **its own title**
+compared against the reference list — so `s41467-023-39631-x.pdf`,
+`1-s2.0-S0140673623001234-main.pdf` and `mmc1.pdf` all find their reference
+without being renamed.
+
+Two rules keep that from guessing. A file whose title matches **more than one**
+reference is used for neither, and is named so you can rename it to choose — a
+corrigendum shares nearly every word with its original, and picking the better
+score there would judge a claim against the wrong paper with nothing able to
+notice. And a title too thin to tell papers apart is not a match at all.
+
+**A filename that names its reference still wins**, because that is your own
+assertion about the file: `pyrros-2023.pdf`, or anything containing the
+author and year (`pyrros-et-al-2023-chest-radiographs.pdf`); where several
+match, an exact `<author>-<year>.pdf` wins, else the shortest name. Such a file
+is title-checked like a downloaded one, but a mismatch is recorded rather than
+refused — you named it, so it is used and the doubt is disclosed. Content
+identification only fills the gap that leaves.
+
+**Nothing in the folder goes unremarked.** Every PDF that ends up attached to
+no reference is listed with the reason — unrecognisable, ambiguous, a spare
+copy of a paper already matched, or a supplement whose article is missing.
+Before this, an unmatched article PDF was skipped in silence, so a folder of
+publisher-named downloads produced an audit that looked entirely normal and
+used none of it.
+
+**Supplementary material is read, as its own document.** Drop
+`pyrros-2023-supplement.pdf` beside `pyrros-2023.pdf` in the same folder and it
+is judged separately: its own model call, its own verdict, its own page anchor
+and evidence crop. Several per reference is fine. A claim citing `[14]` is read
+against every document `[14]` has, and the claim's headline is the most adverse
+of them — so a contradiction that lives only in Table S2 is still reported.
+
+Publisher names work here too, and they are the common case: `MOESM1_ESM.pdf`,
+`mmc1.pdf` and `media-1.pdf` carry no hint of being supplements in their names
+at all, but their first page says so plainly, so that is where it is read from.
+
+Two rules hold this together. A supplement **only attaches to a reference that
+was actually obtained**; one whose article is missing is named and set aside,
+because there is nothing to judge it as part of. And the report says **how each
+supplement was attached**: by its own title or DOI naming that work — which
+establishes it belongs there — or by its filename alone, which nothing checked.
+The second is the thinnest provenance anything here carries, and it is named
+per file rather than as a blanket warning over both.
+
+```bash
+papertrace run paper.pdf --provided ./my_pdfs \
+    --supplement paper_si.pdf --supplement paper_appendix.pdf
+```
+
+A claim that points at the paper's own `Table S3` or `eFigure 2` is then read
+against those. With nothing supplied, such a claim is `not retrieved` and names
+the flag — the paper said where its evidence was and nobody opened it, which is
+a gap rather than an assertion made without a citation.
+
+Output in `<case>/out/` — where `<case>` defaults to a folder named after the
+paper, beside the paper (`paper.pdf` → `./paper/`), and `-c` chooses another.
+It holds `report.md` with inline evidence images, plus machine-readable
 `results.json` and `scout.json`. The retrieval manifest is written one level
-up, at `case/refs_manifest.json`. Want shareable PNG images of the report
-looks? Add `--png` (one-time setup: `playwright install chromium`).
+up, at `<case>/refs_manifest.json`.
+
+The same report also renders as a dark **editor-window** page and as a
+**terminal-run** page, on request: `--format editor`, `--format terminal`, or
+both (`-f` for short, repeatable). They are for sharing and for screenshots, so
+they are not written unless asked for — `report.md` is the record and is always
+written. Want shareable PNG images of those looks? Add `--png`, which renders
+the HTML it needs whether or not you asked for it (one-time setup:
+`playwright install chromium`).
 
 **`--doi` is the DOI of the paper you are auditing** — not of anything it
-cites. It is optional, and it feeds only the literature scout, which has to
-identify your paper in Europe PMC before it can look for work published since
-or work in the field you did not cite. Nothing else in the audit uses it: the
-verdicts, evidence crops and coverage figures are identical with or without.
+cites. It is optional, it defaults to the DOI printed on the paper's own first
+page, and it feeds two steps:
 
-- **Published paper** → pass it. Without it the scout falls back to matching by
-  title, and a *wrong* match is silent: the scan anchors to somebody else's
-  paper and the two registers describe that one instead. The report flags
-  `resolved_via: title`, but it does not error.
-- **Unpublished manuscript** → there is no DOI to pass, and the scout can never
-  identify it. Use `--no-scout` to skip the step rather than reading an empty
-  result as "nothing to find". The guided flow does this for you.
+- **The reference-numbering check** (`refs`, and so `run`). It fetches the
+  reference list the publisher deposited with Crossref, as a second reading to
+  measure the tool's own parse against. The record's own title is compared with
+  the paper's first, so a mistyped or mis-scraped DOI cannot substitute another
+  paper's bibliography; a comparison too thin to settle it leaves the list in
+  use and the identity disclosed as unconfirmed. Without a DOI there is only
+  one reading, and the manifest says the numbering is unconfirmed rather than
+  implying it was checked.
+- **The literature scout**, which has to identify your paper in Europe PMC
+  before it can look for work published since, or work in the field you did
+  not cite.
+
+Verdicts, evidence crops and coverage figures still come only from the
+retrieved sources — but *which* source a claim is judged against depends on the
+reference numbering, so a `--doi` that confirms the numbering can change the
+audit's answers.
+
+- **Published paper** → pass it, or let it be detected. Either way the record
+  the scout finds is checked against the paper's own title: a record that is
+  some other paper stops the scan and is reported, rather than anchoring both
+  registers to it, and a comparison too thin to settle leaves the scan in place
+  with the identity disclosed as unverified. `resolved_via` says which query
+  answered — `doi` or `title` — and, since a detected DOI answers `doi` too, it
+  is not the thing to read for reliability; `identity` is.
+- **Unpublished manuscript** → there is no DOI to pass. The scout can never
+  identify it, so use `--no-scout` to skip that step rather than reading an
+  empty result as "nothing to find"; the guided flow does this for you. The
+  numbering check has nothing to compare against either, and says so.
 
 **One case folder per paper.** `case` is only the default name — give each
 paper its own (`papertrace run zhang2025.pdf -c zhang2025`). Re-running the
@@ -248,7 +438,11 @@ same paper into its case is fine; pointing a *different* paper at a used
 case is refused, so two audits can never mix.
 
 Batch checking runs on headless Claude Code (`claude -p`) — it inherits your
-existing login, **no API key to configure**. It is the **only step that calls a
+existing login, **no API key to configure**. Each call runs with `--safe-mode`
+and no tool access, from a neutral working directory: the judge only ever
+reads the prompt it is given and returns a verdict, regardless of which
+project's `CLAUDE.md` or `.claude/` config happens to sit above the directory
+you ran `papertrace` from. It is the **only step that calls a
 model**; every other step is plain Python. Ingest, crops and reports are also
 **deterministic** — same input, same output. Retrieval and the scout are
 **not**: they query Crossref, Unpaywall, Europe PMC and arXiv live, so their
@@ -284,17 +478,19 @@ accusations.
 
 ## Tables and figures are evidence too
 
-A number in a table cell, or drawn inside a figure, is still in the PDF's text
-layer — so the red box lands on it whichever backend read the document.
-`highlight` searches the real page, never the extracted text:
+A number in a table cell is in the PDF's text layer, and so is text drawn
+inside a figure **when the figure carries a text layer at all** — a vector
+chart usually does, a scanned or raster-exported one does not, and nothing can
+box text that is only pixels. Where the text is there, the red box lands on it
+whichever backend read the document, because `highlight` searches the real
+page, never the extracted text:
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/table_figure_evidence.png" width="85%" alt="Two evidence crops: a table cell (N = 8382, 84.3%) and a number inside a flow-chart figure (97%), each boxed in red">
 </p>
 
-Both crops above come from **cited sources** whose block types (`table block`,
-`picture block`) come from ingesting those sources with the layout backend by
-hand — in batch mode `check` reads a cited source as flat text.
+Both crops above come from **cited sources** ingested with the layout backend,
+which as of 0.5.0 is what `check` does for every cited source by default.
 
 Whether such a number can be *claimed and checked* in the first place is a
 different question, decided by what the backend hands the model:
@@ -302,7 +498,7 @@ different question, decided by what the backend hands the model:
 | | a table cell | text drawn inside a figure |
 |---|---|---|
 | **flat text** (`pymupdf`) | reaches the model linearised — the row and column it belongs to are lost | reaches the model as loose words, with no figure to belong to |
-| **layout-aware** (`docling`; standard install, audited paper only) | reaches the model as a GFM table | the figure arrives as `[FIGURE: <caption>]`; in-figure text arrives only where docling's layout model found a text region inside the figure |
+| **layout-aware** (`docling`; the default, for the paper **and** its cited sources) | reaches the model as a GFM table | the figure arrives as `[FIGURE: <caption>]`; in-figure text arrives only where docling's layout model found a text region inside the figure |
 
 On the one paper measured for this, it found none: of 9 figures, 5 carried text
 in the PDF's text layer, and docling emitted no text block anywhere inside a
@@ -316,14 +512,18 @@ is the weakest evidence this tool produces — under the layout backend the judg
 may never have seen the number, and under flat text it saw the number without
 the figure that gives it meaning.
 
-That layout fidelity is spent on the **audited paper**. In batch mode a cited
-source that has **not yet been ingested** is ingested with the fast flat-text
-backend, so its tables reach the judge linearised and its figures only as
-whatever loose words sat inside them.
-`check` reuses an existing `case/ingest/<slug>/annotated.md` if one is already
-there — so a source you ingested yourself with `papertrace ingest --backend
-docling` keeps its layout, and the report does **not** currently distinguish
-the two cases.
+**Cited sources get the same backend as the paper** (0.5.0). Through 0.4.x they
+were always read as flat text, on the theory that text anchors are all a
+verdict needs — but the evidence for a subgroup claim is usually a table row,
+and a linearized table has lost the row, so the asymmetry was backwards.
+
+`check` still reuses an existing `case/ingest/<slug>/annotated.md` rather than
+re-reading a source every run, and it now rebuilds one that a *different*
+backend wrote: reusing a flat map under `--backend docling` would hand the
+judge the linearized table while the run reported layout-aware ingest. A source
+can still end up flat — you asked for `--backend pymupdf`, or its map survives
+from an earlier run whose PDF is no longer on disk — and every such source is
+**named** in all three reports rather than left to be assumed.
 
 ## Try the demo yourself
 
@@ -345,13 +545,17 @@ claim checker runs on `claude -p`.
 pip install -e ".[full]" && playwright install chromium   # 1 · install
 export PAPERTRACE_EMAIL="you@example.org"                 # 2 · Unpaywall contact
 python examples/demo/make_manuscript.py                   # 3 · build the demo paper
-papertrace run examples/demo/demo_manuscript.pdf -c demo_case   # 4 · audit it
+papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
+    --model claude-opus-5                                 # 4 · audit it
 ```
 
 When it finishes, open `demo_case/out/report.md`. Expected result:
-**2 supported · 2 contradicted · 1 not retrieved**, one uncited assertion
+**1 supported · 2 contradicted · 1 not retrieved**, one uncited assertion
 flagged, and all 5 citation occurrences — spread across the 4 labels — reached
-by an extracted claim, 0 uncertain. (The scout step reports the fictional paper
+by an extracted claim, 0 uncertain. That is **4** claims for 5 occurrences,
+because the sentence citing both [2] and [3] arrives as one multi-source claim;
+0.4.1 split it and reported 2 supported across 5 claims. What matters is the
+same in both: the two planted contradictions found, [4] declined. (The scout step reports the fictional paper
 as *not identified* in Europe PMC — the tool would rather say so than invent
 neighbours. Verdict wording varies run to run, and
 extraction and judgement are live model behaviour that nothing in the code
@@ -366,8 +570,11 @@ Details per plant:
 > stays an inspectable artefact, not a byte-exact expected output: judgement
 > wording differs between runs, and so can the page an anchor is found on — the
 > crop for claim 4 moved from page 1 to page 2 across two runs that reached the
-> same verdict. No claim in the demo cites more than one reference, so the
-> per-source breakdown and its summary count do not appear in it.
+> same verdict. Whether a claim cites more than one reference varies too: in
+> the committed 0.5.0 run the sentence citing [2] and [3] is a single
+> multi-source claim, so the per-source breakdown and the `most adverse of 2
+> cited sources` qualifier both appear; under 0.4.1 the same sentence became
+> two single-source claims and neither did.
 
 ## How it works
 
@@ -385,7 +592,9 @@ paper.pdf ─────ingest──▶ clean.md + source_map.json       (page 
       │
       └─highlight─▶ out/evidence/claim_NN.png             (red box on the matched text)
       │
-      └─report──▶ report.md · report_editor.html/png · report_terminal.html/png
+      └─report──▶ report.md          (always)
+                    · report_editor.html/png · report_terminal.html/png
+                                                          (--format / --png)
 ```
 
 The JSON contracts are versioned in [`schemas/`](schemas/). The two skills in
@@ -489,7 +698,6 @@ generated: `python scripts/make_logo.py`. Changes are tracked in
 - [ ] MCP server — drive PaperTrace as a tool from any MCP-capable client
 - [ ] DOCX ingest
 - [ ] Revision (R1) mode polish
-- [ ] GROBID-grade reference parsing
 - [ ] Figure-vs-text consistency pass (batch)
 - [ ] PyPI release
 - [ ] Journal review packs — may be added in the future

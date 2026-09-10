@@ -129,11 +129,17 @@ record and checks each `n` against its declared population, so the *next*
 denominator that drifts away from what it claims fails a test rather than
 printing a plausible number.
 
-Judgement classes are `supported`, `partial`, `contradicted`. `not_retrieved`
-is a retrieval fact; `unchecked` is a harness error. **Neither is scored as a
-wrong verdict** — both get their own rates. This is the review requirement to
-keep retrieval failures separate from model-judgement failures, and the
-existing verdict enum already encodes the distinction.
+Judgement classes are `supported`, `partial`, `contradicted` and
+`not_addressed` — **four**, since `not_addressed` was added to the verdict
+vocabulary. It is a judgement like the others: the model read the source and
+found it silent on the claim, which is a real finding about the citation, not a
+failure. It therefore takes a row *and a column* in the confusion matrix, and
+counts in `macro_f1` on the same terms as the rest.
+
+`not_retrieved` is a retrieval fact; `unchecked` is a harness error. **Neither
+is scored as a wrong verdict** — both get their own rates. This is the review
+requirement to keep retrieval failures separate from model-judgement failures,
+and the existing verdict enum already encodes the distinction.
 
 | Metric | Numerator / denominator | Population |
 |---|---|---|
@@ -209,20 +215,33 @@ reason whenever anything is `__absent__`, because κ assumes every item is rated
 by every rater.
 
 **The run count is passed explicitly, never inferred from the first vector.**
-Inference was safe only while the caller filtered to the intersection first —
-the very filter that introduced the bias above. Removing the filter without
-passing the count would have swapped a disclosed upward bias for an
+Inference was safe only while the caller filtered to the complete-case set
+first — the very filter that introduced the bias above. Removing the filter
+without passing the count would have swapped a disclosed upward bias for an
 undisclosed arithmetic error. Ragged input raises.
 
-**Both bounds are printed, side by side.** The *intersection* (only cases
-present in every run) is the **upper** bound: it excludes the harness's own
-gaps. The *union* (`__absent__`-padded) is the **lower** bound: it charges
-those gaps to the model. Neither is the answer alone, so neither is printed
-alone, and the omitted cases are named per run.
+**Two populations are printed side by side, and only one of them is a bound.**
+The *penalized* figure (`__absent__`-padded, every case seen in any run) is a
+genuine **lower** bound: filling in any real vote where the harness never asked
+can only raise the modal count. The *complete-case* figure (only cases present
+in every run) was previously labelled the **upper** bound, and that was wrong —
+it drops cases rather than penalising them, and a dropped case whose true
+agreement is high pulls the reported mean *down*. With three or more runs the
+omitted set can sit either side of the kept set, so complete-case is reported
+as a different population ("how stable was the model where we actually asked
+it") and explicitly not as a ceiling. The omitted cases are named per run.
 
-**Two different `set_id`s are refused outright.** Averaging agreement across
-gold sets produces a number describing no set, and no caveat repairs it. That
-is a category error, not a partial comparison.
+**Only eligible cases vote.** `per_case` keeps excluded rows so they can be
+rendered in their own section; they are filtered out before the agreement
+vectors are built. A case that was never scoreable cannot be evidence of the
+model disagreeing with itself.
+
+**Runs that are not comparable are refused outright.** Agreement is defined
+within one **(`set_id`, prompt fingerprint, ingest converter)** triple, and all
+three are checked. Averaging across gold sets produces a number describing no
+set; averaging across prompts or across ingest backends compares two different
+systems and calls the difference instability. No caveat repairs either — a
+category error, not a partial comparison.
 
 - **`modal_agreement`** (headline) — mean over cases of (modal verdict count) / k.
 - `unanimous_rate` — cases where all runs agree.

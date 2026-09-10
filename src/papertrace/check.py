@@ -13,18 +13,20 @@ import json
 import re
 import shutil
 import subprocess
-import unicodedata
+import tempfile
 from dataclasses import dataclass, field
-from difflib import SequenceMatcher
 from pathlib import Path
 
 from .models import (
+    _LABEL_GROUP,
     JUDGMENT_VERDICTS,
     PIPELINE_STATES,
     ClaimResult,
     RefManifest,
     SourceJudgement,
     UncitedClaim,
+    _expand_label_group,
+    citation_labels,
     is_references_heading,
 )
 
@@ -48,6 +50,11 @@ def last_model() -> str | None:
 # A cut is recorded and disclosed in the report rather than passing silently.
 MANUSCRIPT_CHAR_LIMIT = 180_000
 SOURCE_CHAR_LIMIT = 150_000
+# the citation inventory sent with the extraction prompt. A cut here is not
+# cosmetic: contexts past it are never offered to the model, so nothing can be
+# attributed to them and they can only ever come back `uncovered`. Disclosed
+# like every other cut rather than passing quietly.
+CONTEXT_CHAR_LIMIT = 60_000
 
 @dataclass
 class Truncations:
@@ -81,11 +88,21 @@ EXTRACT_PROMPT = """You are the claim-extraction step of a peer-review fact-chec
 Below is a manuscript converted to markdown with provenance markers
 (`<!-- block_NNNN, page N -->`).
 
-Task 1 — CITED claims: extract EVERY claim that carries a citation marker.
-Completeness over selectivity: each bracketed label like [3] or [7,8] or [9-11]
-that supports a statement must appear in at least one extracted claim. This
-includes numerical results, "X showed Y", methodological attributions,
-guideline statements, prevalence claims — and claims made inside TABLES.
+CITATION CONTEXTS below is the complete list of places this manuscript makes a
+citation, found mechanically. Each line is `ctx_NNNN`, its page, its section,
+the label(s) cited there, and the sentence.
+
+Task 1 — CITED claims: extract EVERY claim that carries a citation marker,
+working through the CITATION CONTEXTS list. Completeness over selectivity:
+each context must appear in at least one extracted claim. This includes
+numerical results, "X showed Y", methodological attributions, guideline
+statements, prevalence claims — and claims made inside TABLES.
+
+Every cited claim carries `ctx`: the ids of the contexts it was taken from,
+copied exactly from the list. One sentence citing [2] and [3] is ONE claim
+carrying BOTH ids, not two claims. Never invent an id and never guess: if you
+cannot tell which context a claim came from, return `"ctx": []` and it will be
+reported as unplaced rather than attributed to the wrong sentence.
 
 Task 2 — UNCITED assertions: list assertive factual statements that carry NO
 citation but would normally need one (numbers, prevalence, mechanisms,
@@ -93,14 +110,29 @@ standard-of-care statements). Exclude the manuscript's own results and
 methods descriptions of what the authors themselves did.
 
 Rules for both:
-- claim: the statement, tightly paraphrased, ≤160 chars.
+- quote: the manuscript's own sentence carrying the claim, copied VERBATIM,
+  ≤500 chars. Copy it exactly as written — do not tidy, shorten or rephrase it,
+  and keep the numbers, units, intervals and hedging words as they appear. If
+  the claim spans two sentences, quote both. Strip nothing except the citation
+  marker itself. This is the text that will be checked against the source.
+- claim: the same statement tightly paraphrased for a headline, ≤300 chars.
 - location: manuscript section (e.g. "Introduction ¶2", "Methods", "Table 2").
 - cited claims also carry refs: citation labels as strings, e.g. ["3"] or ["7","8"].
+- own_supplement: true when the claim points at THIS paper's own supplementary
+  material — "Table S3", "eFigure 2", "Supplementary Methods", "Appendix A".
+  That is a pointer, not a citation, so it does NOT go in refs. A claim can
+  carry both: "as in [4] and Table S2" cites [4] and sets own_supplement.
+  Reserve it for the paper's own numbering; "the supplement of [4]" is just [4].
+  A claim whose ONLY support is such a pointer still belongs in `cited`, with
+  an empty refs list — it is not an assertion made without evidence.
 - Number each list from 1 in reading order.
 
 Answer with ONLY a JSON object, no prose, no code fences:
-{"cited":[{"id":1,"claim":"...","location":"...","refs":["1"]}],
- "uncited":[{"id":1,"claim":"...","location":"..."}]}
+{"cited":[{"id":1,"ctx":["ctx_0001"],"quote":"...","claim":"...","location":"...","refs":["1"],"own_supplement":false}],
+ "uncited":[{"id":1,"quote":"...","claim":"...","location":"..."}]}
+
+CITATION CONTEXTS:
+<<CONTEXTS>>
 
 MANUSCRIPT:
 """
@@ -114,6 +146,16 @@ text is the only evidence — never use outside knowledge of the paper.
 A claim may cite several sources. You are shown ONE of them. Judge only what
 THIS source does or does not say, and do not speculate about the others: each
 is judged in its own call and the results are combined afterwards.
+
+WHAT YOU ARE HOLDING: <<DOCKIND>>
+
+Each claim carries `quote`, the manuscript's own sentence, and `claim`, a short
+paraphrase of it. **Judge the quote.** It holds the population, the effect
+size, the interval and the hedging that decide whether the source supports the
+statement; the paraphrase is a label and may have dropped any of them. Where
+the two differ, the quote is the claim. A claim with an empty `quote` is all
+there is for it — judge the paraphrase, and let the missing scope count against
+"supported" rather than for it.
 
 For each claim output:
 - verdict: "supported" (source states it), "partial" (kernel true but scope,
@@ -153,13 +195,33 @@ def claude_available() -> bool:
     return shutil.which("claude") is not None
 
 
+_SCRATCH_CWD: str | None = None
+
+
+def _scratch_cwd() -> str:
+    # /tmp itself is shared and world-writable; a private 0700 directory (one per
+    # process, reused across calls) keeps another local user from planting
+    # anything the judging call would walk into
+    global _SCRATCH_CWD
+    if _SCRATCH_CWD is None:
+        _SCRATCH_CWD = tempfile.mkdtemp(prefix="papertrace-ask-")
+    return _SCRATCH_CWD
+
+
 def _ask(prompt: str, model: str | None = None) -> str:
-    cmd = ["claude", "-p", "--output-format", "json"]
+    # judging happens wherever the user ran papertrace from — never that repo's own
+    # CLAUDE.md, and never with more than the ability to read the prompt and answer
+    cmd = ["claude", "-p", "--output-format", "json", "--safe-mode", "--tools", ""]
     if model:
         cmd += ["--model", model]
     try:
         proc = subprocess.run(
-            cmd, input=prompt, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=CLAUDE_TIMEOUT,
+            cwd=_scratch_cwd(),
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"claude -p timed out after {CLAUDE_TIMEOUT}s") from None
@@ -192,6 +254,46 @@ def _parse_json_object(text: str) -> dict:
     return json.loads(text[start : end + 1])
 
 
+def _ctx_labels(claim: dict) -> list[str]:
+    """The `ctx` values one returned claim carries, however it phrased them.
+
+    A list is the contract, but a model that has exactly one context sometimes
+    sends the bare string. Accepting both costs one branch; rejecting the
+    string form would discard a correct answer over its punctuation.
+    """
+    raw = claim.get("ctx")
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        return [str(x) for x in raw]
+    return []
+
+
+def _render_inventory(occurrences: list[dict]) -> tuple[str, dict[str, str]]:
+    """The citation inventory as the model sees it, and the map back.
+
+    Returns the `ctx_NNNN` block for the prompt and `{ctx label -> occurrence
+    id}`. Both come out of **one pass** over the same list, on purpose: the
+    caller resolves the model's answer through this map rather than re-deriving
+    the pairing from position later. Re-deriving it would be reading-order
+    zipping wearing a different hat — one dropped occurrence and every id after
+    it points at the wrong sentence, silently.
+
+    Internal occurrence ids (`block_0012:345:7`) are deliberately not shown.
+    They are long, punctuated, and a model asked to copy one exactly will
+    sometimes not; `ctx_0007` it copies.
+    """
+    lines: list[str] = []
+    mapping: dict[str, str] = {}
+    for n, o in enumerate(occurrences, start=1):
+        ctx = f"ctx_{n:04d}"
+        mapping[ctx] = o["id"]
+        where = f"p{o['page']}" if o.get("page") else "p?"
+        section = f" §{o['section']}" if o.get("section") else ""
+        lines.append(f"{ctx}  {where}{section}  [{o.get('group') or o['label']}]  {o['sentence']}")
+    return "\n".join(lines), mapping
+
+
 def extract_claims(
     case_dir: Path,
     model: str | None = None,
@@ -200,14 +302,33 @@ def extract_claims(
 ) -> tuple[list[ClaimResult], list[UncitedClaim]]:
     annotated = case_dir / "ingest" / "manuscript" / "annotated.md"
     text = _clip(annotated.read_text(), MANUSCRIPT_CHAR_LIMIT, "manuscript", truncations)
-    raw = _ask(EXTRACT_PROMPT + text, model)
+    # the inventory is built BEFORE the call, from source_map.json, and handed
+    # to the model — rather than built afterwards and matched back against a
+    # paraphrase. This is the whole redesign.
+    occurrences, _source = citation_occurrences(case_dir)
+    inventory, ctx_map = _render_inventory(occurrences)
+    prompt = EXTRACT_PROMPT.replace(
+        "<<CONTEXTS>>",
+        _clip(inventory or "(none found)", CONTEXT_CHAR_LIMIT, "citation contexts", truncations),
+    )
+    raw = _ask(prompt + text, model)
     data = _parse_json_object(raw)
     cited = [
         ClaimResult(
             id=int(c["id"]),
             claim=str(c["claim"]),
+            # `.get`, and NOT falling back to `claim`: a missing quote means the
+            # model did not give one, and copying the paraphrase in would put
+            # the compression back while looking like it had been removed
+            quote=str(c.get("quote", "")),
             location=str(c.get("location", "")),
+            # resolved here, where the map is in hand. An id that is not in the
+            # inventory is DROPPED, never repaired into "the first occurrence of
+            # that label" — coverage reports the claim as unplaced instead, and
+            # the label's occurrences as uncertain.
+            ctx_ids=[ctx_map[k] for k in _ctx_labels(c) if k in ctx_map],
             refs=[str(r) for r in c.get("refs", [])],
+            own_supplement=bool(c.get("own_supplement", False)),
         )
         for c in data.get("cited", [])
     ]
@@ -215,6 +336,7 @@ def extract_claims(
         UncitedClaim(
             id=int(u["id"]),
             claim=str(u["claim"]),
+            quote=str(u.get("quote", "")),
             location=str(u.get("location", "")),
         )
         for u in data.get("uncited", [])
@@ -226,31 +348,60 @@ def extract_claims(
 # deterministic citation-label coverage audit
 # ---------------------------------------------------------------------------
 
-_LABEL_GROUP = re.compile(r"\[(\d{1,3}(?:\s*[,\u2013\u2014-]\s*\d{1,3})*)\]")
-_REFS_HEADING = re.compile(r"^##\s+(references|bibliography|literature)\b", re.I | re.M)
+def _body_before_references(clean_md: str) -> str:
+    """`clean_md` up to the line where the bibliography begins.
+
+    Uses `models.is_references_heading` — the rule `refs` and the occurrence
+    walk already share — instead of a second regex of its own. That regex
+    required a markdown `##`, which needs ingest to have *typed* the block as a
+    heading; flat-text ingest guesses headings from font size, so a `References`
+    line at body size reaches `clean.md` as plain text. The shared rule is built
+    for exactly that case and says True where this cut said False, and the two
+    disagreeing is how every `[N]` printed in the reference list came to be
+    counted as a body citation — reporting gaps that do not exist, in the one
+    figure the audit computes mechanically so that it cannot.
+
+    A markdown-marked line is read as a heading, so `## References and further
+    reading` cuts. A plain line must be the word and nothing else, which is what
+    keeps `References were checked by hand [1].` from swallowing the paper.
+    """
+    out: list[str] = []
+    for line in clean_md.splitlines(keepends=True):
+        marked = line.lstrip().startswith("#")
+        if is_references_heading("sectionheader" if marked else "text", line):
+            break
+        out.append(line)
+    return "".join(out)
 
 
-def _expand_label_group(group: str) -> set[str]:
-    labels: set[str] = set()
-    for part in re.split(r"\s*,\s*", group):
-        m = re.match(r"^(\d{1,3})\s*[\u2013\u2014-]\s*(\d{1,3})$", part.strip())
-        if m:
-            lo, hi = int(m.group(1)), int(m.group(2))
-            if lo <= hi and hi - lo <= 50:
-                labels.update(str(n) for n in range(lo, hi + 1))
-        elif part.strip().isdigit():
-            labels.add(part.strip())
-    return labels
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+
+
+def _strip_table_rows(text: str) -> str:
+    """Blank out GitHub-flavoured-markdown table rows.
+
+    `clean.md` is flat text with no block-type information, so a table can only
+    be recognised by its own linearized shape (`| ... |`, one row per line \u2014 see
+    `Block` in `models.py`). A results table's own numbers are not citations: a
+    95% CI column like `[51, 77]` matches the same bracket-and-comma syntax as a
+    citation group `[7,8]`, and a live audit read a table's CI columns as
+    citations to references that did not exist at that number.
+    """
+    return "\n".join("" if _TABLE_ROW.match(line) else line for line in text.splitlines())
 
 
 def citation_labels_in_text(clean_md: str) -> set[str]:
-    """Every citation label appearing in the body text (References section excluded)."""
-    cut = _REFS_HEADING.search(clean_md)
-    body = clean_md[: cut.start()] if cut else clean_md
-    labels: set[str] = set()
-    for m in _LABEL_GROUP.finditer(body):
-        labels.update(_expand_label_group(m.group(1)))
-    return labels
+    """Every citation label appearing in the body text (References section excluded).
+
+    The label rule itself lives in `models.citation_labels` \u2014 `refs.py` needs the
+    same reading to reconcile the reference list against what the manuscript
+    cites, and two independent readings of one fact are only evidence when they
+    come from one rule. This wrapper owns the one thing that is local to
+    coverage: stopping at the bibliography, so its own `[N]` markers are not
+    counted as body citations, and skipping table rows, whose own numbers are not
+    citations either.
+    """
+    return citation_labels(_strip_table_rows(_body_before_references(clean_md)))
 
 
 # ---------------------------------------------------------------------------
@@ -258,14 +409,20 @@ def citation_labels_in_text(clean_md: str) -> set[str]:
 #
 # Label-level coverage was pure set arithmetic — mechanical and incapable of a
 # false positive, but blind: two sentences citing [3] with one extracted claim
-# reported [3] as covered and left the other sentence invisible. Occurrences
-# fix the blindness and buy a new failure mode with it (the *counts* stay
-# right; the *pointer* can be wrong), which is why `uncertain` is a third
-# status and why the report carries a self-caveat.
+# reported [3] as covered and left the other sentence invisible. Occurrences fix
+# the blindness.
+#
+# Occurrences first bought a new failure mode with it: the inventory was built
+# AFTER the model call, so a paraphrase had to be matched back to a sentence by
+# text similarity, and the *pointer* could be wrong while the counts were right.
+# That is gone. The inventory is now built first and handed to the extractor as
+# `ctx_NNNN`, and attribution is a lookup of the ids it returned.
+#
+# `uncertain` stays, for the one case that can still produce doubt: a claim
+# cites a label and names none of that label's contexts, so a claim did reach
+# one of them and nothing can say which.
 # ---------------------------------------------------------------------------
 
-OCCURRENCE_MIN_RATIO = 0.45
-OCCURRENCE_MIN_MARGIN = 0.10
 _EXCERPT_RADIUS = 120
 
 # structural, not textual: the source map says a block IS a section header, so
@@ -273,37 +430,14 @@ _EXCERPT_RADIUS = 120
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
-def _normalize_for_match(text: str) -> str:
-    """Fold the differences that are never semantic, for attribution only.
-
-    Deliberately *similar* to `evals/align.py::normalize_claim`, not identical —
-    do not collapse the two. This one removes quotes outright and strips
-    bracketed citation markers, because it compares a claim against manuscript
-    sentences that carry `[3]` the claim text never had; `normalize_claim`
-    converts quotes to ASCII and keeps the markers, because it compares two
-    claim texts where a marker is signal.
-
-    They stay separate for a second reason: papertrace cannot import `evals`
-    (it is not in the wheel), and `evals` must not import a matcher from the
-    very thing it grades. Ten lines is the right price.
-    """
-    t = unicodedata.normalize("NFKC", text or "")
-    t = t.translate(dict.fromkeys(map(ord, "‐‑‒–—―"), "-"))
-    t = re.sub(r"[*_`\"'‘’“”]", "", t).casefold()
-    t = re.sub(r"\[\d[\d\s,–—-]*\]", " ", t)  # the markers themselves carry no meaning
-    return re.sub(r"\s+", " ", t).strip(" .")
-
-
-def _ratio(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b).ratio()
-
-
 def _excerpt(text: str, start: int, end: int) -> str:
     """The sentence carrying the marker, clipped to ±120 chars around it.
 
     The excerpt is what turns an uncovered occurrence from a bare number into
-    something a reader can act on, and it is also what the attributor matches
-    against — so it is the sentence, not an arbitrary window.
+    something a reader can act on, and it is also what the extractor is shown
+    in the `ctx_NNNN` inventory — so it is the sentence, not an arbitrary
+    window. A window that cut mid-clause would ask the model to place a claim
+    against half of the sentence it came from.
     """
     begin = 0
     for m in _SENTENCE_END.finditer(text, 0, start):
@@ -362,6 +496,9 @@ def citation_occurrences(case_dir: Path) -> tuple[list[dict], str]:
             # the SAME rule `references_section` uses — see models.is_references_heading
             if is_references_heading(b.type, b.text or ""):
                 break
+            if b.type == "table":
+                # a table's own numbers are not citations — see _strip_table_rows
+                continue
             out += _occurrences_in(
                 b.text or "",
                 block=b.id,
@@ -372,74 +509,12 @@ def citation_occurrences(case_dir: Path) -> tuple[list[dict], str]:
 
     clean = manuscript / "clean.md"
     if clean.exists():
-        text = clean.read_text()
-        cut = _REFS_HEADING.search(text)
-        body = text[: cut.start()] if cut else text
+        # the same cut as the label reading above: a fallback that counted
+        # reference-list markers as occurrences would inflate the denominator of
+        # the coverage ratio, not just the label set
+        body = _strip_table_rows(_body_before_references(clean.read_text()))
         return _occurrences_in(body, block=None, page=None, section=""), "clean.md"
     return [], "none"
-
-
-def _location_matches(location: str, section: str) -> bool:
-    """Does a claim's free-text `location` ("Methods §2") name this section?"""
-    loc, sec = _normalize_for_match(location), _normalize_for_match(section)
-    if not loc or not sec:
-        return False
-    return sec in loc or loc in sec
-
-
-def _attribute_label(occs: list[dict], claims: list[ClaimResult]) -> tuple[dict, list[int], bool]:
-    """Which occurrence of ONE label each claim citing it reached.
-
-    Returns (occurrence id -> claim id, claim ids attributed to nothing,
-    whether any attribution was refused on the margin).
-
-    One occurrence is the whole answer: a claim citing the label reached the
-    only place the label appears. With several, the claim's `location` narrows
-    the field and text similarity decides, assigned globally best-first. The
-    extraction prompt returns a tight ≤160-char paraphrase, so the absolute
-    ratio is weak evidence — **the margin is the decisive test**, since the
-    question is only *which* occurrence.
-
-    Reading-order zipping (claim 1 → occurrence 1, and so on) is deliberately
-    NOT used. `EXTRACT_PROMPT` does ask for reading order, which makes it
-    tempting, but the order is unverified and degrades silently on a single
-    skipped claim: every later pairing shifts by one and the audit manufactures
-    confident, wrong attributions. Refusing to answer is the honest failure.
-    """
-    if not occs:
-        return {}, [], False
-    if len(occs) == 1:
-        if claims:
-            return {occs[0]["id"]: claims[0].id}, [c.id for c in claims[1:]], False
-        return {}, [], False
-
-    edges: list[tuple[float, int, str]] = []
-    for c in claims:
-        narrowed = [o for o in occs if _location_matches(c.location, o["section"])] or occs
-        want = _normalize_for_match(c.claim)
-        for o in narrowed:
-            edges.append((_ratio(want, _normalize_for_match(o["sentence"])), c.id, o["id"]))
-    edges.sort(key=lambda t: (-t[0], t[1], t[2]))
-
-    assigned: dict[str, int] = {}
-    taken: set[int] = set()
-    refused = False
-    for score, cid, oid in edges:
-        if cid in taken or oid in assigned or score < OCCURRENCE_MIN_RATIO:
-            continue
-        # the competitor is the best LIVE candidate sharing either endpoint —
-        # a row rival (this claim, another occurrence) or a column rival
-        # (another claim, this occurrence). Both are coin flips.
-        rivals = [
-            t for t in edges
-            if (t[1] == cid) != (t[2] == oid) and t[1] not in taken and t[2] not in assigned
-        ]
-        if score - max((t[0] for t in rivals), default=0.0) >= OCCURRENCE_MIN_MARGIN:
-            assigned[oid] = cid
-            taken.add(cid)
-        else:
-            refused = True
-    return assigned, [c.id for c in claims if c.id not in taken], refused
 
 
 def attribute_occurrences(
@@ -447,13 +522,27 @@ def attribute_occurrences(
 ) -> tuple[list[dict], list[dict]]:
     """Stamp a `status` and a `claim_id` on every occurrence.
 
-    `uncertain` is a third status and is NEVER counted as covered: it means a
-    claim did reach this label and the tool cannot say which sentence it came
-    from. Calling that covered restores the overstatement; calling it
-    uncovered cries wolf. Surplus claims (more claims cite the label than there
-    are places citing it) are recorded and cast no doubt on anything — every
-    occurrence is already attributed, so nothing is left to be uncertain about.
+    Bookkeeping, not matching: an occurrence is `covered` when some claim's
+    `ctx_ids` names it. The extractor was shown this exact inventory and told
+    which ids to copy, so nothing here has to work out where a paraphrase came
+    from.
+
+    `uncertain` survives, for the one case that can still produce doubt: a
+    claim cites the label but named no usable context for it, so a claim *did*
+    reach one of these places and nothing can say which. Calling those covered
+    restores the overstatement occurrences exist to remove; calling them
+    uncovered cries wolf about a citation that was in fact read. It is never
+    counted as covered.
+
+    A claim naming a context that is not in the inventory lands here too, and
+    on purpose — a hallucinated `ctx_9999` and an honest `"ctx": []` are the
+    same amount of information about which sentence was meant.
     """
+    reached: dict[str, int] = {}
+    for c in claims:
+        for cid in c.ctx_ids:
+            reached.setdefault(cid, c.id)
+
     by_label: dict[str, list[dict]] = {}
     for o in occurrences:
         by_label.setdefault(o["label"], []).append(o)
@@ -461,13 +550,16 @@ def attribute_occurrences(
     status: dict[str, tuple[str, int | None]] = {}
     unattributed: list[dict] = []
     for label, occs in by_label.items():
-        citing = [c for c in claims if label in c.refs]
-        assigned, orphans, refused = _attribute_label(occs, citing)
-        rest = "uncertain" if (refused or orphans) else "uncovered"
+        here = {o["id"] for o in occs}
+        # a claim is unplaced *for this label* when it cites the label and
+        # named none of the label's own contexts — including when it named a
+        # context belonging to some other label
+        unplaced = [c.id for c in claims if label in c.refs and not (set(c.ctx_ids) & here)]
+        rest = "uncertain" if unplaced else "uncovered"
         for o in occs:
-            claim_id = assigned.get(o["id"])
+            claim_id = reached.get(o["id"])
             status[o["id"]] = ("covered", claim_id) if claim_id is not None else (rest, None)
-        unattributed += [{"claim_id": cid, "label": label} for cid in orphans]
+        unattributed += [{"claim_id": cid, "label": label} for cid in unplaced]
 
     items = [{**o, "status": status[o["id"]][0], "claim_id": status[o["id"]][1]}
              for o in occurrences]
@@ -510,19 +602,66 @@ def coverage_audit(case_dir: Path, claims: list[ClaimResult]) -> dict:
         "labels_in_text": sorted(in_text, key=int),
         "covered": sorted(covered & in_text, key=int),
         "missing": missing,
-        "schema": "coverage/2",
+        "schema": "coverage/3",
         "unit": "occurrence",
         "source": source,
         "labels_partially_covered": partial,
         "labels_uncertain_only": uncertain_only,
         "occurrences": {"total": len(items), **counts, "items": items},
         "attribution": {
-            "method": "location narrowing, then text similarity assigned globally best-first",
-            "min_ratio": OCCURRENCE_MIN_RATIO,
-            "min_margin": OCCURRENCE_MIN_MARGIN,
+            # no thresholds to report any more: the extractor was shown this
+            # inventory and returned the ids it used, so there is nothing to
+            # tune and no close call to refuse
+            "method": "context id returned by extraction, resolved against the inventory",
             "claims_unattributed": unattributed,
         },
     }
+
+
+def _stale_ingest(ingest_dir: Path, pdf_path: str | None, *, backend: str) -> bool:
+    """Must `ingest_dir` be rebuilt — wrong PDF, or read by the wrong backend?
+
+    The directory is named after the reference's slug, and a slug is not an
+    identity that holds still. Fixing a slug collision renames one of the two
+    colliding entries, and the reconciler can hand `refs` the publisher's list
+    on one run and the parsed list on the next — so re-running an existing case
+    could hand the model the directory's previous occupant and judge a claim,
+    confidently, against a different paper. `SourceMap.doc` cannot catch it:
+    every cited source is stored as `<slug>.pdf`, so it reads the same either
+    way.
+
+    An unhashed map — written before source maps recorded what they read — is
+    treated as stale. Re-ingesting is local, free and quick; trusting it is a
+    guess about which paper is in a file, and that guess is the whole thing this
+    module refuses to make.
+
+    The **converter** is checked for the same reason, and it is not the same
+    question as the hash: a case folder built before sources were read
+    layout-aware holds `pymupdf` maps of exactly the right PDFs. Reusing one
+    under `--backend docling` would hand the judge a linearized table while the
+    run reports layout-aware source ingest — the fidelity claim would be true
+    of the paper and false of the papers it is judged against.
+    """
+    if not pdf_path or not Path(pdf_path).exists():
+        return False  # nothing better to ingest; SourceProvenance reports the gap
+    smap_path = ingest_dir / "source_map.json"
+    if not smap_path.exists():
+        return True
+    try:
+        from .models import SourceMap
+
+        smap = SourceMap.from_json(smap_path)
+        recorded, converter = smap.source_sha256, smap.converter
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
+    from .ingest import resolve_backend
+    from .models import manuscript_fingerprint
+
+    if recorded != manuscript_fingerprint(Path(pdf_path)):
+        return True
+    # "auto" is not a converter name, and a docling map records its version
+    # ("docling 2.53.0"), so compare the resolved backend against the first word
+    return resolve_backend(backend) != converter.split()[0]
 
 
 def _slug_for_ref(manifest: RefManifest, label: str):
@@ -532,15 +671,54 @@ def _slug_for_ref(manifest: RefManifest, label: str):
 _MAX_PAGE_DIGITS = 5  # a page number, not an integer literal
 
 
-def _judgement_from(entry) -> tuple[dict | None, str]:
+@dataclass(frozen=True)
+class SourceProvenance:
+    """What one source actually contains, read from its own source map.
+
+    The yardstick a judgement is held to. Without it a verdict's page and block
+    are the model's unchecked word for it, which is how `page 99999` and
+    `block_nope` survived into a report as provenance.
+    """
+
+    pages: int
+    block_pages: dict[str, int]  # block id -> the page it is on
+
+    @classmethod
+    def from_map(cls, smap) -> SourceProvenance:
+        return cls(pages=smap.pages, block_pages={b.id: b.page for b in smap.blocks})
+
+    @classmethod
+    def read(cls, source_map: Path) -> SourceProvenance | None:
+        """None when the map is missing or unreadable — never a permissive default.
+
+        A guessed yardstick measures nothing. The caller turns None into
+        `unchecked`, so an unverifiable location is refused rather than trusted.
+        """
+        if not source_map.exists():
+            return None
+        try:
+            from .models import SourceMap
+
+            return cls.from_map(SourceMap.from_json(source_map))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+
+def _judgement_from(entry, provenance: SourceProvenance | None) -> tuple[dict | None, str]:
     """Validate one model response object into claim fields, or say why not.
 
-    Total by construction: every branch is an isinstance test, so this cannot
-    raise. A validator that throws would turn a bug in OUR code into a note
-    blaming the model — the same laundering `unchecked` exists to prevent.
+    Total by construction: every branch is an isinstance test or a lookup, so
+    this cannot raise. A validator that throws would turn a bug in OUR code into
+    a note blaming the model — the same laundering `unchecked` exists to prevent.
 
     Rejection is all-or-nothing. The caller writes no field unless every field
     validated, so a bad response never leaves half-applied provenance behind.
+
+    `provenance` is the source's own source map. A substantive verdict must
+    name a page that exists and a block that exists **on that page**, because
+    the block is what guarantees the reader an evidence image: `crop_for_anchor`
+    takes its region from the block's bbox, so a valid block always produces a
+    crop and the anchor phrases only decide whether a red box is drawn on it.
     """
     if not isinstance(entry, dict):
         return None, f"model returned an unusable verdict (not an object: {type(entry).__name__})"
@@ -598,12 +776,44 @@ def _judgement_from(entry) -> tuple[dict | None, str]:
     if page < 1:
         return None, unusable_page  # highlight does doc[page - 1]
 
-    # optional — but a non-string block id is never coerced into one
-    block = entry.get("source_block")
-    if block is not None and not isinstance(block, str):
+    # the source map is the only thing that can contradict the model here. With
+    # no map nothing can, so nothing does — and a location nobody can check is
+    # refused rather than trusted.
+    if provenance is None:
         return None, (
-            f"model returned an unusable verdict for this claim: {verdict!r} with a "
-            f"source_block that is not a block id ({block!r})"
+            f"model returned {verdict!r} but the source map could not be read, so "
+            f"the page and block it names cannot be checked against the source — "
+            f"re-run `papertrace ingest` for this source, then `papertrace check`"
+        )
+    if page > provenance.pages:
+        return None, (
+            f"model returned {verdict!r} for a passage on page {page}, but the "
+            f"source has {provenance.pages} page{'s' if provenance.pages != 1 else ''} "
+            f"— there is no such page to show"
+        )
+
+    # REQUIRED, not optional: the block's bbox is what `crop_for_anchor` uses as
+    # the crop region, so a judgement without one can leave the reader with no
+    # evidence image at all — a verdict nobody can look at.
+    block = entry.get("source_block")
+    if not isinstance(block, str) or not block.strip():
+        return None, (
+            f"model returned {verdict!r} with no source_block ({block!r}) — without "
+            f"one there is no region to crop, so the verdict would carry no evidence "
+            f"image a reader could check"
+        )
+    block = block.strip()
+    block_page = provenance.block_pages.get(block)
+    if block_page is None:
+        return None, (
+            f"model returned {verdict!r} citing {block}, which is not a block of "
+            f"this source — nothing to crop, nothing to check"
+        )
+    if block_page != page:
+        return None, (
+            f"model returned {verdict!r} citing {block}, which is on page "
+            f"{block_page}, not the page {page} it named — a crop of page {page} "
+            f"would show the reader a different passage"
         )
 
     # absent means "none offered" and is allowed, as is an empty list. null, a
@@ -626,6 +836,29 @@ def _judgement_from(entry) -> tuple[dict | None, str]:
     }, ""
 
 
+# What the judge is actually reading. A supplement handed over unannounced gets
+# treated as the article: `not_addressed` is the ordinary answer for an appendix
+# that covers a different part of the work, and a judge with no reason to expect
+# it reaches for `partial` instead and invents a true kernel.
+_DOCKIND = {
+    "article": "the cited article itself.",
+    "supplement": (
+        "supplementary material accompanying the cited article — an appendix, "
+        "supporting information, or an online-only data supplement. It is part of "
+        "the cited work, so what it states counts. But it covers only part of that "
+        "work, so a claim it simply does not speak to is `not_addressed`, and that "
+        "is the expected answer here far more often than for an article."
+    ),
+    "own_supplement": (
+        "supplementary material belonging to the manuscript UNDER REVIEW, not to a "
+        "cited work. The claim points at it — a table, figure or section number the "
+        "paper names. Judge whether this document actually states what the paper "
+        "says it does. `not_addressed` means the paper pointed here and the thing it "
+        "pointed at is not here."
+    ),
+}
+
+
 def check_claims(
     claims: list[ClaimResult],
     manifest: RefManifest,
@@ -635,6 +868,11 @@ def check_claims(
     on_error=None,
     *,
     truncations: Truncations | None = None,
+    # REQUIRED, like `_clip`'s accumulator above: this decides whether a table
+    # in a cited source is readable at all, and neither possible default is
+    # honest. "auto" drags docling into an offline test run; "pymupdf" silently
+    # downgrades a caller who asked for layout. So there is no default.
+    backend: str,
 ) -> list[ClaimResult]:
     """Fill verdicts in place. One model call per source that carries claims.
 
@@ -643,18 +881,33 @@ def check_claims(
     the claims get verdict `unchecked`, the reason lands in the note, and
     `on_error(slug, message)` fires so the CLI can say so loudly.
 
-    Sources are ingested with the flat backend on purpose — fast and
-    dependable, and text anchors are what verdicts and crops need. Layout
-    fidelity (tables/figures) is spent on the audited paper, not its sources.
+    Sources are ingested with the SAME backend as the audited paper. They used
+    to be read flat on the theory that text anchors are all a verdict needs,
+    but the decisive evidence for a claim is often a table — a subgroup row, a
+    confidence interval in a column — and a linearized table loses the
+    relationships that make those readable. Spending layout fidelity on the
+    paper and not on the papers it is judged against had the asymmetry
+    backwards.
     """
     by_slug: dict[str, list[ClaimResult]] = {}
     for c in claims:
         pairs = [(r, _slug_for_ref(manifest, r)) for r in c.refs]
         avail = [(r, e) for r, e in pairs if e and e.status in ("retrieved", "provided") and e.slug]
-        if not avail:
+        own = manifest.manuscript_supplements if c.own_supplement else []
+        if not avail and not own:
             c.verdict = "not_retrieved"
-            reasons = {e.status for _, e in pairs if e}
-            c.note = f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
+            if c.own_supplement:
+                # the paper said exactly where its evidence was and nobody
+                # opened it. That is a retrieval gap, not an uncited assertion.
+                c.note = (
+                    "points at this paper's own supplementary material, which was not "
+                    "provided — pass it with --supplement"
+                )
+            else:
+                reasons = {e.status for _, e in pairs if e}
+                c.note = (
+                    f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
+                )
             continue
         # Co-citation is an offer of support: every source cited for this claim
         # was put forward as backing it, so every one that could be obtained is
@@ -665,8 +918,35 @@ def check_claims(
             if e.slug in seen_slugs:  # the same paper cited under two labels
                 continue
             seen_slugs.add(e.slug)
-            c.judgements.append(SourceJudgement(source_slug=e.slug, ref=r))
+            c.judgements.append(SourceJudgement(source_slug=e.slug, ref=r, kind="article"))
             by_slug.setdefault(e.slug, []).append(c)
+            # A supplement is part of the work that was cited, so it is read for
+            # every claim citing that label rather than only when the article
+            # turns out to be silent — a supplement contradicting a claim the
+            # article supports is exactly the finding that would be missed.
+            # Costs one extra call per supplement, not per claim: the loop below
+            # groups every claim for a document into a single call.
+            for s in e.supplements:
+                if s.slug in seen_slugs:
+                    continue
+                seen_slugs.add(s.slug)
+                c.judgements.append(
+                    SourceJudgement(source_slug=s.slug, ref=r, kind="supplement",
+                                    verified=s.verified)
+                )
+                by_slug.setdefault(s.slug, []).append(c)
+        # the paper's own supplements answer for no citation label, so `ref` is
+        # empty: filling in a number would say the claim cited something it did
+        # not. Every one provided is read, matching the cited side and sparing
+        # the extractor a guess about which file "S3" lives in.
+        for s in own:
+            if s.slug in seen_slugs:
+                continue
+            seen_slugs.add(s.slug)
+            c.judgements.append(
+                SourceJudgement(source_slug=s.slug, ref="", kind="own_supplement")
+            )
+            by_slug.setdefault(s.slug, []).append(c)
         # what is left here could NOT be obtained — the only remaining reason a
         # cited source goes unopened
         avail_refs = {r for r, _ in avail}
@@ -676,16 +956,32 @@ def check_claims(
         try:
             ingest_dir = case_dir / "ingest" / slug
             annotated = ingest_dir / "annotated.md"
-            if not annotated.exists():
-                entry = next(e for e in manifest.entries if e.slug == slug)
+            # a missing source_map.json is NOT re-ingested here: `entry.pdf_path`
+            # may be gone, and turning one absent artifact into a group-wide
+            # FileNotFoundError buries the real problem. It degrades per
+            # judgement instead, with a note naming the fix — see
+            # SourceProvenance.read.
+            doc = manifest.document(slug)
+            if doc is None:  # pragma: no cover - every judged slug names a document
+                raise KeyError(f"no document named {slug!r} in the manifest")
+            if not annotated.exists() or _stale_ingest(
+                ingest_dir, doc.pdf_path, backend=backend
+            ):
                 from .ingest import ingest_pdf
 
-                ingest_pdf(Path(entry.pdf_path), ingest_dir, backend="pymupdf")
+                ingest_pdf(Path(doc.pdf_path), ingest_dir, backend=backend)
+            # the quote goes with the paraphrase, not instead of it: the judge
+            # is told to rule on the quote, and the paraphrase stays so a claim
+            # whose extraction returned no quote is still judgeable
             claims_json = json.dumps(
-                [{"id": c.id, "claim": c.claim, "location": c.location} for c in group]
+                [
+                    {"id": c.id, "quote": c.quote, "claim": c.claim, "location": c.location}
+                    for c in group
+                ]
             )
             prompt = (
                 CHECK_PROMPT.replace("<<CLAIMS>>", claims_json)
+                .replace("<<DOCKIND>>", _DOCKIND[doc.kind])
                 .replace("<<SLUG>>", slug)
                 .replace(
                     "<<SOURCE>>",
@@ -716,6 +1012,7 @@ def check_claims(
         # deliberately NO per-claim `except Exception`: a blanket catch would
         # relabel our own bugs as the model's fault. The per-group except above
         # stays as scoped — ingest/prompt/_ask failures really are group-wide.
+        provenance = SourceProvenance.read(case_dir / "ingest" / slug / "source_map.json")
         for c in group:
             j = next((x for x in c.judgements if x.source_slug == slug), None)
             if j is None:  # pragma: no cover - group membership implies one
@@ -724,7 +1021,7 @@ def check_claims(
             if v is None:
                 j.verdict, j.note = "unchecked", "model returned no verdict for this claim"
                 continue
-            fields, why = _judgement_from(v)
+            fields, why = _judgement_from(v, provenance)
             if fields is None:
                 j.verdict, j.note = "unchecked", why
                 continue

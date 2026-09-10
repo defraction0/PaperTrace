@@ -51,7 +51,7 @@ def offline(monkeypatch):
     import papertrace.refs as refs_mod
 
     monkeypatch.setattr(refs_mod, "resolve_all",
-                        lambda entries, dest, email, provided_dir=None, progress=None: entries)
+                        lambda entries, dest, email, provided_dir=None, progress=None, taken=None: entries)
     monkeypatch.setenv("PAPERTRACE_EMAIL", "test@example.org")
 
 
@@ -66,7 +66,7 @@ def test_a_legacy_case_reingests_rather_than_certifying_the_old_paper(tmp_path, 
     new_pdf = _paper(tmp_path / "new" / "paper.pdf", "NEW", "10.1000/new")
 
     # build the legacy case: ingest OLD, then strip the hash from its manifest
-    cli.refs(manuscript=old_pdf, case=case, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=old_pdf, case=case, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
     payload = json.loads((case / "refs_manifest.json").read_text())
     del payload["manuscript_sha256"]
@@ -74,7 +74,7 @@ def test_a_legacy_case_reingests_rather_than_certifying_the_old_paper(tmp_path, 
     assert RefManifest.from_json(case / "refs_manifest.json").manuscript_sha256 is None
 
     # now the same filename, different content
-    cli.refs(manuscript=new_pdf, case=case, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=new_pdf, case=case, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
 
     written = RefManifest.from_json(case / "refs_manifest.json")
@@ -92,7 +92,7 @@ def test_an_ordinary_case_still_reuses_its_cached_ingest(tmp_path, offline, monk
     case = tmp_path / "case"
     pdf = _paper(tmp_path / "a" / "paper.pdf", "SAME", "10.1000/same")
 
-    cli.refs(manuscript=pdf, case=case, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=case, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
     assert RefManifest.from_json(case / "refs_manifest.json").manuscript_sha256 is not None
 
@@ -103,7 +103,7 @@ def test_an_ordinary_case_still_reuses_its_cached_ingest(tmp_path, offline, monk
     monkeypatch.setattr(ing, "ingest_pdf",
                         lambda p, o, **kw: calls.append(p) or real(p, o, **kw))
 
-    cli.refs(manuscript=pdf, case=case, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=case, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
     assert calls == [], "a verified case re-ingested when it did not need to"
 
@@ -114,10 +114,10 @@ def test_a_different_paper_in_a_hashed_case_is_still_refused(tmp_path, offline):
     one = _paper(tmp_path / "one" / "alpha.pdf", "ALPHA", "10.1000/alpha")
     two = _paper(tmp_path / "two" / "beta.pdf", "BETA", "10.1000/beta")
 
-    cli.refs(manuscript=one, case=case, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=one, case=case, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
     with pytest.raises(typer.Exit) as e:
-        cli.refs(manuscript=two, case=case, provided=None, email="test@example.org",
+        cli._refs_pipeline(manuscript=two, case=case, provided=None, email="test@example.org",
                  parse_only=False, backend="pymupdf")
     assert e.value.exit_code == 2
 
@@ -156,7 +156,7 @@ def test_the_case_folder_defaults_to_the_papers_own_name(tmp_path, offline, monk
     monkeypatch.chdir(elsewhere)  # the audit must not follow the user's cwd
     pdf = _paper(tmp_path / "papers" / "PIIS0720048X2600522X.pdf", "ONE", "10.1000/one")
 
-    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=None, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
 
     derived = tmp_path / "papers" / "PIIS0720048X2600522X"
@@ -174,7 +174,7 @@ def test_an_explicit_case_flag_still_wins(tmp_path, offline, monkeypatch, termin
     chosen = tmp_path / "mycase"
 
     for _ in range(2):  # twice: an explicit re-run is not interrogated either
-        cli.refs(manuscript=pdf, case=chosen, provided=None, email="test@example.org",
+        cli._refs_pipeline(manuscript=pdf, case=chosen, provided=None, email="test@example.org",
                  parse_only=False, backend="pymupdf")
 
     assert (chosen / "refs_manifest.json").exists()
@@ -187,10 +187,10 @@ def test_a_rerun_of_the_same_paper_can_amend_its_case(tmp_path, offline, monkeyp
     pdf = _paper(tmp_path / "papers" / "beta.pdf", "BETA", "10.1000/beta")
     derived = tmp_path / "papers" / "beta"
 
-    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=None, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
     terminal.append("amend")
-    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=None, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
 
     assert terminal == [], "the collision was not put to the user"
@@ -203,11 +203,11 @@ def test_a_rerun_can_start_a_fresh_numbered_case(tmp_path, offline, monkeypatch,
     monkeypatch.chdir(tmp_path)
     pdf = _paper(tmp_path / "papers" / "gamma.pdf", "GAMMA", "10.1000/gamma")
 
-    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=None, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
     first = (tmp_path / "papers" / "gamma" / "refs_manifest.json").read_bytes()
     terminal.append("fresh")
-    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=None, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
 
     assert (tmp_path / "papers" / "gamma-2" / "refs_manifest.json").exists()
@@ -224,10 +224,10 @@ def test_a_rerun_without_a_terminal_amends_and_says_so(tmp_path, offline, monkey
     monkeypatch.chdir(tmp_path)
     pdf = _paper(tmp_path / "papers" / "delta.pdf", "DELTA", "10.1000/delta")
 
-    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=None, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
     capsys.readouterr()
-    cli.refs(manuscript=pdf, case=None, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=pdf, case=None, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
     out = capsys.readouterr().out
 
@@ -245,12 +245,12 @@ def test_a_replaced_paper_of_the_same_name_is_still_refused(tmp_path, offline, m
     monkeypatch.chdir(tmp_path)
     path = tmp_path / "papers" / "epsilon.pdf"
     _paper(path, "FIRST", "10.1000/first")
-    cli.refs(manuscript=path, case=None, provided=None, email="test@example.org",
+    cli._refs_pipeline(manuscript=path, case=None, provided=None, email="test@example.org",
              parse_only=False, backend="pymupdf")
 
     _paper(path, "SECOND", "10.1000/second")  # same name, different paper
     with pytest.raises(typer.Exit) as e:
-        cli.refs(manuscript=path, case=None, provided=None, email="test@example.org",
+        cli._refs_pipeline(manuscript=path, case=None, provided=None, email="test@example.org",
                  parse_only=False, backend="pymupdf")
     assert e.value.exit_code == 2
 
@@ -262,7 +262,14 @@ def test_run_derives_one_case_folder_and_hands_it_to_every_stage(tmp_path, offli
     monkeypatch.chdir(tmp_path)
     pdf = _paper(tmp_path / "papers" / "zeta.pdf", "ZETA", "10.1000/zeta")
     seen: dict[str, dict] = {}
-    for name in ("ingest", "refs", "scout", "check", "highlight", "report"):
+    # `ingest` and `refs` are split into a Typer command plus a `_..._pipeline`
+    # function, the plain function `run` actually calls — see cli.py's comment
+    # on `run()`.
+    monkeypatch.setattr(cli, "_ingest_pipeline", lambda **kw: seen.__setitem__("ingest", kw))
+    monkeypatch.setattr(cli, "_refs_pipeline", lambda **kw: seen.__setitem__("refs", kw))
+    monkeypatch.setattr(cli, "_report_pipeline", lambda **kw: seen.__setitem__("report", kw))
+    monkeypatch.setattr(cli, "_check_pipeline", lambda **kw: seen.__setitem__("check", kw))
+    for name in ("scout", "highlight"):
         monkeypatch.setattr(cli, name, (lambda n: lambda **kw: seen.__setitem__(n, kw))(name))
 
     cli.run(manuscript=pdf, case=None, provided=None, email="test@example.org", model=None,
@@ -281,3 +288,95 @@ def test_the_wizard_suggests_the_folder_batch_mode_would_use(tmp_path):
     pdf.parent.mkdir(parents=True)
     pdf.write_bytes(b"%PDF-1.4\n")
     assert wizard._suggest_case(pdf) == str(cli.default_case(pdf))
+
+
+# --- the two ways around the guard -----------------------------------------
+#
+# `_guard_case` only ever ran inside `refs`. Two other paths could write into a
+# case's manuscript slot: `ingest` never consulted the guard at all, and
+# `refs --parse-only` re-ingested a legacy case and then returned before the
+# manifest caught up. Both leave one case folder describing two papers, which
+# is precisely the state the guard exists to make impossible.
+
+
+def test_ingest_refuses_to_overwrite_another_papers_manuscript_slot(tmp_path, offline):
+    """`papertrace ingest manuscript.pdf -c CASE` writes <case>/ingest/manuscript
+    — the same slot `refs` filled and `coverage_audit` reads. A different paper
+    landing there leaves the source map describing NEW and the manifest OLD.
+    """
+    case = tmp_path / "case"
+    old_pdf = _paper(tmp_path / "old" / "manuscript.pdf", "OLD", "10.1000/old")
+    new_pdf = _paper(tmp_path / "new" / "manuscript.pdf", "NEW", "10.1000/new")
+
+    cli._refs_pipeline(manuscript=old_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+
+    with pytest.raises(typer.Exit):
+        cli._ingest_pipeline(pdf=new_pdf, out=None, case=case, backend="pymupdf")
+
+    smap = json.loads((case / "ingest" / "manuscript" / "source_map.json").read_text())
+    body = " ".join(b.get("text", "") for b in smap["blocks"])
+    assert "NEW" not in body, "a different paper overwrote the case's manuscript"
+    assert "OLD" in body
+
+
+def test_ingest_of_a_cited_source_into_the_same_case_is_untouched(tmp_path, offline):
+    """The guard is about the manuscript slot, not the folder. A cited source
+    ingested into `<case>/ingest/<slug>` is not the audited paper and must stay
+    ingestable — guarding it would break `check`'s own source ingest."""
+    case = tmp_path / "case"
+    paper = _paper(tmp_path / "a" / "paper.pdf", "PAPER", "10.1000/paper")
+    source = _paper(tmp_path / "b" / "smith-2020.pdf", "SOURCE", "10.1000/src")
+
+    cli._refs_pipeline(manuscript=paper, case=case, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    cli._ingest_pipeline(pdf=source, out=None, case=case, backend="pymupdf")
+
+    assert (case / "ingest" / "smith-2020" / "source_map.json").exists()
+
+
+def test_parse_only_on_a_legacy_case_leaves_the_case_coherent(tmp_path, offline):
+    """`--parse-only` says "List references, no network" — an inspection. On a
+    legacy case it re-ingested into the manuscript slot and then returned before
+    writing the manifest, so the source map described NEW while the manifest and
+    its (absent) hash still described OLD.
+    """
+    case = tmp_path / "case"
+    old_pdf = _paper(tmp_path / "old" / "paper.pdf", "OLD", "10.1000/old")
+    new_pdf = _paper(tmp_path / "new" / "paper.pdf", "NEW", "10.1000/new")
+
+    cli._refs_pipeline(manuscript=old_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    payload = json.loads((case / "refs_manifest.json").read_text())
+    del payload["manuscript_sha256"]
+    (case / "refs_manifest.json").write_text(json.dumps(payload))
+
+    cli._refs_pipeline(manuscript=new_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=True, backend="pymupdf")
+
+    smap = json.loads((case / "ingest" / "manuscript" / "source_map.json").read_text())
+    body = " ".join(b.get("text", "") for b in smap["blocks"])
+    manifest = RefManifest.from_json(case / "refs_manifest.json")
+    raws = " ".join(e.raw for e in manifest.entries)
+    assert ("NEW" in body) == ("NEW PAPER" in raws), (
+        "the source map and the manifest describe different papers"
+    )
+
+
+def test_parse_only_still_lists_the_new_papers_references(tmp_path, offline, capsys):
+    """Not mutating the case must not mean reading the wrong paper: the listing
+    is of the file that was passed, whatever the case folder holds."""
+    case = tmp_path / "case"
+    old_pdf = _paper(tmp_path / "old" / "paper.pdf", "OLD", "10.1000/old")
+    new_pdf = _paper(tmp_path / "new" / "paper.pdf", "NEW", "10.1000/new")
+
+    cli._refs_pipeline(manuscript=old_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=False, backend="pymupdf")
+    payload = json.loads((case / "refs_manifest.json").read_text())
+    del payload["manuscript_sha256"]
+    (case / "refs_manifest.json").write_text(json.dumps(payload))
+    capsys.readouterr()
+
+    cli._refs_pipeline(manuscript=new_pdf, case=case, provided=None, email="test@example.org",
+             parse_only=True, backend="pymupdf")
+    assert "NEW PAPER" in capsys.readouterr().out

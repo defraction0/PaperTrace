@@ -4,6 +4,870 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.6.0] — unreleased
+
+### Added — a provided PDF is identified by what is in it
+
+`--provided` matched on the **filename** and nothing said so. It needs the
+reference's surname and year in the name, which a reference-manager export has
+and a publisher download never does:
+
+```
+pyrros-2023.pdf                              matches
+Pyrros et al. - 2023 - Opportunistic....pdf  matches
+s41467-023-39631-x.pdf                       no
+1-s2.0-S0140673623001234-main.pdf            no
+41467_2023_39631_MOESM1_ESM.pdf              no   (the standard Nature supplement name)
+```
+
+So a user who dragged in a folder of downloads got an audit that looked
+entirely normal and used none of it — and the failure was **asymmetric**: an
+unmatched supplement was reported, an unmatched *article* was skipped in
+silence.
+
+Each unrecognised PDF is now identified from **its own DOI**, else from **its
+own title** compared against the reference list. Filename matching still runs
+first and still wins: that is the user's own assertion about the file, and
+content only fills the gap it leaves. Supplements are identified the same way,
+which matters more than it sounds — the publisher forms carry no filename
+marker at all (`\besm\b` cannot match inside `MOESM1_ESM`, and `mmc1` and
+`media-1` say nothing) while their first page states plainly what they are.
+
+**Nothing in the folder goes unremarked.** `unused_provided` lists every PDF
+that ended up attached to nothing, with the reason kept apart: unrecognisable,
+ambiguous, a spare copy of a paper already matched, or a supplement whose
+article is missing.
+
+⚠️ **Two refusals, both deliberate.** A title matching **two** references is
+used for neither — a corrigendum shares nearly every distinctive word with its
+original, and picking the better score would judge a claim against the wrong
+paper with nothing downstream able to notice. And a title with too few
+distinctive words to tell papers apart is not a match: a filename match may be
+accepted as `unverifiable` because the user named the file, but nobody asserted
+anything about a file identified by content.
+
+Not reused for this: `_title_check_text`, the rule that already vets a
+filename-matched file. Measured on the demo's real sources it verifies
+`pyrros-2023.pdf` against an unrelated NEJM review as well, because it counts a
+reference's words anywhere on a whole page and both are about AI in medical
+imaging. It is a forgiving veto for a file already chosen, and it stays that.
+
+`Supplement.verified` and `SourceJudgement.verified` record which supplements
+were established to belong to their work. The 0.6.0 disclosure said
+*"supplements carry no identity check"*; that was true of all of them then and
+is true of only some now, so the report states the split per file instead of
+warning about both equally.
+
+Also fixed: a surname under four characters is dropped by the filename token
+filter, so `liu-2019` matched on the **year alone** and `smith-2019-appendix.pdf`
+would attach to Liu 2019 — with no title check to catch it, since supplements
+had none. Such a match now requires the slug itself in the filename.
+
+The guided wizard asks *whether* you have cited PDFs before asking *where*,
+defaulting to yes when `<case>/sources` already holds some, and asks the same
+about the paper's own supplementary material. A user with neither now answers
+two questions instead of reading two explainers and two path prompts.
+
+### Added — supplementary material, read as its own document
+
+A subgroup table in Supplementary Table S2, a sensitivity analysis in Appendix
+B, a protocol in an ESM: real papers put the decisive evidence outside the
+article, and a user holding that file had no way to hand it over. Worse,
+`refs.py` recognised supplement filenames **only in order to discard them**,
+because judging a claim against an appendix while calling it the cited source
+is the laundering this tool exists to prevent.
+
+The organising idea is that **a judgement target is a document, not a
+reference**. Multi-source checking already judged one claim against N documents
+— one model call each, per-document verdicts and crops, most-adverse headline,
+`not_addressed` unranked so a silent document taints nothing. A supplement
+enters as one more document, which is why this needs no new verdict, no new
+headline rule and no change to `coverage/3`.
+
+- **A cited work's supplements need no flag.** Drop
+  `pyrros-2023-supplement.pdf` beside `pyrros-2023.pdf` in the sources folder.
+  Several per reference is fine. Each is judged separately, and a claim citing
+  `[14]` is read against every document `[14]` has.
+- **`--supplement` (repeatable) for the audited paper**, which has no reference
+  slug for a filename to key on. A claim pointing at its own `Table S3` is read
+  against those; with none supplied it is `not retrieved` and names the flag,
+  rather than sitting in the uncited register — the paper said where its
+  evidence was and nobody opened it.
+- **A supplement never stands in for the article.** It attaches only to a
+  reference that was actually obtained; an orphan is named in the ticker with
+  the reason, because a file the user supplied that then did nothing is the
+  quietest possible failure.
+- **The wizard now asks for the sources folder**, which it never did:
+  `run_wizard` hardcoded `provided=None`, so the guided path could not reach a
+  flag the CLI has had all along.
+
+⚠️ **Two disclosures you should expect to see.** Supplements carry **no
+identity check** — a supplement's own title is not its parent's, so the check
+that guards every cited source cannot apply, and it is not faked. And a
+citation appearing *only* inside a supplement is **not counted** by the
+coverage audit, which reads the manuscript alone. Both are stated in all three
+reports whenever supplements were read, and a claim whose headline came from a
+supplement rather than the article body says so on the claim.
+
+Slugs come from the file stem, never an ordinal: `-suppl1`/`-suppl2` numbered
+in folder order is the shifting-id defect this codebase already rejects for
+citation occurrences, where deleting one file re-points another document's
+stored verdicts and crops.
+
+Wire format: `RefEntry.supplements`, `RefManifest.manuscript_supplements`,
+`SourceJudgement.kind`, `ClaimResult.own_supplement`, all schema-declared and
+absent-safe, so 0.5.x files still load. `RefManifest.from_json` also stops
+raising `TypeError` on a key it does not know — a manifest from a newer
+papertrace used to kill an older one outright.
+
+Both prompts changed, so `evals/provenance.prompt_fingerprint()` moves and
+`agreement.py` will refuse to compare a 0.6.0 run against an earlier one. That
+is the guard working, not a regression.
+
+Judgement quality here is **unmeasured**, like everything since ADR 0001.
+
+## [0.5.0] — unreleased
+
+0.4.1 was never released, so its entries below ship together with these.
+
+### Added — `papertrace --version`
+
+The first thing anyone types after installing, and it answered *"No such
+option: --version"*. Found by installing this branch from GitHub into a clean
+virtualenv and typing it. The only way to check was
+`python -c "import papertrace; print(papertrace.__version__)"`, which nobody
+guesses — so a user who had just installed from a branch had no way to confirm
+which one they were running.
+
+`--version` / `-V`, eager so it answers before the callback body runs: a bare
+`papertrace` on a terminal opens the guided wizard, and a version flag resolved
+after that would have interviewed the user about their manuscript before
+telling them the number. It reads `papertrace.__version__`, the one home
+`docs/RELEASING.md` names, rather than restating it where it could drift.
+
+### Changed — extraction is told where the citations are ⚠️ **`coverage/3`**
+
+The old flow discarded the location and then worked to reconstruct it. The
+model returned a paraphrase plus a free-text `location` ("Methods ¶2"), and
+Python guessed which of several `[3]` markers that paraphrase had come from:
+normalise both sides, score with `SequenceMatcher`, accept only on
+`ratio ≥ 0.45` **and** `margin ≥ 0.10`, assign globally best-first, and report
+everything it could not decide as `uncertain`. The counts were right and the
+*pointer* could be wrong.
+
+The inventory it was matching against had been there all along — built
+deterministically from `source_map.json`, just *after* the model call instead
+of before it.
+
+- **The inventory goes into the prompt.** `_render_inventory()` renders each
+  citation occurrence as `ctx_NNNN` with its page, section, labels and
+  sentence; `EXTRACT_PROMPT` asks the model to work through that list and
+  return, per claim, the ids it was taken from. One sentence citing [2] and [3]
+  is **one** claim carrying **both** ids.
+- **Attribution becomes a set lookup.** An occurrence is covered when some
+  claim's `ctx_ids` names it. `results.json` gains `ctx_ids` per claim and the
+  audit is `"schema": "coverage/3"`; `coverage/2` files still validate, and
+  `labels_in_text`/`covered`/`missing` keep their label-level meaning byte for
+  byte, because `evals/align.py` reads `missing` to apportion blame.
+- **Six symbols deleted** — `_attribute_label`, `_normalize_for_match`,
+  `_ratio`, `_location_matches`, `OCCURRENCE_MIN_RATIO`,
+  `OCCURRENCE_MIN_MARGIN` — and the `unicodedata`/`SequenceMatcher` imports
+  with them. **This is not a net line saving and should not be sold as one:**
+  `check.py` loses 110 lines and gains 115, roughly a third of the new ones
+  being prompt text and comments. What goes is a *mechanism* — a scoring
+  function, two tuned thresholds and a global assignment pass — replaced by a
+  dictionary lookup. The audit no longer
+  publishes `min_ratio`/`min_margin` because there is nothing to tune. The
+  deliberate ~10-line duplication with `evals/align.py` is gone too — the
+  reason it existed (papertrace cannot import `evals`, `evals` must not import
+  a matcher from the thing it grades) no longer applies, since there is no
+  matcher on this side.
+- **A `ctx` the inventory does not contain is dropped, never repaired.**
+  A hallucinated `ctx_9999` and an honest `"ctx": []` carry the same amount of
+  information about which sentence was meant, and both are treated as such.
+  Falling back to "the first occurrence of that label" would manufacture
+  exactly the confident wrong pointer this removes.
+- **`uncertain` survives, with one cause instead of several.** A claim cites a
+  label and names none of that label's contexts ⇒ a claim reached one of those
+  places and nothing can say which, so they are `uncertain` and counted as
+  **not** covered. Previously it also absorbed close calls the matcher refused;
+  that category no longer exists.
+- The report's attribution self-caveat is correspondingly shorter, and its
+  token changes: attribution is no longer "a text match that can be wrong" but
+  "the context the extractor named" — still a model step, so still capable of
+  naming the wrong place, and the report keeps saying so.
+
+**Also unmeasured**, per ADR 0001. The argument for it is structural — it
+deletes a guess and a whole class of silent wrong pointer — not a score.
+
+### Changed — the committed demo report is regenerated, and its judge is pinned
+
+`examples/demo/output/` is the only committed output and the artefact the README
+links as *"See a completed report"*. It was produced on 2026-08-30 by 0.4.1, so
+it showed none of what this release changed.
+
+- **Regenerated under 0.5.0**, and the demo command now pins
+  `--model claude-opus-5`. Without it `claude -p` takes the account default,
+  which had silently moved from opus to haiku between two regenerations — so
+  the committed showcase's judge depended on the day it was rebuilt.
+- **The pinned expectation moves to `1 supported · 2 contradicted · 1 not
+  retrieved · 1 uncited assertion`, over 4 claims rather than 5.** All four
+  planted defects are still found; what changed is that the sentence citing
+  both [2] and [3] now arrives as **one multi-source claim** instead of two
+  single-source ones, because extraction is asked for the verbatim sentence.
+  **Reproduced on `claude-opus-5` and `claude-haiku-4-5` alike**, so it is the
+  prompt and not the model — which is worth stating, because the first
+  regeneration changed both at once and the cause was ambiguous until the
+  second run isolated it.
+- Two README claims corrected as a consequence: the counts, and the line
+  asserting that no claim in the demo cites more than one reference. That is
+  now false, and the demo consequently exercises the per-source breakdown and
+  the new `most adverse of 2 cited sources` qualifier — which the old one
+  never did.
+
+### Changed — cited sources are read with the layout backend ⚠️ **breaking**
+
+`check.py` hard-coded `backend="pymupdf"` for every cited source, and said why:
+*"Layout fidelity (tables/figures) is spent on the audited paper, not its
+sources."* That had the asymmetry backwards. The manuscript's claim is the
+question; the **source** is the evidence — and the evidence for a subgroup
+claim is usually a table row. Read flat, the row is gone.
+
+- **Sources now get the same backend as the paper.** `check` gains
+  `--backend`, `run` forwards its own, and `check_claims` takes it as a
+  **required** keyword — no default, like `_clip`'s truncation accumulator in
+  the same module and for the same reason. Neither possible default is honest:
+  `auto` drags docling into an offline test run, `pymupdf` silently downgrades
+  a caller who asked for layout.
+- **`docling` moves from an extra to a base dependency.** It cannot be optional
+  once the sources depend on it. The `[docling]` and `[full]` extras are kept as
+  aliases so 0.4.x install commands still resolve. **Measured in a clean
+  virtualenv: 1.4 GB installed** (torch 591 MB, then opencv, transformers,
+  scipy), plus the ~500 MB layout-model download on first *use*. That number is
+  in the README install table rather than left as "pulls torch", because it is
+  the kind of cost a user should meet before typing the command and not after.
+  `--backend pymupdf` remains the escape hatch.
+- **CI installs it and never runs it.** The models download on use, not on
+  install, and every test pins `backend="pymupdf"` — which the required
+  argument now makes impossible to forget. The suite stays offline and no
+  slower: measured back to back on one machine, 632 tests in 22.6 s before this
+  change and 645 tests in 17.1 s after. `import docling` is itself only ~0.2 s,
+  because it does not pull torch until something converts a PDF.
+
+**Two defects this would otherwise have introduced, both found by looking:**
+
+- **`_stale_ingest` compared only the PDF hash**, so re-running an existing
+  case folder would have reused its 0.4.x **pymupdf** source maps while the run
+  reported layout-aware source ingest — a silent wrong-fidelity judgement,
+  which is the exact failure class this project exists to refuse. It now
+  compares the recorded `converter` too, resolving `auto` and ignoring
+  docling's version suffix through a shared `ingest.resolve_backend()`.
+- **The reports never said how the sources were read.** `RunResults.converter`
+  is the *manuscript's*, and the only mention of the sources was one dim line
+  in the terminal — the markdown and both HTML looks said nothing. Each
+  source's converter now travels in `RunResults.source_converters`, and any
+  source read as flat text is **named by slug** in all three formats. An empty
+  dict means the run never recorded it (every 0.4.x file) and is deliberately
+  not read as "all of them were flat".
+
+**Measured cost**, since this is a real slowdown and not an unpriced one: on
+this machine the first docling ingest in a process costs ~41 s (loading the
+layout models) and each subsequent source ~3 s. Under `papertrace run` the
+models are already loaded from the manuscript, so a 20-source paper pays
+roughly a minute more in total; `papertrace check` on its own pays the load
+once. `--backend pymupdf` remains a deliberate choice for a constrained
+machine, and now says so per source in the report instead of being the
+unstated default.
+
+A source-ingest failure — docling can run out of memory or fail to fetch its
+models, which flat text never could — unchecks that one source with the reason
+in its note, and is never laundered into `not_retrieved`.
+
+### Changed — the judge reads the paper's own sentence, not a summary of it
+
+`EXTRACT_PROMPT` asked for each claim "tightly paraphrased, ≤160 chars", and
+`CHECK_PROMPT` was handed `{id, claim, location}`. So the population, the
+effect size, the confidence interval and the hedging — the things that actually
+decide whether a citation supports a statement — had to survive a compression
+the judge could not undo. *"Mortality fell by 12% in the subgroup over 65 (HR
+0.88, 95% CI 0.79-0.98)"* and *"mortality fell by 12%"* are different claims,
+and only one of them is checkable.
+
+- **Extraction returns a verbatim `quote`** — the manuscript's own sentence,
+  ≤500 chars — alongside the paraphrase, whose cap rises to 300. The paraphrase
+  stays because it is what a report headline reads well; the quote is what gets
+  judged, and `CHECK_PROMPT` says so explicitly.
+- **The quote appears in the report** above each verdict, in all three formats,
+  so what was judged is visible rather than taken on trust.
+- **A claim judged without one says so.** An empty quote means the model did
+  not return a sentence, so the verdict rests on the paraphrase — weaker
+  evidence, and now a warn-level disclosure in every format rather than
+  something a reader has to infer from a missing blockquote. It fires only
+  where a judgement actually happened: nothing read an unretrieved source, so
+  the notice would otherwise land on every row of the gap register.
+- **The quote is never back-filled from the paraphrase.** That would reinstate
+  the exact compression this change removes while looking like it had been
+  fixed.
+- Coverage attribution briefly took its similarity ratio on the quote rather
+  than the paraphrase, which was a free improvement to the matcher — and then
+  the matcher was deleted outright by the change below. Nothing of it remains;
+  the note is kept only so the two entries do not appear to contradict each
+  other.
+- `results.json` gains `quote` on both cited claims and the uncited register;
+  `schemas/results.schema.json` is updated and `from_json` still loads a 0.4.x
+  file, where the field is simply absent.
+
+**One consequence for `evals/`:** `prompt_fingerprint()` is a content hash of
+the prompts, so this invalidates comparison against any pre-0.5.0 run.
+`agreement.py` already refuses to compare runs that do not share the
+`(set_id, prompt fingerprint, converter)` triple — that is the correct
+behaviour, not a regression. And per ADR 0001 there is no benchmark to
+compare against anyway: **this change is unmeasured.** It removes a known
+information loss; that is not the same as evidence that verdicts improved.
+
+### Changed — `report.md` by default; the HTML looks on request ⚠️ **breaking**
+
+Every run wrote three report files and a ~1 MB font bundle, whether or not
+anyone wanted three. `report.md` is what almost every run is read through; the
+editor and terminal looks exist for sharing and for screenshots.
+
+- **`papertrace run` and `papertrace report` now write `report.md` alone.**
+  Add `--format editor`, `--format terminal`, or both — `-f` for short, and
+  repeatable. The fonts are copied only when an HTML look is actually written.
+- **`report.md` is always written**, whatever `--format` says. It is the record
+  of the audit, not one presentation of it among three; a request for only a
+  screenshot look must not leave the case folder without the report itself.
+- **`--png` pulls in the HTML it screenshots.** `--png --format md` cannot mean
+  "photograph a file I told you not to write", so the HTML looks are rendered
+  regardless. Honouring it literally would have produced no PNG and said
+  nothing about why.
+- **A mistyped format is refused** — `unknown --format pdf — expected any of
+  md, editor, terminal`, exit 2, checked before `results.json` is even loaded
+  so a bad flag cannot half-write a report folder. Silently ignoring it would
+  answer `--format pdf` with a folder containing no PDF and no complaint, which
+  is the same shape as the unknown-backend bug `ingest_pdf` already refuses.
+- `write_reports()` itself still defaults to every format. It is the seam the
+  disclosure-parity suite drives, and that suite has to render all three or it
+  stops comparing anything; the narrower default belongs to the CLI, where the
+  user's intent actually is.
+
+**To restore the old behaviour:** `papertrace run paper.pdf -f editor -f
+terminal`.
+
+### Fixed — a wizard-driven audit would have crashed at the report stage
+
+Found while adding `--format`, and the third appearance of a bug class this
+codebase has now met three times. `run_wizard()` calls `cli.run` as a plain
+Python function, and Typer's declared defaults are `OptionInfo` sentinels
+rather than the values `--help` displays — so the new parameter the wizard did
+not name would have arrived as a sentinel, reached `write_reports`, and raised
+on not being iterable. After every paid model call had already been made.
+
+- `report` is now split into the Typer command and `_report_pipeline()`, which
+  is keyword-only with ordinary Python defaults — the same treatment `ingest`
+  and `refs` already had, and for the same reason. `run()` calls the pipeline
+  function.
+- The wizard now names **every** parameter `run` declares, and a new test
+  asserts that against `inspect.signature(cli.run)` rather than against a list
+  of names — so the next parameter added to `run` is caught without anyone
+  remembering to come back and update the test.
+
+### Changed — the headline no longer reads as a verdict on the whole claim
+
+`❌ CONTRADICTED` is one source's verdict. On a claim citing four references it
+reads as a statement about the claim, and a compound sentence may legitimately
+draw different parts from different references — so one dissenting source of
+four overstates by exactly the amount the status line cannot show.
+
+- **A multi-source headline now names what it ranged over**: *"❌ CONTRADICTED
+  — most adverse of 4 cited sources"*, in all three report formats. The rule
+  itself is unchanged and deliberately so: the most adverse verdict is the
+  right triage signal, and one dissenter must never be averaged away. What
+  changes is that it stops being stated unqualified.
+- **Single-source claims are not qualified**, and neither is a claim with no
+  judgements. With one source the headline *is* the claim's verdict, and
+  "most adverse of 1" would be noise that teaches readers to skip the line; a
+  `not_retrieved` claim ranked nothing at all, so naming a comparison that
+  never happened would be its own small invention.
+- No new verdict value, no schema change. A `disputed`/`mixed` state was
+  considered and declined: it would have meant a `VERDICTS` entry, a schema
+  update, a gold-verdict enum change and six render sites, to express something
+  the existing per-source breakdown already shows.
+
+**The limitation this leaves, stated rather than glossed:** the run's summary
+counts and `results.json` still tally each claim once, under its headline. A
+claim splitting 2 support / 1 partial / 1 contradict appears in the
+`contradicted` total and nowhere else. That total means *"claims with at least
+one contradicting source"*, not *"claims that are wrong"*, and the README's
+does-not list now says so. Fixing the totals properly needs the per-source
+population counted separately, which is a larger change than this one.
+
+### Decided against — two proposals declined in writing, with reasons on file
+
+A full-stack review raised seven items. Five became changes; two are declined,
+and `docs/adr/` now exists to record why so that a future review does not
+re-derive them. Choosing not to build something is user-visible scope, which
+is why it is here and not only in a commit message.
+
+- **No gold benchmark, and therefore still no accuracy figure**
+  ([ADR 0001](docs/adr/0001-no-gold-benchmark.md)). The evaluation harness is
+  not the thing that was missing: `evals/` already holds ten modules, 22 metric
+  functions, a JSON-schema'd gold contract and twelve CI-green test modules,
+  and `evals/PROPOSAL.md` already specifies the ≥40-case paired set down to its
+  acceptance criteria. What is missing is data, and one precondition for it —
+  `evals/DESIGN.md` requires ≥ 2 labellers who did not write the prompts.
+  There is one maintainer, who wrote them. Building the set self-labelled would
+  produce a number the harness itself prints a conflict-of-interest caveat
+  against, and a number nobody may cite is worse than no number, because the
+  number gets cited. `evals/PROPOSAL.md` is kept, with its status updated: it
+  is the plan if that precondition ever changes.
+
+  The consequence is stated rather than glossed: the other changes in this
+  release **ship unmeasured**. They remove mechanisms that could only degrade
+  judgment quality; that is not the same as evidence it improved, and the two
+  are not blurred anywhere in this file or the README.
+
+- **No GROBID** ([ADR 0002](docs/adr/0002-no-grobid.md)). The reference
+  parsing and reconciliation really is ~707 contiguous lines of `refs.py`, but
+  only ~261 of those are *parsing* a specialist parser would displace. The
+  other ~470 — the Crossref deposit, corroboration and `reconcile` — exist
+  because any reading of a reference list can be wrong and the tool must be
+  able to say so, and they survive a parser swap: a parser cannot certify
+  itself. Against that, GROBID wants Java, Docker and 2–4 GB of memory, and
+  its own citation-context linking is 0.76–0.91 F1 — a probabilistic gain for
+  a disqualifying deployment cost in a `pip install` tool. Not benchmarking it
+  is part of the decision: a benchmark is only worth running if a favourable
+  result would change the outcome. The roadmap item is removed rather than left
+  implying a plan that does not exist.
+
+  Superscript-citation support, which shares this surface and would fix three
+  of seven papers with unconfirmed numbering, is unaffected and remains the
+  higher-value work here.
+
+## [0.4.1] — unreleased
+
+### Added — the reference list is now checked against what the paper cites
+
+`parse_references` was the only stage in the pipeline with no way to report its
+own failure. Every other stage has one — `not_retrieved`, `unchecked`, the
+anchor tri-state, `unverifiable`, coverage `uncertain` — but the reference
+parser always returned a confident list, and nothing ever compared it to
+anything. The citation label is the **join key** between a claim and the source
+it is judged against, so a list off by one does not produce a worse audit; it
+produces a confident audit of the wrong papers. One live run misnumbered 27 of
+41 references and said so nowhere.
+
+- **Three-way reconciliation.** Two independent readings of the reference list
+  are taken — the tool's parse of the printed text, and the list the publisher
+  deposited with Crossref — and the manuscript's own `[N]` markers arbitrate
+  between them. A reading is used only if it accounts for exactly the labels
+  the body cites, which under citation-order numbering is a structural test
+  rather than a heuristic: reference *N* is by definition the *N*th first-cited
+  work. `refs` gains `--doi`, defaulting to the DOI printed on page 1.
+- **Crossref is a candidate, not an oracle.** A short deposit is more dangerous
+  than a bad parse because it looks authoritative: mapped onto `[1]`, `[2]` it
+  would silently discard the rest. One record in the test spread carries 2
+  references for a paper citing about 40, and the payload cannot reveal it —
+  Crossref's `references-count` counts what was *deposited*, so it always equals
+  the array length. The body's labels are the only thing that catches it.
+- **A reference deposited as a bare DOI is kept, and a shortfall is named as
+  this tool's.** Some publishers deposit references as a DOI and nothing else;
+  those rendered to an empty string and were dropped, and the run then reported
+  that the publisher had deposited a fraction of its own list — a false
+  accusation, and a plausible-looking number in place of an admission. They are
+  now kept and named after the DOI, which is the best case for retrieval: the
+  DOI is already resolved, so the title search is skipped entirely. Where this
+  tool still cannot render part of a deposit, the deposit is set aside rather
+  than used to renumber, and the disclosure says whose limitation it is.
+  Reference numbering is read from **array order**, never from the `key` field — keys are
+  publisher-specific (`_b0005`, `_bib1`, `3400_CR1`, `bibr1-…`,
+  `R10-45-20210317`), and two schemes turned up inside a single deposit.
+- **The DOI is checked against the paper before its record is trusted.** The
+  DOI is typed by hand or read off page 1, and the deposit is the one retrieval
+  route that can replace the *entire* reference list — a companion paper, an
+  erratum or an earlier version can carry exactly as many references as the body
+  cites, so the count test passes and the run would print "numbering confirmed"
+  over another paper's bibliography. The record's title is now compared with the
+  paper's own, tri-state like every other title check here: a mismatch sets the
+  deposit aside, and too little title to compare leaves the list in use with the
+  identity disclosed as unconfirmed rather than assumed either way. The DOI used
+  and where it came from are printed and recorded.
+- **The paper's title comes from the paper, not from its layout.** Source maps
+  record `declared_title`, the title the PDF states in its own metadata.
+  Measured on the seven-paper spread, the first heading is the article-type
+  banner whenever the layout heuristic was wrong — `CLINICAL GUIDELINE`,
+  `RESEARCH ARTICLE`, `Journal Pre-proofs`, `Editorial` — while the metadata
+  carried the exact title for six of the seven. Docling does not help here: on
+  the seventh it emits no `title` item at all. A declaration that is not
+  title-shaped (too few words, a producer's filename, a `Microsoft Word -`
+  prefix) is passed over for the layout, because an author's PDF declares the
+  name of the file it was exported from, and this tool's main case is an
+  author's PDF. `scout` uses the same title to identify the paper, so its
+  Europe PMC lookup stops searching for "RESEARCH ARTICLE".
+- **A paper's bibliography identifies it when its title cannot.** Where the
+  title comparison is unverifiable, the deposit is checked against the reference
+  list printed in the paper: 38 of 41 deposited works appear in the printed list
+  for the audited paper, against 0 of 41 for a different paper's list. Compared
+  as a set, never positionally — the same pair scores 34% in order, because that
+  paper's parse is the misnumbered one this feature exists to catch, so the
+  numbering cannot be an input to the identity test. The asymmetry is
+  deliberate: agreement is evidence of identity, disagreement is not evidence of
+  difference, since two lists that disagree may be one paper read badly. Across
+  the spread this settles all seven papers — six by title, one by bibliography,
+  where before it settled three.
+- **Failure is disclosed, not fatal.** When neither reading can be confirmed the
+  audit continues, a run-level disclosure states that the numbering is
+  unconfirmed, and every claim citing a doubtful label carries the caveat beside
+  its verdict — in all three report formats. Where the two readings corroborate
+  each other the doubt starts at their first divergence, so a list that is right
+  for its first 30 entries is not tainted wholesale.
+- **Three absences read differently.** No DOI, no deposit, and Crossref
+  unreachable are three different facts asking the reader for three different
+  things, and are never collapsed into one message.
+- `RefManifest` gains `reference_source`, `numbering_verified`,
+  `numbering_note` and `unverified_from`; all additive, and an older manifest
+  still loads — as a parse whose numbering was never checked, which is what it
+  is. `scripts/reference_audit.py` reports the three counts per PDF, offline of
+  the model and free.
+
+Measured on seven papers across four publishers: all seven deposit a reference
+list, and the check catches both known parse failures (43 parsed vs 41 real;
+106 parsed vs 101 real). Three of the seven cite by **superscript numeral**,
+which flattens to indistinguishable prose when the PDF is converted to text —
+those papers have no arbiter, and are reported as unconfirmed rather than
+presented as checked.
+
+### Fixed — eleven cited sources were downloading to one file
+
+Found by a live run on a JAMA editorial while verifying the above, and worse
+than the `TypeError` that revealed it. `_slug` took the *first* token of the
+reference, stripped non-letters, and fell back to the literal `ref` when nothing
+survived. `_parse_bulleted` leaves the printed list numeral at the front of the
+reference text, so the first token was `1`, `2`, `3`… and **23 of 28 references
+slugged `ref-2024`**. The slug is also the download's filename, so all eleven
+retrieved sources wrote to one path, each overwriting the last — every claim
+citing any of them would have been judged against whichever paper downloaded
+last, with no error.
+
+- `_slug` now takes the first token that actually contains letters.
+- `_unique_slugs` guarantees no two entries in a manifest share a slug, applied
+  to both producers. A genuine collision needs no parser bug — the same first
+  author and year cited twice does it — so uniqueness is enforced rather than
+  assumed to follow from a better slug. The first entry keeps the natural slug,
+  so a `--provided` file named `<author>-<year>.pdf` still matches.
+- `_parse_bulleted` strips the leading numeral, which also kept it out of the
+  Crossref bibliographic search and the title check.
+
+### Fixed — `--parse-only` and the offline test suite reached the network
+
+`refs` is also called as a plain Python function, by `run` and by the tests, and
+Typer's declared default for an option is an `OptionInfo` object rather than the
+value the help screen shows. `OptionInfo` is truthy, so the new `doi or
+detect_doi(...)` took it for a real DOI and built a request URL out of its repr.
+The offline test suite began making live Crossref calls — and passed, because
+the machine running it had network. Same shape as the bug that made `ingest`'s
+backend an `OptionInfo` and read every paper as flat text while reporting
+layout-aware ingest.
+
+### Fixed — the scout's wrong-paper warning stopped firing when the DOI became a guess
+
+`_resolve_paper` records `via: doi` whenever a DOI is supplied, and the console
+warned "wrong paper? pass --doi" only on `via: title` — so when `run` began
+reading the DOI off page 1 and handing it down, a funder, data-availability or
+erratum DOI could anchor the whole literature scan to somebody else's paper
+*and* suppress the only signal that it had. The provenance is not recoverable
+inside `scout`, and it is the wrong question: the record's own title is
+comparable with the paper's.
+
+`ScoutResults` gains `identity` — `confirmed` / `unverified` / `mismatch`,
+additive, and `""` on an older `scout.json` means not recorded rather than
+confirmed. A mismatch stops the scan and says so instead of filling both
+registers from another paper, since the registers *are* the finding. Too little
+title to compare leaves the scan in place and discloses the unknown, the same
+tri-state used for a deposit and for a downloaded source. The title comparison
+itself moved to `models.titles_match`: three readers now need it, and a copy in
+`scout` is the defect the other shared rules in that module exist to prevent.
+
+### Fixed — a `--provided` file could be judged as two different references
+
+`_unique_slugs` renames the second of two colliding entries to
+`smith-2019-r7`, and `_provided_candidates` drops slug tokens of three
+characters or fewer — so `r7`, the only thing telling the two apart, was
+invisible and `sources/smith-2019.pdf` matched both. Measured: entry [7] came
+back `status=provided`, `title_check=mismatch`, pointing at entry [2]'s paper,
+and its claims would have been judged against it. Worse than before slugs were
+made unique, when both entries shared a slug and were grouped into one source.
+
+"Disclosed, not fatal" still holds for a file the user *named* for a reference —
+they chose it, there is nothing to fall back to, and a scanned PDF yields no
+text to check. It does not hold for a file a token match found: nobody chose it
+for that reference, so a title check that says "different paper" is now a reason
+to keep looking. Candidates are read in rank order until one is usable, and
+where the retrieval chain then finds nothing, the reason names the file that was
+set aside and why — a gap that withholds what the tool already knows is the
+failure this project exists to avoid.
+
+### Fixed — the coverage audit had its own idea of where the bibliography begins
+
+`coverage_audit` cut the body at `^##\s+(references|bibliography|literature)`,
+a second boundary rule beside `models.is_references_heading` — which carries a
+comment saying two readers need one rule because two is a defect this project
+already shipped. The regex needs ingest to have *typed* the block as a heading,
+and flat-text ingest guesses headings from font size, so a `References` line at
+body size reaches `clean.md` with no `##`. Reproduced on a generated paper:
+`labels_in_text` came back `['1','2','3']` where `[3]` appears only inside the
+reference list, so the audit reported a gap that does not exist — in the one
+figure it computes mechanically so that it cannot. Both the label reading and
+the `clean.md` occurrence fallback now cut on the shared rule.
+
+### Added — `init --for <paper>` names the case folder the way `run` would
+
+`init` then `run paper.pdf` used to orphan `case/sources/`: `run`/`refs` name
+their own folder after the paper, so a hand-made `./case/` is only reused if
+`-c case` is remembered every time. `init --for paper.pdf` now names the
+folder exactly as `default_case` would, so a plain follow-up
+`papertrace run paper.pdf` finds it automatically. An explicit folder name
+still wins over `--for`; omitting `--for` keeps the previous `./case/`
+default and its `-c` reminder.
+
+### Fixed — the judging call ran with the wrong repo's rules and a full toolset
+
+`_ask`, the only seam that calls a model, passed no `cwd` to `claude -p` and no
+tool restriction. Running an audit from inside a repo silently fed that repo's
+own `CLAUDE.md` into every verdict, undisclosed anywhere in the report, and the
+judge held the CLI's default toolset — Bash, Edit, WebFetch — while it is only
+ever supposed to read the prompt it is given and answer. `_ask` now runs with
+`--safe-mode`, `--tools ""` and `cwd` set to a private, per-process scratch
+directory — not the shared, world-writable system temp root, which another
+local user could otherwise plant config into.
+
+### Fixed — the "no case folder" hint implied a search it never ran
+
+`check`, `highlight`, `report` and `scout` take no manuscript path, so when
+`-c` is omitted and no case folder is found, the hint had nothing to look
+beside and only ever checked the current working directory — but it said "no
+case folder found here," which reads as an exhaustive search. Reworded to "no
+case folder found in the current directory," naming the one thing that was
+actually checked.
+
+### Fixed — a table's own numbers were read as citations
+
+`_LABEL_GROUP` matches `[N]` and `[N, M]` alike, and a results table's 95% CI
+column is written exactly that way — `[100, 100]`, `[51, 85]`. Reproduced on a
+real radiology paper: two table blocks holding CI columns supplied every
+square-bracket match in the manuscript, none from prose, and pushed the highest
+cited label the reconciler saw from the paper's real count to 100 — a confident,
+wrong numbering read for a paper whose actual in-text citation style
+(round-bracket numeric) this tool does not yet recognise at all, so the honest
+answer was "unconfirmable," not "[1]-[100]." `_body_citation_labels`,
+`citation_occurrences`, and `citation_labels_in_text` now skip table content —
+by block type where a source map is available, by each row's own GFM `| ... |`
+shape in the `clean.md` fallback, since flat text carries no block type.
+
+### Fixed — the numbering banner and the per-claim caveat contradicted each other
+
+When the doubt could not be narrowed, the run-level disclosure rendered "every
+entry is affected" while `label_is_doubtful` returned False for every label for
+the same reason — `unverified_from is None`. The report asserted that every
+entry was suspect and marked no claim suspect, so a reader acting on a single
+verdict was told nothing. An unconfirmed numbering with no recorded scope now
+puts every label in doubt. Two shapes reach that state: a manifest written
+before the list was reconciled at all, and two readings that agree entry for
+entry with no arbiter to confirm either — the superscript-citation case, which
+is about half of real papers, so those reports now carry the caveat on every
+claim rather than on none.
+
+### Fixed — a reused source directory could hold a different paper
+
+`check` re-ingests a cited source only when `annotated.md` is missing, and the
+directory it reuses is named after the reference's slug. A slug is not an
+identity that holds still: fixing a slug collision renames one of the two
+colliding entries, and the reconciler can hand `refs` the publisher's list on
+one run and the parsed list on the next. Re-running an existing case could
+therefore hand the model the directory's previous occupant and judge a claim,
+confidently, against a different paper. `SourceMap.doc` could not catch it —
+every cited source is stored as `<slug>.pdf`, so it reads the same either way.
+
+Source maps now record `source_sha256`, the hash of the bytes they were built
+from, and a directory whose hash does not match the file now at `pdf_path` is
+re-ingested. An unhashed map — written before this — counts as stale:
+re-ingesting is local, free and quick, while trusting it is a guess about which
+paper is in a file. The field is additive and older maps still load, where
+absent means unknown and never "matches".
+
+### Fixed — the tool could invent a reference
+
+Found by the first real audit: a 43-reference Elsevier paper was reported as
+having 46, and the three extra "references" were the paper's own table
+captions, published in the retrieval manifest as `paywalled` works with real
+DOIs attached.
+
+- **A resumed reference list must look like references.** `references_span`
+  scanned to the end of the document for any run of blocks sharing the
+  bibliography's block *type*, with no test on the text — so three `list`
+  blocks under a `TABLE TITLES` heading became references 44–46. A candidate
+  run now has to be at least half reference-shaped. Half rather than all,
+  because a genuine continuation can carry a bare-URL entry with no year. The
+  docstring claimed this was already the case; it was not.
+
+- **A non-reference is never title-searched, and a component DOI is never
+  accepted.** Crossref answered a title search for "Table 1. Dataset
+  characteristics" with `10.7717/peerj.7892/table-1` — a *table* belonging to
+  an unrelated paper — and nothing caught it, because the title sanity check
+  only runs on the download path and no copy was ever downloaded. Entries that
+  read as nothing citable are refused before the search, mirroring the existing
+  web-page gate, and any DOI naming a table, figure or supplement is rejected
+  wherever it came from.
+
+  `looks_like_reference` accepts a year, a DOI, an arXiv id **or an author
+  list**. The author clause is not decoration: two real references in the same
+  paper reached the resolver truncated mid-title with no year at all, and
+  Crossref found both correct DOIs from the author string. A year-only test
+  turned them into gaps.
+
+- **The retrieval manifest keeps the evidence for a title check that passed.**
+  `title_check: verified` and `title_check: unverifiable` both arrived as bare
+  assurances; the detail was recorded only on mismatch. Accepted downloads now
+  carry it too — `title check: 18/19 reference tokens on its first page`.
+
+- **The scout says which failure it was.** With `--doi` supplied and no record
+  found, it reported "paper not identified in Europe PMC — pass `--doi` to pin
+  it", advising the operator to do what they had just done, and wrote
+  `"doi": ""` into `scout.json` so the artifact could not show what was tried.
+  A DOI that returns nothing means the paper is not indexed — usual for an
+  in-press pre-proof, and a stronger fact than a failed title heuristic. Both
+  registers being empty is absence of data, not a clean literature search.
+
+### Fixed — the literature scout, and the escaping hole it uncovered
+
+Found by a second live audit, of a pancreatic-cancer paper.
+
+- **The keyword query is about the subject now.** `_keywords` took the first
+  four content words of the title, so *"Image registration improves inter-reader
+  agreement of objective response in CT assessment of pancreas adenocarcinoma"*
+  searched for `image AND registration AND improves AND inter-reader` — a method
+  phrase containing a verb, never reaching the disease. It matched a stroke
+  conference abstract on the word IMPROVES. Words are now ranked by length as a
+  proxy for topical specificity rather than by position, and a short list of
+  words that state what a paper *claims* rather than what it is *about*
+  (`improves`, `reduces`, `assessment`, …) joins the stop list. The same title
+  now yields `adenocarcinoma AND registration AND inter-reader AND agreement`.
+
+- **A paper from the manuscript's own year is no longer "existed but uncited".**
+  That register invites the reader to ask what the authors missed, and a
+  same-year paper may have appeared after submission — on the audited paper all
+  fifteen candidates were from its own year. `same_year` is a third register,
+  rendered apart and labelled, because folding it into either neighbour states
+  something false and dropping it would lose a finding a reviewer might
+  legitimately raise. Additive in `schemas/scout.schema.json`; an older
+  `scout.json` still loads.
+
+- **Europe PMC's escaped markup is decoded.** Titles arrived as
+  `CTV&lt;sub&gt;boost&lt;/sub&gt;` and were rendered verbatim.
+
+- **The HTML reports actually escape their interpolations.** `report.py` passed
+  `select_autoescape(["html"])`, which matches a name ending in `.html` — the
+  templates are `report_editor.html.j2` and `report_terminal.html.j2`, so
+  nothing ever matched and **autoescape was off for all three formats**. It
+  stayed invisible because the one field carrying angle brackets, a Europe PMC
+  title, arrived pre-escaped from the API; decoding those entities above is what
+  made it reachable. Cited source PDFs are downloaded from third parties and
+  their text reaches the report, so this was not hypothetical. Matched on
+  `.html.j2` now. Markdown is not HTML and is left verbatim.
+
+### Changed
+
+- **A substantive verdict must now name a page and a block the source actually
+  has, and must be showable.** `check` validates every `supported`, `partial`
+  and `contradicted` judgement against the cited source's own
+  `source_map.json`: the page must exist, `source_block` is now **required**,
+  and it must sit on the page the verdict names. Anything else is
+  `unchecked` with a note, never a verdict. `highlight` enforces the same rule
+  against reality — a substantive judgement that produced no evidence image is
+  downgraded there too, because the PDF can be missing from
+  `sources_resolved/` and a source map can disagree with the PDF it came from.
+
+  The block requirement is what makes the picture unconditional: the crop
+  region is the block's bbox, so a valid block always yields an image and the
+  anchor phrases only decide whether a red box is drawn on it. `CHECK_PROMPT`
+  already asked for `source_block` and already told the model to omit it only
+  for `not_addressed`, so no prompt text changed and eval runs stay comparable
+  across this release.
+
+  **This changes counts.** A run that previously reported a verdict resting on
+  page-only provenance, an impossible page or a nonexistent block now reports a
+  gap. `not_addressed` is unaffected — it never claimed a passage.
+
+- **A source with no `source_map.json` can no longer produce a verdict.** Its
+  judgements are `unchecked`, with a note naming the re-ingest that fixes it.
+  Previously the location it named could not be checked against anything.
+
+### Fixed
+
+- **Two ways around the one-case-one-paper guard.** `papertrace ingest` never
+  consulted `_guard_case`, so a different paper could overwrite
+  `<case>/ingest/manuscript` — the slot `refs` fills and the coverage audit
+  reads — while the manifest still described the first paper. The guard now
+  runs whenever the output *is* that slot, recognised by shape so `--out`
+  cannot walk in behind `-c`'s back; a cited source ingested into
+  `<case>/ingest/<slug>` is untouched. And `refs --parse-only` on a pre-hash
+  case re-ingested the manuscript slot and then returned before writing the
+  manifest; an inspection command now reads the paper into a temporary
+  directory and mutates nothing.
+
+- **Claims whose headline is `not_retrieved` or `unchecked` now show their full
+  per-source state.** The gap sections printed the claim text alone, so a claim
+  citing [1,2] where source 1's check failed and source 2 was never obtainable
+  said neither thing, and a `not_addressed` from a source that *was* read
+  vanished behind the `unchecked` headline that outranks it. All three formats
+  now render the co-citation breakdown, the unretrieved co-citations and one
+  row per judgement with its note. The editor look also labelled a whole
+  section row with `items[0].verdict`, calling a mixed section whichever
+  verdict came first; it is one row per claim now.
+
+- **The anchor tri-state is no longer flattened.** `anchor_located` is `True`
+  (searched and located), `False` (searched, not located) or `None` (never
+  searched) — three facts. The disclosure was gated on `evidence_image`, so a
+  verdict with a page and no crop disclosed nothing; it is gated on provenance
+  now, with wording that does not describe a picture that was not written. The
+  `highlight` console branched on truthiness and described `None` as "no anchor
+  phrase found on the page", asserting a search that never happened.
+
+### Evaluation harness
+
+Developer tooling; none of this affects an ordinary audit.
+
+- Gold-case eligibility is decided **before** alignment, not after. An
+  unresolved or drift-invalidated case used to compete for predictions and
+  consume the one an eligible case needed — which then reported as the tool's
+  extraction gap, moving blame off the tool silently.
+- Cases that were never eligible no longer vote in repeated-run agreement.
+- Duplicate prediction ids are refused with an error naming them, instead of a
+  dict comprehension keeping whichever came last — the one place alignment's
+  documented order-independence did not hold.
+- Repeated-run agreement enforces the whole **(`set_id`, prompt fingerprint,
+  ingest converter)** triple. The error message already claimed the triple
+  while only `set_id` was checked.
+- The two agreement figures are renamed for what they are: **penalized**
+  (a genuine lower bound) and **complete-case** (a different population, not a
+  bound in either direction). `intersection` was labelled the upper bound,
+  which is false — dropping a case whose true agreement is high pulls the mean
+  down.
+- `not_addressed` is a rendered confusion-matrix **column**, not only a row.
+  The arithmetic always had four classes; the table printed three, so a
+  mistake was counted and then hidden.
+- `evals/DESIGN.md` describes all four judgement classes.
+
+### Documentation
+
+`README.md` corrections, each a statement that did not match the code: page
+provenance is not universal (`not_addressed` has none by design) and is now
+page *and* block; an unboxed crop needs a valid block to exist at all;
+`not_addressed` is deliberately unranked in the headline rule; the default case
+folder is the paper's stem, not `case/`; text drawn inside a raster figure has
+no text layer to box; and both Quick Starts need `git clone` because PaperTrace
+is not on PyPI.
+
 ## [0.4.0] — 2026-08-30 (beta)
 
 ### Added

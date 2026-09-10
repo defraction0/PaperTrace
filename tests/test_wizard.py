@@ -367,7 +367,15 @@ def test_run_forwards_the_backend_it_was_given(tmp_path, monkeypatch):
             seen[name] = (a, kw)
         return f
 
-    for stage in ("ingest", "refs", "scout", "check", "highlight", "report"):
+    # `ingest` and `refs` are split into a Typer command plus a `_..._pipeline`
+    # function, the plain function `run` actually calls — see cli.py's comment
+    # on `run()`. The rest are still Typer commands called directly,
+    # keyword-only by convention.
+    monkeypatch.setattr(cli, "_ingest_pipeline", spy("ingest"))
+    monkeypatch.setattr(cli, "_refs_pipeline", spy("refs"))
+    monkeypatch.setattr(cli, "_report_pipeline", spy("report"))
+    monkeypatch.setattr(cli, "_check_pipeline", spy("check"))
+    for stage in ("scout", "highlight"):
         monkeypatch.setattr(cli, stage, spy(stage))
     monkeypatch.setattr(cli, "_guard_case", lambda case, manuscript: None)
 
@@ -618,4 +626,39 @@ def test_the_printed_estimate_does_not_promise_a_ceiling_it_can_exceed():
     assert "model_calls_max" in src, "the worst case is computed but never shown to the user"
     assert "up to [bold]{w['model_calls']}" not in src, (
         "the base estimate is still presented as a ceiling"
+    )
+
+
+def test_the_wizard_passes_run_every_parameter_run_declares():
+    """`run_wizard` calls `cli.run` — a Typer command — as a plain function, so
+    every parameter it omits arrives as a truthy `OptionInfo` rather than the
+    default the help screen shows.
+
+    This is the third appearance of that bug class and the first at this edge.
+    Adding `--format` to `run` left the wizard's call short by one, and an
+    `OptionInfo` reaching `write_reports` is not iterable — so a wizard-driven
+    audit would have crashed at the report stage, after every paid model call
+    had already been made.
+
+    Asserted against the signature rather than against a list of names, so the
+    next parameter added to `run` is caught without anyone remembering to come
+    back here.
+    """
+    import inspect
+
+    from papertrace import cli, wizard
+
+    declared = {
+        n for n, p in inspect.signature(cli.run).parameters.items()
+        if p.kind is not inspect.Parameter.VAR_KEYWORD
+    }
+    src = inspect.getsource(wizard.run_wizard)
+    call = src[src.index("run_cmd("):]
+    call = call[: call.index(")\n")]
+    passed = set(re.findall(r"(\w+)\s*=", call))
+
+    missing = declared - passed
+    assert not missing, (
+        f"run_wizard's call to cli.run omits {sorted(missing)} — Typer will "
+        "supply an OptionInfo sentinel for each, not the documented default"
     )

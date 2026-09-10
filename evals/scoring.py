@@ -23,13 +23,19 @@ def score(gold: dict, results, gold_path: Path | None = None,
     if refs_drift is None:
         refs_drift = (provenance or {}).get("refs_status_drift")
 
-    alignment = align_mod.align(gold, results)
-    pairs = align_mod.matched_pairs(gold, results, alignment)
-    matched = {g["case_id"]: p for g, p in pairs}
-
-    # eligibility is decided once, for both reasons, before any metric runs
+    # eligibility is decided once, for both reasons, BEFORE alignment — not
+    # merely before the metrics. A case that can never be scored used to
+    # compete for predictions anyway, and a prediction is consumed once: an
+    # unresolved gold case sitting on the same citation label as an eligible
+    # one took its match, and the eligible case was then reported as the tool's
+    # extraction gap. Blame moved off the harness and onto the tool, silently.
     scoreable, excluded = elig_mod.eligibility(gold, refs_drift)
     eligible_ids = {c["case_id"] for c in scoreable}
+
+    eligible_gold = {**gold, "cases": scoreable}
+    alignment = align_mod.align(eligible_gold, results)
+    pairs = align_mod.matched_pairs(eligible_gold, results, alignment)
+    matched = {g["case_id"]: p for g, p in pairs}
     unresolved = [e for e in excluded if e.reason == elig_mod.GOLD_VERDICT_UNRESOLVED]
     drifted = [e for e in excluded if e.reason == elig_mod.REFS_STATUS_DRIFT]
     unverified = elig_mod.not_verified(refs_drift)

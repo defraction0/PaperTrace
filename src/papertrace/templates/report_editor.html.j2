@@ -58,6 +58,7 @@
   figure{margin:2px 0 0;}
   .crop{display:block;max-width:600px;max-height:230px;border:1px solid var(--edge);border-radius:3px;background:#fff;}
   figcaption{font-family:"Mono",monospace;font-size:11px;color:var(--dim);margin-top:5px;}
+  .mquote{font-size:13.5px;color:#c8c8c8;margin:0 0 11px;padding:7px 0 7px 14px;border-left:3px solid #4a4a4a;line-height:1.55;max-width:850px;font-style:italic;}
   .cap{font-size:13px;color:var(--muted);margin:9px 0 0;padding-left:14px;border-left:3px solid var(--edge);line-height:1.5;max-width:850px;}
   .cap b{color:#d0d0d0;}
   .gap-intro{font-size:13.5px;color:var(--muted);margin:5px 0 12px;line-height:1.5;}
@@ -124,16 +125,28 @@
 
 {% for c in checked %}
     <h2><span class="hx">##</span> Claim {{ c.id }}: <span class="q">“{{ c.claim }}”</span></h2>
-    <div class="status {{ c.verdict }}"><span class="lbl">Status:</span> <span class="val">{{ c.label }}</span></div>
+    <div class="status {{ c.verdict }}"><span class="lbl">Status:</span> <span class="val">{{ c.label }}</span>{% if c.headline_qualifier() %} <span class="cap">— {{ c.headline_qualifier() }}</span>{% endif %}</div>
+{% if c.quote %}
+    <blockquote class="mquote">{{ c.quote }}</blockquote>
+{% endif %}
 {% for d in claim_disclosures(c) if d.key == "sources" %}
     <p class="src-summary"><b>{{ d.text }}</b></p>
+{% endfor %}
+{% for d in claim_disclosures(c) if d.key == "no_quote" %}
+    <p class="cap">⚠️ {{ d.text }}</p>
+{% endfor %}
+{% for d in claim_disclosures(c) if d.key == "supplement_headline" %}
+    <p class="cap">⚠️ {{ d.text }}</p>
 {% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}
     <p class="cap"><span style="color:var(--amber)">⚠ {{ d.text }}</span></p>
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "claim_numbering" %}
+    <p class="cap"><span style="color:var(--amber)">⚠ {{ d.text }}</span></p>
+{% endfor %}
 {% if c.judgements %}
 {% for j in c.judgements %}
-    <h3><span class="hx">###</span> <span class="status {{ j.verdict }}">{{ j.label }}</span> — <span class="slug">{{ j.source_slug }}</span> <span class="cap">cited as [{{ j.ref }}]</span></h3>
+    <h3><span class="hx">###</span> <span class="status {{ j.verdict }}">{{ j.label }}</span> — <span class="slug">{{ j.source_slug }}</span> <span class="cap">{{ j.origin }}</span></h3>
 {% if j.source_page %}
     <ul class="src"><li><b>Source:</b> Page {{ j.source_page }}{% if j.source_block %} <code>({{ j.source_block }})</code>{% endif %}</li></ul>
 {% endif %}
@@ -145,6 +158,10 @@
       <img class="crop" src="{{ j.evidence_image }}">
       <figcaption>![evidence] {{ j.source_slug }} · page {{ j.source_page }} · {% for d in judgement_disclosures(j) %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}</figcaption>
     </figure>
+{% else %}
+{% for d in judgement_disclosures(j) %}
+    <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
+{% endfor %}
 {% endif %}
 {% endfor %}
 {% else %}
@@ -157,6 +174,10 @@
       <img class="crop" src="{{ c.evidence_image }}">
       <figcaption>![evidence] {{ c.source_slug }} · page {{ c.source_page }} · {% for d in claim_disclosures(c) if d.key == "anchor" %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}</figcaption>
     </figure>
+{% else %}
+{% for d in claim_disclosures(c) if d.key == "anchor" %}
+    <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
+{% endfor %}
 {% endif %}
 {% if c.note %}
     <p class="cap">{{ c.note }}</p>
@@ -169,7 +190,7 @@
     <p class="gap-intro">Statements that would normally carry a reference but don't. Not verified — flagged for you to weigh.</p>
     <ul class="src">
 {% for u in r.uncited %}
-      <li><b>[U{{ u.id }}]</b> {{ u.claim }}{% if u.location %} <code>{{ u.location }}</code>{% endif %}</li>
+      <li><b>[U{{ u.id }}]</b> {{ u.quote or u.claim }}{% if u.location %} <code>{{ u.location }}</code>{% endif %}</li>
 {% endfor %}
     </ul>
 {% endif %}
@@ -178,12 +199,29 @@
     <p class="gap-intro">Either the cited PDF could not be obtained, or the check step failed on an
       available source (see notes). Reported as such — never filled in from memory.</p>
     <table class="gaptbl">
+{# one row per CLAIM, not per section: `items[0].verdict` labelled a section
+   holding one not_retrieved and one unchecked as whichever came first #}
 {% for section, items in gaps.items() %}
-      <tr><td class="sec">{{ section }}</td><td class="st">{{ items[0].verdict|replace("_", " ") }} · {{ items|length }}</td>
-        <td class="it">{% for c in items %}{{ c.claim }}{% if not loop.last %}<span class="s">·</span>{% endif %}{% endfor %}</td></tr>
+{% for c in items %}
+      <tr><td class="sec">{{ section if loop.first else "" }}</td><td class="st">{{ c.verdict|replace("_", " ") }}</td>
+        <td class="it">{{ c.claim }}
+{% if c.note %}
+          <div class="cap">{{ c.note }}</div>
+{% endif %}
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs", "claim_numbering") %}
+          <div class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></div>
+{% endfor %}
+{% for j in c.judgements %}
+          <div class="cap"><span class="slug">{{ j.source_slug }}</span> {{ j.origin }} — <span class="status {{ j.verdict }}">{{ j.verdict }}</span>{% if j.source_page %} · p.{{ j.source_page }}{% endif %}{% if j.note %} — {{ j.note }}{% endif %}</div>
+{% for d in judgement_disclosures(j) %}
+          <div class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></div>
+{% endfor %}
+{% endfor %}
+        </td></tr>
+{% endfor %}
 {% endfor %}
     </table>
-{% if scout and (scout.newer or scout.overlooked or scout.error) %}
+{% if scout and (scout.newer or scout.overlooked or scout.same_year or scout.error) %}
 
     <h2><span class="hx">##</span> Literature scout <span class="q">— what the reference list doesn't know</span></h2>
     <p class="gap-intro">Candidates for your judgement, not accusations — search-based (Europe PMC{% if scout.paper_year %}, paper year {{ scout.paper_year }}{% endif %}),
@@ -194,11 +232,19 @@
         <td class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> <code>{{ h.doi }}</code>{% endif %}</td></tr>
 {% endfor %}
 {% for h in scout.overlooked[:8] %}
-      <tr><td class="sec">uncited · {{ h.year or "?" }}</td><td class="st">existed at pub. time</td>
+      <tr><td class="sec">uncited · {{ h.year or "?" }}</td><td class="st">in print before pub.</td>
+        <td class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> <code>{{ h.doi }}</code>{% endif %}</td></tr>
+{% endfor %}
+{% for h in scout.same_year[:8] %}
+      <tr><td class="sec">same year · {{ h.year or "?" }}</td><td class="st">may postdate submission</td>
         <td class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> <code>{{ h.doi }}</code>{% endif %}</td></tr>
 {% endfor %}
     </table>
-{% if scout.newer|length > 10 or scout.overlooked|length > 8 %}
+{% if scout.same_year %}
+    <p class="gap-intro" style="margin-top:8px">Same-year candidates are listed apart on purpose: one from the paper's own year may
+      have appeared after submission, so it is neither literature published since nor something the authors should have known.</p>
+{% endif %}
+{% if scout.newer|length > 10 or scout.overlooked|length > 8 or scout.same_year|length > 8 %}
     <p class="gap-intro" style="margin-top:8px">Full lists in <code>scout.json</code>.</p>
 {% endif %}
 {% endif %}

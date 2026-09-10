@@ -140,7 +140,8 @@ def test_failed_check_is_unchecked_never_not_retrieved(tmp_path, monkeypatch):
 
     monkeypatch.setattr(check_mod, "_ask", boom)
     errors = []
-    check_claims(claims, manifest, tmp_path, on_error=lambda s, m: errors.append((s, m)))
+    check_claims(claims, manifest, tmp_path, on_error=lambda s, m: errors.append((s, m)),
+                 backend="pymupdf")
 
     assert len(calls) == 2  # one retry before giving up
     assert claims[0].verdict == "unchecked"
@@ -149,19 +150,40 @@ def test_failed_check_is_unchecked_never_not_retrieved(tmp_path, monkeypatch):
 
     # and a genuinely missing source still reads not_retrieved
     claims2 = [ClaimResult(id=2, claim="d", location="Intro", refs=["9"])]
-    check_claims(claims2, manifest, tmp_path)
+    check_claims(claims2, manifest, tmp_path, backend="pymupdf")
     assert claims2[0].verdict == "not_retrieved"
 
 
+def _ingested(dirpath, slug: str, pages: int = 2) -> None:
+    """An ingested source: the text AND the map that proves where its blocks are.
+
+    Both, always — a source map is no longer optional. `check` validates every
+    substantive verdict's page and block against it, so a source without one
+    can produce no verdict at all.
+    """
+    from papertrace.models import Block, SourceMap
+
+    dirpath.mkdir(parents=True, exist_ok=True)
+    (dirpath / "annotated.md").write_text(
+        f"<!-- block_0001, page 1 -->\nText of {slug}.\n"
+        f"<!-- block_0002, page 2 -->\nMore of {slug}.\n"
+    )
+    SourceMap(
+        doc=f"{slug}.pdf", pages=pages,
+        blocks=[
+            Block("block_0001", "text", 1, (0.0, 0.0, 100.0, 20.0), [], f"Text of {slug}."),
+            Block("block_0002", "text", 2, (0.0, 0.0, 100.0, 20.0), [], f"More of {slug}."),
+        ],
+    ).to_json(dirpath / "source_map.json")
+
+
 def _one_source_manifest(tmp_path, *entries):
-    """Manifest + an ingested annotated.md for every retrieved entry."""
+    """Manifest + a fully ingested source for every retrieved entry."""
     from papertrace.models import RefManifest
 
     for e in entries:
         if e.status in ("retrieved", "provided"):
-            d = tmp_path / "ingest" / e.slug
-            d.mkdir(parents=True, exist_ok=True)
-            (d / "annotated.md").write_text(f"<!-- block_0001, page 1 -->\nText of {e.slug}.")
+            _ingested(tmp_path / "ingest" / e.slug, e.slug)
     return RefManifest(manuscript="m.pdf", entries=list(entries))
 
 
@@ -186,7 +208,7 @@ def test_malformed_verdict_becomes_unchecked_never_partial(tmp_path, monkeypatch
         lambda prompt, model=None: '[{"id":1,"note":"no verdict key"},'
                                    ' {"id":2,"verdict":"probably fine","note":"junk"}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     assert claims[0].verdict == "unchecked"
     assert claims[1].verdict == "unchecked"
@@ -219,7 +241,7 @@ def test_multiref_claim_records_only_the_sources_it_could_not_obtain(tmp_path, m
                                    ' "source_page":1,"source_block":"block_0001",'
                                    ' "anchor_phrases":["Text"]}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     c = claims[0]
     assert c.verdict == "supported"
@@ -350,7 +372,7 @@ def test_model_may_not_assign_a_pipeline_state(tmp_path, monkeypatch):
         check_mod, "_ask",
         lambda prompt, model=None: '[{"id":1,"verdict":"not_retrieved","note":"could not find"}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     c = claims[0]
     assert c.verdict == "unchecked"
@@ -394,7 +416,7 @@ def test_verdict_without_a_source_page_is_unchecked_not_page_none(tmp_path, monk
         lambda prompt, model=None: '[{"id":1,"verdict":"supported","note":"ok",'
                                    ' "anchor_phrases":["Text"]}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     assert claims[0].verdict == "unchecked"
     assert "source_page" in claims[0].note
@@ -422,7 +444,7 @@ def test_a_rejected_response_writes_nothing_to_the_claim(tmp_path, monkeypatch):
         lambda prompt, model=None: '[{"id":1,"verdict":"supported","note":"ok",'
                                    ' "source_block":"block_0001","anchor_phrases":["Text"]}]',
     )
-    check_claims(claims, manifest, tmp_path)
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
     c = claims[0]
     assert c.verdict == "unchecked"
@@ -455,7 +477,7 @@ def test_null_anchor_phrases_is_rejected_without_poisoning_siblings(tmp_path, mo
             ' {"id":2,"verdict":"partial","note":"fine","source_page":2,'
             ' "source_block":"block_0002","anchor_phrases":["Text"]}]',
     )
-    check_claims(claims, manifest, tmp_path)  # must not raise
+    check_claims(claims, manifest, tmp_path, backend="pymupdf")  # must not raise
 
     assert claims[0].verdict == "unchecked"
     assert "anchor_phrases" in claims[0].note
@@ -483,12 +505,12 @@ def test_a_bug_in_our_validator_is_not_relabelled_as_the_models_fault(tmp_path, 
                                    ' "source_page":1,"anchor_phrases":[]}]',
     )
 
-    def our_bug(entry):
+    def our_bug(entry, provenance):
         raise AttributeError("a bug in PaperTrace, not in the model's answer")
 
     monkeypatch.setattr(check_mod, "_judgement_from", our_bug)
     with pytest.raises(AttributeError):
-        check_claims(claims, manifest, tmp_path)
+        check_claims(claims, manifest, tmp_path, backend="pymupdf")
 
 
 def test_truncations_cannot_leak_between_runs(tmp_path, monkeypatch):
@@ -729,11 +751,37 @@ def test_references_section_occurrences_are_excluded_structurally(tmp_path):
 
     cov = coverage_audit(case, [])
     assert [o["label"] for o in cov["occurrences"]["items"]] == ["4"]
-    # and the clean.md regex genuinely cannot see it — the headings carry no `##`,
-    # which is exactly why the structural test is not a restatement of the regex
-    assert "99" in citation_labels_in_text(
+    # The two readings now agree, and that is the point of the fix rather than a
+    # restatement of it. This line used to assert the opposite — that the label
+    # reading DID see [99] — as proof that the occurrence walk's structural test
+    # was doing independent work. It was proof of a defect: the headings here
+    # carry no `##`, the label reading cut on `^##\s+references`, and so a label
+    # printed only inside the reference list was counted as a body citation and
+    # reported as an uncovered gap. Both readings cut on
+    # `models.is_references_heading` now.
+    assert "99" not in citation_labels_in_text(
         (case / "ingest" / "manuscript" / "clean.md").read_text()
     )
+    assert cov["labels_in_text"] == ["4"]
+
+
+def test_table_ci_brackets_are_not_read_as_citation_occurrences(tmp_path):
+    """A results table's own numbers are not citations. `[54, 100]` in a 95% CI
+    column matches the same bracket-and-comma syntax as a citation group
+    `[7,8]`, and a live audit read a table's CI columns as citations to
+    references #54 and #100 — in both the occurrence walk (block-type aware,
+    reading `source_map.json`) and the label-level count (`labels_in_text`,
+    which reads flat `clean.md` and has no block-type information, so it must
+    recognise the table by its own GFM `| ... |` row shape instead)."""
+    case = _case_with_source_map(tmp_path, [
+        {"id": "block_0001", "page": 1, "text": "Uptake was low [4]."},
+        {"id": "block_0002", "type": "table", "page": 1,
+         "text": "| PPV (%) | 83 (5/6) [54, 100] |\n|---|---|\n"},
+    ])
+
+    cov = coverage_audit(case, [])
+    assert [o["label"] for o in cov["occurrences"]["items"]] == ["4"]
+    assert cov["labels_in_text"] == ["4"]
 
 
 def test_surplus_claims_are_recorded_without_making_anything_uncertain(tmp_path):
@@ -743,11 +791,15 @@ def test_surplus_claims_are_recorded_without_making_anything_uncertain(tmp_path)
         {"id": "block_0001", "page": 1, "text": "Recruitment reached 500,000 adults [2]."},
     ])
     claims = [
-        ClaimResult(id=1, claim="recruitment reached 500,000 adults", location="", refs=["2"]),
+        ClaimResult(id=1, claim="recruitment reached 500,000 adults", location="", refs=["2"],
+                    ctx_ids=["block_0001:35:2"]),
         ClaimResult(id=2, claim="the cohort is large", location="", refs=["2"]),
     ]
     cov = coverage_audit(case, claims)
 
+    # claim 1 named the only place [2] is cited, so nothing about that place is
+    # in doubt. Claim 2 named nothing and is reported unattributed — it cannot
+    # make an occurrence uncertain that another claim has already placed.
     assert cov["occurrences"]["covered"] == 1
     assert cov["occurrences"]["uncertain"] == 0
     assert [c["claim_id"] for c in cov["attribution"]["claims_unattributed"]] == [2]
@@ -868,6 +920,16 @@ def test_the_occurrence_list_is_capped_with_a_pointer_to_results_json(tmp_path):
 # --- _judgement_from is total by construction, and stays that way -----------
 
 
+def _prov():
+    """A three-page source with one block per page — enough that the page-shape
+    guards below fail on the shape, not on a location that doesn't exist."""
+    from papertrace.check import SourceProvenance
+
+    return SourceProvenance(
+        pages=3, block_pages={"block_0001": 1, "block_0002": 2, "block_0003": 3}
+    )
+
+
 @pytest.mark.parametrize("page", [
     "9" * 5000,          # passes isascii() and isdigit(), then int() raises
     "9" * 4301,          # one past CPython's default limit
@@ -882,7 +944,10 @@ def test_an_absurdly_long_page_number_degrades_instead_of_raising(page):
     """
     import papertrace.check as check_mod
 
-    j, note = check_mod._judgement_from({"id": 1, "verdict": "supported", "source_page": page})
+    j, note = check_mod._judgement_from(
+        {"id": 1, "verdict": "supported", "source_page": page,
+         "source_block": "block_0003"}, _prov()
+    )
     assert j is None
     assert "unusable" in note
 
@@ -896,7 +961,10 @@ def test_other_page_shapes_still_degrade_rather_than_raise(page):
     by breaking another. `" 3 "` is deliberately accepted after stripping."""
     import papertrace.check as check_mod
 
-    j, note = check_mod._judgement_from({"id": 1, "verdict": "supported", "source_page": page})
+    j, note = check_mod._judgement_from(
+        {"id": 1, "verdict": "supported", "source_page": page,
+         "source_block": "block_0003"}, _prov()
+    )
     if isinstance(page, str) and page.strip() == "3":
         assert j is not None and j["source_page"] == 3  # a dict, not a dataclass
     else:
@@ -965,3 +1033,36 @@ def test_both_readers_agree_on_where_the_bibliography_starts(tmp_path):
 
     occ, _ = citation_occurrences(tmp_path)
     assert [o["label"] for o in occ] == ["1"]
+
+
+def test_a_bibliography_heading_the_ingest_did_not_mark_still_ends_the_body():
+    """Two boundary rules, one claiming to be the other. `coverage_audit` cut the
+    body at `^##\\s+references`, which needs ingest to have emitted a markdown
+    heading — but flat-text ingest guesses headings from font size, and a
+    `References` line at body size stays body text and is written to `clean.md`
+    without `##`. `models.is_references_heading` is built for exactly that case
+    and says True; this cut said False, so every `[N]` printed in the reference
+    list was counted as a body citation and the audit reported gaps that do not
+    exist. Reproduced on a generated flat-ingest paper: labels_in_text held [3],
+    a label the body never cites.
+    """
+    body = (
+        "## A Study\n\nBody text citing [1] and [2] here.\n\n"
+        "References\n\n"
+        "[1] Alpha A. First paper. 2020. [2] Bravo B. Second. 2021. "
+        "[3] Gamma G. Never cited in body. 2022.\n"
+    )
+    assert citation_labels_in_text(body) == {"1", "2"}
+
+
+def test_a_sentence_about_references_does_not_end_the_body():
+    """The other half of the same rule, and why the plain-line test has to be
+    exact: a body sentence starting with the word must not swallow the paper."""
+    body = "References were checked by hand [1].\n\nMore body citing [2].\n"
+    assert citation_labels_in_text(body) == {"1", "2"}
+
+
+def test_a_marked_heading_with_a_suffix_still_ends_the_body():
+    """Unchanged behaviour for a heading ingest did mark: the prefix rule."""
+    body = "Body cites [1].\n\n## References and further reading\n\n[1] A. 2020. [9] B. 2021.\n"
+    assert citation_labels_in_text(body) == {"1"}

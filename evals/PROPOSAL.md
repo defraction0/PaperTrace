@@ -1,8 +1,12 @@
 # Draft issue: a paired evaluation benchmark for the claim checker
 
-**Status: draft text, not posted.** Open it as a GitHub issue only after review.
-It is deliberately written to invite disagreement about the design rather than
-to announce a decision.
+**Status: considered and declined, 2026-09-05 — see
+[`docs/adr/0001-no-gold-benchmark.md`](../docs/adr/0001-no-gold-benchmark.md).**
+Not posted as an issue. The blocker is not the design below but its labelling
+precondition: `DESIGN.md` requires ≥ 2 labellers who did not write the prompts,
+and there is one maintainer, who wrote them. Kept in the repository unchanged
+because it is the plan that would be executed if that ever changes — the text
+from here down is the original draft and still reflects what should be built.
 
 ---
 

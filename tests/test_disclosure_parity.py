@@ -100,7 +100,11 @@ def test_every_claim_disclosure_appears_in_all_three_formats(tmp_path, anchor_lo
     rendered = _render(results, tmp_path)
 
     fired = claim_disclosures(claim)
-    assert {d.key for d in fired} == {"unjudged_refs", "anchor"}
+    # `no_quote` belongs here: the fixture claim carries no verbatim quote, so
+    # a verdict on it rests on the paraphrase and the reader is owed that in
+    # every format. Pinning the set is what makes a newly added disclosure
+    # arrive in this loop instead of quietly missing one template.
+    assert {d.key for d in fired} == {"unjudged_refs", "anchor", "no_quote"}
     for d in fired:
         for name, body in rendered.items():
             assert d.token in body, f"{d.key}: token {d.token!r} missing from {name}"
@@ -292,3 +296,127 @@ def test_references_resumed_round_trips_and_older_manifests_still_load(tmp_path)
     path.write_text(_json.dumps(payload))
     jsonschema.validate(_json.loads(path.read_text()), _json.loads(schema_path.read_text()))
     assert RefManifest.from_json(path).references_resumed is False
+
+
+# --- claims whose HEADLINE is a pipeline state ------------------------------
+#
+# `gaps_by_location()` routes any claim whose headline is `not_retrieved` or
+# `unchecked` out of the main loop and into the gap section — which printed the
+# claim text and nothing else. So a claim citing [1,2] where source 1's check
+# failed and source 2 was never obtainable said neither thing, and a
+# `not_addressed` from a source that WAS successfully read vanished behind the
+# `unchecked` headline that outranks it.
+
+
+def _gap_claim() -> ClaimResult:
+    """One source read and silent, one source's check failed, one never obtained.
+
+    The headline is `unchecked`: a failed check makes "every available source
+    was read and none addressed it" an assertion the run cannot make.
+    """
+    from papertrace.models import SourceJudgement
+
+    claim = ClaimResult(
+        id=4,
+        claim="the intervention halved readmissions",
+        location="Discussion",
+        refs=["1", "2", "3"],
+        judgements=[
+            SourceJudgement(source_slug="read-2019", ref="1", verdict="not_addressed",
+                            note="reports incidence only; silent on readmission"),
+            SourceJudgement(source_slug="failed-2021", ref="2", verdict="unchecked",
+                            note="check failed (TimeoutError) — the source WAS retrieved"),
+        ],
+        unjudged_refs=["3"],
+    )
+    claim.apply_headline()
+    assert claim.verdict == "unchecked"
+    return claim
+
+
+def test_a_gap_claims_disclosures_reach_all_three_formats(tmp_path):
+    claim = _gap_claim()
+    results = RunResults(manuscript="m.pdf", claims=[claim])
+    rendered = _render(results, tmp_path)
+
+    fired = claim_disclosures(claim)
+    assert {d.key for d in fired} == {"sources", "unjudged_refs"}
+    for d in fired:
+        for name, body in rendered.items():
+            assert d.token in body, f"{d.key}: token {d.token!r} missing from {name}"
+
+
+def test_a_gap_claim_names_each_source_and_its_verdict(tmp_path):
+    """The per-source rows themselves, not just the summary. A reader has to be
+    able to see that [1] was read and said nothing while [2] was never read."""
+    rendered = _render(RunResults(manuscript="m.pdf", claims=[_gap_claim()]), tmp_path)
+
+    for name, body in rendered.items():
+        assert "read-2019" in body, f"the source that WAS read is missing from {name}"
+        assert "failed-2021" in body, f"the source whose check failed is missing from {name}"
+        assert "not_addressed" in body or "DOES NOT ADDRESS" in body, (
+            f"a successfully-checked not_addressed verdict is invisible in {name}"
+        )
+
+
+def test_a_gap_claim_keeps_its_note_in_every_format(tmp_path):
+    """The two HTML looks printed no note at all for gap claims."""
+    rendered = _render(RunResults(manuscript="m.pdf", claims=[_gap_claim()]), tmp_path)
+    for name, body in rendered.items():
+        assert "silent on readmission" in body, f"per-source note missing from {name}"
+
+
+def test_a_gap_section_row_does_not_label_a_mixed_section_with_one_verdict(tmp_path):
+    """The editor look printed `items[0].verdict` for the whole row, so a
+    section holding one `not_retrieved` and one `unchecked` claimed both were
+    whichever came first."""
+    gap = _gap_claim()
+    other = ClaimResult(id=5, claim="a second claim", location="Discussion", refs=["9"],
+                        verdict="not_retrieved", note="cited source not available (paywalled)")
+    rendered = _render(RunResults(manuscript="m.pdf", claims=[gap, other]), tmp_path)
+
+    # scoped to the gap table: both verdicts appear elsewhere on the page (the
+    # summary counts them), so an unscoped assertion passes even unfixed
+    editor = rendered["report_editor.html"]
+    table = editor.split('<table class="gaptbl">')[1].split("</table>")[0]
+    assert "not retrieved" in table, table
+    assert "unchecked" in table, table
+
+
+# --- provenance without a picture -------------------------------------------
+
+
+@pytest.mark.parametrize("anchor_located", [False, None])
+def test_an_anchor_state_without_a_crop_still_reaches_every_format(tmp_path, anchor_located):
+    """The disclosure used to be gated on `evidence_image`, so a verdict with a
+    page and no crop told the reader nothing about what backed it."""
+    claim = _claim(evidence_image=None, anchor_located=anchor_located, source_page=3)
+    rendered = _render(RunResults(manuscript="m.pdf", claims=[claim]), tmp_path)
+
+    anchor = next(d for d in claim_disclosures(claim) if d.key == "anchor")
+    for name, body in rendered.items():
+        assert anchor.token in body, f"anchor token missing from {name}"
+
+
+# --- the HTML reports actually escape what they interpolate ------------------
+
+
+def test_markup_in_source_text_cannot_reach_the_html_reports_unescaped(tmp_path):
+    """`select_autoescape(["html"])` matches names ending `.html`. The templates
+    are named `report_editor.html.j2`, so nothing ever matched and autoescape
+    was off for all three formats — including the two that emit HTML.
+
+    It went unnoticed because Europe PMC pre-escapes the markup in its titles,
+    so the one field carrying angle brackets arrived already safe. Cited source
+    PDFs are downloaded from third parties, and their text reaches the report.
+    """
+    hostile = '<script>alert("xss")</script>'
+    claim = _claim(claim=f"a claim containing {hostile}", verdict="supported")
+    rendered = _render(RunResults(manuscript="m.pdf", claims=[claim]), tmp_path)
+
+    for name in ("report_editor.html", "report_terminal.html"):
+        assert "<script>" not in rendered[name], f"{name} interpolated raw markup"
+        assert "&lt;script&gt;" in rendered[name], f"{name} did not escape it"
+
+    # markdown is not HTML and must not grow entities — it stays verbatim
+    assert hostile in rendered["report.md"]

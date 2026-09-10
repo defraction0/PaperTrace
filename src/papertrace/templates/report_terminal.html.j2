@@ -37,6 +37,7 @@
   .cl-meta .st{font-weight:700;}
   .cl-meta .from{color:var(--blue);}
   .cl-meta .loc{color:var(--dim);}
+  .cl-meta .it{color:#adbac7;line-height:1.5;}
   .st.supported{color:var(--green);} .st.partial{color:var(--amber);} .st.contradicted{color:var(--red);}
   .dot{font-size:12px;vertical-align:1px;}
   .imgwrap{border:1px solid var(--edge);border-radius:4px;overflow:hidden;width:600px;background:#fff;position:relative;margin:2px 0 2px;}
@@ -75,6 +76,15 @@
 {% for d in disclosures if d.key == "converter" %}
     <div class="log"><span class="step">▸ ingest</span><span class="cyan">{{ d.token }}</span>{% if d.level == "warn" %}<span class="k"> · </span><span class="amber">⚠ {{ d.short }}</span>{% endif %}</div>
 {% endfor %}
+{% for d in disclosures if d.key == "source_fidelity" %}
+    <div class="log"><span class="step">▸ sources</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
+{% for d in disclosures if d.key == "supplement_identity" %}
+    <div class="log"><span class="step">▸ sources</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
+{% for d in disclosures if d.key == "supplement_coverage" %}
+    <div class="log"><span class="step">▸ coverage</span><span class="dim">{{ d.short }}</span></div>
+{% endfor %}
 {% for d in disclosures if d.key == "truncation" %}
     <div class="log"><span class="step">▸ limits</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
@@ -82,6 +92,9 @@
     <div class="log"><span class="step">▸ resolve</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
 {% for d in disclosures if d.key == "references_resumed" %}
+    <div class="log"><span class="step">▸ resolve</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
+{% for d in disclosures if d.key == "numbering" %}
     <div class="log"><span class="step">▸ resolve</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
     <div class="log"><span class="step">▸ check</span><span class="k">{{ r.claims|length }} citation-backed claims · reading each against its cited page{% if r.uncited %} · </span><span class="amber">{{ r.uncited|length }} uncited assertions flagged</span><span class="k">{% endif %}</span></div>
@@ -98,34 +111,42 @@
 {% endfor %}
 {% for d in claim_disclosures(c) if d.key == "unjudged_refs" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "no_quote" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
+{% for d in claim_disclosures(c) if d.key == "supplement_headline" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
+{% if c.quote %}      <div class="cl-meta"><span class="lab">quote </span><span class="it">{{ c.quote }}</span></div>
+{% endif %}
+{% for d in claim_disclosures(c) if d.key == "claim_numbering" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
       <div class="cl-meta">
         <span style="display:inline-block;width:190px"><span class="lab">status </span><span class="st {{ c.verdict }}"><span class="dot">●</span> {{ c.verdict|upper }}</span></span>
-        {% if c.source_slug %}<span class="lab">from </span><span class="from">{{ c.source_slug }}</span>
+        {% if c.headline_qualifier() %}<span class="loc">{{ c.headline_qualifier() }} · </span>{% endif %}{% if c.source_slug %}<span class="lab">from </span><span class="from">{{ c.source_slug }}</span>
         <span class="loc"> · p.{{ c.source_page }}{% if c.source_block %} · {{ c.source_block }}{% endif %}</span>{% endif %}
       </div>
 {% if c.judgements %}
 {% for j in c.judgements %}
       <div class="cl-meta">
-        <span style="display:inline-block;width:190px"><span class="lab">[{{ j.ref }}] </span><span class="st {{ j.verdict }}"><span class="dot">●</span> {{ j.verdict|upper }}</span></span>
-        <span class="from">{{ j.source_slug }}</span>{% if j.source_page %}<span class="loc"> · p.{{ j.source_page }}</span>{% endif %}
+        <span style="display:inline-block;width:190px"><span class="lab">{% if j.kind == "article" %}[{{ j.ref }}] {% else %}[+] {% endif %}</span><span class="st {{ j.verdict }}"><span class="dot">●</span> {{ j.verdict|upper }}</span></span>
+        <span class="from">{{ j.source_slug }}</span>{% if j.kind != "article" %}<span class="loc"> · {{ j.origin }}</span>{% endif %}{% if j.source_page %}<span class="loc"> · p.{{ j.source_page }}</span>{% endif %}
       </div>
 {% if j.note %}
       <div class="note"><span class="a">└─</span> {{ j.note }}</div>
 {% endif %}
 {% if j.evidence_image %}
       <div class="imgwrap" data-src="{{ j.source_slug }} · page {{ j.source_page }}"><img src="{{ j.evidence_image }}"></div>
+{% endif %}
 {% for d in judgement_disclosures(j) %}
       <div class="cl-meta"><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
-{% endif %}
 {% endfor %}
 {% else %}
 {% if c.evidence_image %}
       <div class="imgwrap" data-src="{{ c.source_slug }} · page {{ c.source_page }}"><img src="{{ c.evidence_image }}"></div>
+{% endif %}
 {% for d in claim_disclosures(c) if d.key == "anchor" %}
       <div class="cl-meta"><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
-{% endif %}
 {% if c.note %}
       <div class="note"><span class="a">└─</span> {{ c.note }}</div>
 {% endif %}
@@ -161,16 +182,27 @@
     <div class="nr-head"><span class="amber">▲</span> assertions without citation <span class="c">({{ r.uncited|length }}) — your judgement required</span></div>
     <div class="nr-sub">would normally carry a reference but don't — not verified, flagged for you to weigh.</div>
 {% for u in r.uncited %}
-    <div class="nrrow"><span class="sec">[U{{ u.id }}]</span><span class="n"></span><span class="it">{{ u.claim }}{% if u.location %} <span class="s">·</span> {{ u.location }}{% endif %}</span></div>
+    <div class="nrrow"><span class="sec">[U{{ u.id }}]</span><span class="n"></span><span class="it">{{ u.quote or u.claim }}{% if u.location %} <span class="s">·</span> {{ u.location }}{% endif %}</span></div>
 {% endfor %}
     <div style="height:14px"></div>
 {% endif %}
     <div class="nr-head"><span class="dim">○</span> not verified — source not retrieved or check failed <span class="c">({{ gap_total }} / {{ r.claims|length }})</span></div>
     <div class="nr-sub">the cited PDF couldn’t be fetched — or the check step failed on an available source — so the claim is reported unverified, never guessed.</div>
 {% for section, items in gaps.items() %}
-    <div class="nrrow"><span class="sec">{{ section|lower }}</span><span class="n">[{{ items|length }}]</span><span class="it">{% for c in items %}{{ c.claim }}{% if not loop.last %}<span class="s">·</span>{% endif %}{% endfor %}</span></div>
+{% for c in items %}
+    <div class="nrrow"><span class="sec">{{ section|lower if loop.first else "" }}</span><span class="n">{{ c.verdict|replace("_", " ") }}</span><span class="it">{{ c.claim }}{% if c.note %} <span class="s">·</span> {{ c.note }}{% endif %}</span></div>
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs", "claim_numbering") %}
+    <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
-{% if scout and (scout.newer or scout.overlooked or scout.error) %}
+{% for j in c.judgements %}
+    <div class="nrrow"><span class="sec"></span><span class="n">{% if j.kind == "article" %}[{{ j.ref }}]{% else %}[+]{% endif %}</span><span class="it dim">{{ j.source_slug }} {% if j.kind != "article" %}<span class="s">·</span> {{ j.origin }} {% endif %}<span class="s">·</span> {{ j.verdict }}{% if j.source_page %} <span class="s">·</span> p.{{ j.source_page }}{% endif %}{% if j.note %} <span class="s">·</span> {{ j.note }}{% endif %}</span></div>
+{% for d in judgement_disclosures(j) %}
+    <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
+{% endfor %}
+{% endfor %}
+{% endfor %}
+{% endfor %}
+{% if scout and (scout.newer or scout.overlooked or scout.same_year or scout.error) %}
 
     <div style="height:14px"></div>
     <div class="nr-head"><span class="cyan">◆</span> literature the reference list doesn't know <span class="c">(scout · europe pmc{% if scout.paper_year %} · paper year {{ scout.paper_year }}{% endif %})</span></div>
@@ -186,6 +218,12 @@
 {% endfor %}
 {% if scout.overlooked|length > 6 %}
     <div class="nr-sub" style="margin-top:7px">… {{ scout.overlooked|length - 6 }} more uncited candidates in scout.json</div>
+{% endif %}
+{% for h in scout.same_year[:6] %}
+    <div class="nrrow"><span class="sec">same year · {{ h.year or "?" }}</span><span class="n">[{{ h.via[:6] }}]</span><span class="it">{{ h.title }}{% if h.journal %} <span class="s">·</span> {{ h.journal }}{% endif %}{% if h.doi %} <span class="s">·</span> {{ h.doi }}{% endif %}</span></div>
+{% endfor %}
+{% if scout.same_year %}
+    <div class="nr-sub" style="margin-top:7px">same-year candidates listed apart — one from the paper's own year may postdate submission, so it is neither newer literature nor a citation the authors owed{% if scout.same_year|length > 6 %} · … {{ scout.same_year|length - 6 }} more in scout.json{% endif %}</div>
 {% endif %}
 {% endif %}
 

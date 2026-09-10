@@ -304,14 +304,35 @@ def test_a_hand_built_legacy_results_json_loads_and_still_renders(tmp_path):
 # --- the fan-out ----------------------------------------------------------
 
 
+def _ingested(dirpath, slug: str, pages: int = 2) -> None:
+    """An ingested source: the text AND the map that proves where its blocks are.
+
+    Both, always — a source map is no longer optional. `check` validates every
+    substantive verdict's page and block against it, so a source without one
+    can produce no verdict at all.
+    """
+    from papertrace.models import Block, SourceMap
+
+    dirpath.mkdir(parents=True, exist_ok=True)
+    (dirpath / "annotated.md").write_text(
+        f"<!-- block_0001, page 1 -->\nText of {slug}.\n"
+        f"<!-- block_0002, page 2 -->\nMore of {slug}.\n"
+    )
+    SourceMap(
+        doc=f"{slug}.pdf", pages=pages,
+        blocks=[
+            Block("block_0001", "text", 1, (0.0, 0.0, 100.0, 20.0), [], f"Text of {slug}."),
+            Block("block_0002", "text", 2, (0.0, 0.0, 100.0, 20.0), [], f"More of {slug}."),
+        ],
+    ).to_json(dirpath / "source_map.json")
+
+
 def _case(tmp_path: Path, slugs: list[str]):
-    """A case folder with an ingested annotated.md per source."""
+    """A case folder with a fully ingested source per slug."""
     from papertrace.models import RefEntry, RefManifest
 
     for slug in slugs:
-        d = tmp_path / "ingest" / slug
-        d.mkdir(parents=True)
-        (d / "annotated.md").write_text(f"<!-- block_0001, page 1 -->\nText of {slug}.")
+        _ingested(tmp_path / "ingest" / slug, slug)
     manifest = RefManifest(
         manuscript="m.pdf",
         entries=[
@@ -346,7 +367,7 @@ def test_every_available_cited_source_is_judged_in_its_own_call(tmp_path, monkey
         }])
 
     monkeypatch.setattr(check_mod, "_ask", fake_ask)
-    check_claims([claim], manifest, tmp_path)
+    check_claims([claim], manifest, tmp_path, backend="pymupdf")
 
     assert sorted(seen) == ["a-2020", "b-2021", "c-2022"], "one call per source"
     assert {j.source_slug: j.verdict for j in claim.judgements} == verdict_for
@@ -378,7 +399,7 @@ def test_unjudged_refs_now_means_could_not_be_obtained(tmp_path, monkeypatch):
         "id": 1, "verdict": "supported", "note": "n", "source_page": 1,
         "source_block": "block_0001", "anchor_phrases": ["Text of a-2020"],
     }]))
-    check_claims([claim], manifest, tmp_path)
+    check_claims([claim], manifest, tmp_path, backend="pymupdf")
 
     assert [j.source_slug for j in claim.judgements] == ["a-2020"]
     assert claim.unjudged_refs == ["2"], "the paywalled co-citation, and only that"
@@ -402,7 +423,7 @@ def test_a_failed_call_unchecks_only_that_source(tmp_path, monkeypatch):
         }])
 
     monkeypatch.setattr(check_mod, "_ask", fake_ask)
-    check_claims([claim], manifest, tmp_path)
+    check_claims([claim], manifest, tmp_path, backend="pymupdf")
 
     by_slug = {j.source_slug: j.verdict for j in claim.judgements}
     assert by_slug["good-2020"] == "supported"
@@ -501,3 +522,51 @@ def test_a_claim_no_cited_source_addresses_says_so(tmp_path):
     # Only the new bucket is asserted verbatim; the markdown counts line is the
     # one with the number inline, so it is where that is checkable.
     assert "◌ **Does not address:** 1" in out["report.md"]
+
+
+# --- the headline is one source's verdict, never the claim's ----------------
+
+
+def test_a_multi_source_headline_names_how_many_sources_it_ranked():
+    """`❌ CONTRADICTED` on a four-source claim is one source's verdict, but it
+    reads as a statement about the claim. One dissenter of four is a finding
+    worth surfacing and worth *qualifying* — a compound sentence may draw
+    different parts from different references legitimately."""
+    claim = _four_source_claim()
+    assert claim.verdict == "contradicted"
+    assert claim.headline_qualifier() == "most adverse of 4 cited sources"
+
+
+def test_a_single_source_headline_carries_no_qualifier():
+    """With one source the headline *is* a statement about the claim, and
+    "most adverse of 1" would be noise that trains readers to skip the line."""
+    claim = ClaimResult(id=1, claim="x", location="Intro", refs=["3"],
+                        judgements=[_j("a-2022", "3", "supported", note="Yes.")])
+    claim.apply_headline()
+    assert claim.headline_qualifier() == ""
+
+
+def test_a_claim_with_no_judgements_carries_no_qualifier():
+    """`not_retrieved` ranked nothing. Claiming it was the most adverse of some
+    number of sources would invent a comparison that never happened."""
+    claim = ClaimResult(id=1, claim="x", location="Intro", refs=["3"])
+    assert claim.verdict == "not_retrieved"
+    assert claim.headline_qualifier() == ""
+
+
+def test_the_headline_qualifier_reaches_all_three_formats(tmp_path):
+    """The parity contract again: a status line qualified in the markdown but
+    not the HTML would leave the overstatement exactly where it is most often
+    read."""
+    out = _render(_four_source_claim(), tmp_path)
+    for name, text in out.items():
+        assert "most adverse of 4 cited sources" in text, f"{name} drops the qualifier"
+
+
+def test_a_single_source_claim_is_not_qualified_in_any_format(tmp_path):
+    claim = ClaimResult(id=1, claim="x", location="Intro", refs=["3"],
+                        judgements=[_j("a-2022", "3", "supported", note="Yes.")])
+    claim.apply_headline()
+    out = _render(claim, tmp_path)
+    for name, text in out.items():
+        assert "most adverse of" not in text, f"{name} qualifies a single-source claim"
