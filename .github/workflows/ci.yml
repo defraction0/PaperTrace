@@ -1,8 +1,26 @@
 name: ci
 on:
-  push: { branches: [main] }
+  # EVERY branch, not just main. With `branches: [main]` a feature branch was
+  # never tested until someone opened a PR, so 53 commits across three pushed
+  # branches reached `main`'s doorstep having run on one developer machine and
+  # nothing else — and the first PR failed on all five pythons, twice over, for
+  # two faults that were invisible locally: a test reading a saved config from
+  # the developer's home directory, and an assertion on rich output that only
+  # holds when colour is off.
+  push:
+    branches: ['**']
+  # kept alongside `push`, for pull requests from FORKS: their commits never
+  # land in this repo, so the push trigger above cannot see them. On a
+  # same-repo PR both fire and the suite runs twice. That is deliberate —
+  # roughly three runner-minutes against the alternatives, which are either
+  # dropping fork coverage or a job-level `if` on the head repository whose
+  # interaction with required checks cannot be verified from here.
   pull_request:
 concurrency:
+  # `github.ref` and not the branch name: a push is `refs/heads/x` while its
+  # pull_request is `refs/pull/N/merge`, so the two keep separate groups. Were
+  # they shared, a push and its PR event would race and cancel one another —
+  # leaving a required check stuck at "cancelled" on the PR.
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
