@@ -131,7 +131,16 @@ ingest → refs → scout → check → highlight → report
 - **`highlight.py`** — the division of labour that keeps evidence trustworthy:
   the model proposes page, block and verbatim anchor phrases; **Python** locates
   them with PyMuPDF `page.search_for` and draws the boxes. Boxes are never
-  model-placed or hand-placed.
+  model-placed or hand-placed. `crop_for_anchor` returns **one image per
+  `Block.region`** — a passage crossing a column or page break is several
+  rectangles and cropping only the first showed where the evidence began and not
+  where it was. The rectangles come from the converter's own provenance, never
+  from clustering the search hits: a derived rule would be guessing at a recorded
+  fact, and both candidate rules were measured and rejected. `crop_evidence`
+  bounds the boxes by intersection with the region it is given, so one call per
+  region needs no new box logic; the continuation filename carries the region
+  **ordinal**, because two regions can share a page and the save is
+  unconditional.
 - **`models.py`** — the dataclasses *are* the wire format. `VERDICTS`,
   `REF_STATUSES`, `BLOCK_TYPES` and `DOCUMENT_KINDS` are the vocabularies;
   `to_json`/`from_json` pairs must stay symmetric, and `from_json` uses

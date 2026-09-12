@@ -1018,12 +1018,6 @@ def highlight(
                 rel = [str(Path(i).relative_to(case / "out")) for i in imgs]
                 a.evidence_image, a.continuation_images = rel[0], rel[1:]
                 done += len(rel)
-                if a.continuation_images:
-                    n = len(rel)
-                    console.print(
-                        f"  [cyan]↳ {tag}: the passage crosses a break — {n} images"
-                        f"[/cyan]"
-                    )
                 # `is True` / `is False` / `is None` — never truthiness. None
                 # means nothing was ever searched for, and calling that "not
                 # found" asserts a search that did not happen.
@@ -1043,6 +1037,16 @@ def highlight(
                         f"  [yellow]○ {tag}: {a.evidence_image} — no anchor phrase "
                         f"was offered, so none was searched for; crop written "
                         f"unboxed[/yellow]"
+                    )
+                # after the verdict on the first image, not before it: the line
+                # above names that image, and this says where the rest of the
+                # passage went
+                if a.continuation_images:
+                    console.print(
+                        f"    [cyan]↳ the passage crosses a break — "
+                        f"{len(a.continuation_images)} further "
+                        f"image{'' if len(a.continuation_images) == 1 else 's'}: "
+                        f"{', '.join(Path(i).name for i in a.continuation_images)}[/cyan]"
                     )
             elif a.source_slug and a.source_page:
                 # a page the source does not have is not the same as a page that

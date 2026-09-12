@@ -126,6 +126,57 @@ is the guard working, not a regression.
 
 Judgement quality here is **unmeasured**, like everything since ADR 0001.
 
+### Fixed — a passage crossing a column or page break is shown in full
+
+An evidence crop was one rectangle on one page, so a passage continuing into the
+next column or overleaf was shown only as far as its opening. The reader saw
+where the evidence began and never where it was.
+
+The cause was ingest throwing away data it had been given. `prov` is a list and
+`_item_prov` returned `prov[0]`, so only the rectangle a block's opening sat in
+survived — while docling states `page_no`, `bbox` **and** `charspan` for every
+rectangle. Measured on one 14-page cited source: **14,367 characters sat outside
+the rectangle their block claimed**, and five blocks were on two pages at once
+while `Block.page` named one of them.
+
+```
+block_0012  3 rectangles, text length 2554
+  page 2  chars    0- 295   ← the only one kept
+  page 2  chars  296-2152   the right column
+  page 3  chars 2153-2554   overleaf
+```
+
+`Block.regions` now records all of them and `crop_for_anchor` returns one image
+per rectangle, in reading order, each with its own matched text boxed.
+`crop_evidence` is untouched — it already boxed exactly the hits intersecting
+the region it was handed.
+
+Measured on a real 101-reference audit before the fix: **17 of 31 anchored
+judgements had located anchor text outside the crop region**, 4 of them on the
+next page. On a fresh end-to-end run of one of those claims, the verdict's
+evidence turned out to be on page 3 of the source — a page the report had no way
+to show, so the crop came back unboxed and captioned "no anchor phrase could be
+boxed" while the phrase sat two rectangles away.
+
+`anchor_located` is now true when **any** image carries a box, and
+`_downgrade_unshowable` no longer discards a verdict whose boxes are in a
+continuation. The continuation filename carries the region ordinal, not the
+page: two rectangles can share a page, and the unconditional save would have
+left one image holding the other's picture.
+
+Wire format: `Block.regions` (source map) and `continuation_images` on both the
+claim and the judgement (results). Both schema-declared and absent-safe —
+**empty means not recorded, never "no continuation"**, so an older source map
+keeps the single-rectangle behaviour it always had. Continuations appear only
+for sources ingested after this change.
+
+Two caption defects went with it, both found by rendering the report and reading
+it. The first image carried the judgement's anchor caption, so a crop where the
+passage merely opens — no box in it at all — was captioned "red box = matched
+text"; the caption describes the set and now sits below the images. And
+"the anchor phrase was located on this page" was false whenever the box is in a
+continuation on another page.
+
 ### Fixed — a quote crossing a column break was boxed nowhere at all
 
 A two-column page splits a sentence at the column break, so a decisive passage
