@@ -198,6 +198,30 @@ def test_the_reader_is_told_the_passage_crosses_a_break(tmp_path):
         assert "crosses a column or page break" in body, name
 
 
+def test_the_opening_image_never_claims_a_box_it_may_not_have(tmp_path):
+    """Found by rendering and reading it. The judgement's anchor caption was
+    inside the FIRST image's figcaption, so a crop where the passage merely
+    opens — the real fujima case, no box in it at all — was captioned "red box =
+    matched text". The caption describes the set, so it moves below the images."""
+    import re
+
+    rendered = _rendered(tmp_path, continuation_images=["evidence/a_cont2.png"])
+    caps = re.findall(r"<figcaption>(.*?)</figcaption>", rendered["report_editor.html"], re.S)
+    assert caps, "no figcaptions rendered"
+    assert "red box = matched text" not in caps[0], caps[0]
+    assert "the boxes may be in a later image" in caps[0], caps[0]
+    # and it is still disclosed, once, for the judgement
+    assert rendered["report_editor.html"].count("red box = matched text") == 1
+
+
+def test_no_caption_claims_the_box_is_on_the_page_the_verdict_names(tmp_path):
+    """A continuation can be on the NEXT page, so "located on this page" was
+    false for exactly the case this feature exists to serve."""
+    rendered = _rendered(tmp_path, continuation_images=["evidence/a_p3_cont2.png"])
+    for name, body in rendered.items():
+        assert "located on this page" not in body, name
+
+
 def test_an_ordinary_single_image_judgement_gains_no_caption(tmp_path):
     """The 193-of-205 case must not grow a sentence about a break it has not."""
     rendered = _rendered(tmp_path, continuation_images=[])

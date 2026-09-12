@@ -156,7 +156,7 @@
 {% if j.evidence_image %}
     <figure>
       <img class="crop" src="{{ j.evidence_image }}">
-      <figcaption>![evidence] {{ j.source_slug }} · page {{ j.source_page }}{% if j.continuation_images %} · image 1 of {{ j.continuation_images|length + 1 }} — the passage opens here{% endif %} · {% for d in judgement_disclosures(j) %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}</figcaption>
+      <figcaption>![evidence] {{ j.source_slug }} · page {{ j.source_page }}{% if j.continuation_images %} · image 1 of {{ j.continuation_images|length + 1 }} — the passage opens here; the boxes may be in a later image{% endif %}{% if not j.continuation_images %} · {% for d in judgement_disclosures(j) %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}{% endif %}</figcaption>
     </figure>
 {% for img in j.continuation_images %}
     <figure>
@@ -164,6 +164,11 @@
       <figcaption>![evidence] {{ j.source_slug }} · continued · image {{ loop.index + 1 }} of {{ j.continuation_images|length + 1 }} — the passage crosses a column or page break</figcaption>
     </figure>
 {% endfor %}
+{% if j.continuation_images %}
+{% for d in judgement_disclosures(j) %}
+    <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
+{% endfor %}
+{% endif %}
 {% else %}
 {% for d in judgement_disclosures(j) %}
     <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
@@ -178,7 +183,7 @@
 {% if c.evidence_image %}
     <figure>
       <img class="crop" src="{{ c.evidence_image }}">
-      <figcaption>![evidence] {{ c.source_slug }} · page {{ c.source_page }}{% if c.continuation_images %} · image 1 of {{ c.continuation_images|length + 1 }} — the passage opens here{% endif %} · {% for d in claim_disclosures(c) if d.key == "anchor" %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}</figcaption>
+      <figcaption>![evidence] {{ c.source_slug }} · page {{ c.source_page }}{% if c.continuation_images %} · image 1 of {{ c.continuation_images|length + 1 }} — the passage opens here; the boxes may be in a later image{% endif %}{% if not c.continuation_images %} · {% for d in claim_disclosures(c) if d.key == "anchor" %}{% if d.level == "warn" %}<span style="color:var(--amber)">⚠ {{ d.text }}</span>{% else %}{{ d.token }}{% endif %}{% endfor %}{% endif %}</figcaption>
     </figure>
 {% for img in c.continuation_images %}
     <figure>
@@ -186,6 +191,11 @@
       <figcaption>![evidence] {{ c.source_slug }} · continued · image {{ loop.index + 1 }} of {{ c.continuation_images|length + 1 }} — the passage crosses a column or page break</figcaption>
     </figure>
 {% endfor %}
+{% if c.continuation_images %}
+{% for d in claim_disclosures(c) if d.key == "anchor" %}
+    <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
+{% endfor %}
+{% endif %}
 {% else %}
 {% for d in claim_disclosures(c) if d.key == "anchor" %}
     <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>

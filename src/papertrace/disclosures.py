@@ -99,8 +99,11 @@ ANCHOR: dict[str, Disclosure] = {
         level="info",
         token=ANCHOR_LOCATED_TOKEN,
         text=(
-            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located on this page "
-            "by text search, not placed by hand or by the model."
+            # not "on this page": a passage crossing a page break is shown in
+            # several images, and the box can be on a page other than the one
+            # the judgement names
+            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located by text "
+            "search, not placed by hand or by the model."
         ),
         short=ANCHOR_LOCATED_TOKEN,
     ),
@@ -135,8 +138,8 @@ ANCHOR_NO_IMAGE: dict[str, Disclosure] = {
         level="info",
         token=ANCHOR_LOCATED_TOKEN,
         text=(
-            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located on this page "
-            "by text search, though no evidence image was written for it."
+            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located by text "
+            "search, though no evidence image was written for it."
         ),
         short=f"{ANCHOR_LOCATED_TOKEN} — no evidence image",
     ),
