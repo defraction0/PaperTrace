@@ -76,6 +76,13 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if j.evidence_image %}
 
 ![evidence]({{ j.evidence_image }})
+{% if j.continuation_images %}
+*the passage opens here and crosses a column or page break — {{ j.continuation_images|length + 1 }} images below show all of it*
+{% for img in j.continuation_images %}
+
+![evidence, continued]({{ img }})
+{% endfor %}
+{% endif %}
 {% endif %}
 {% for d in judgement_disclosures(j) %}
 {% if not j.evidence_image %}
@@ -93,6 +100,13 @@ Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs
 {% if c.evidence_image %}
 
 ![evidence]({{ c.evidence_image }})
+{% if c.continuation_images %}
+*the passage opens here and crosses a column or page break — {{ c.continuation_images|length + 1 }} images below show all of it*
+{% for img in c.continuation_images %}
+
+![evidence, continued]({{ img }})
+{% endfor %}
+{% endif %}
 {% endif %}
 {% for d in claim_disclosures(c) if d.key == "anchor" %}
 {% if not c.evidence_image %}

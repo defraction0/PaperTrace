@@ -676,6 +676,12 @@ class SourceJudgement:
     source_block: str | None = None
     anchor_phrases: list[str] = field(default_factory=list)
     evidence_image: str | None = None  # relative path, filled by highlight
+    # the rest of the passage, when it crosses a column or page break: one image
+    # per further rectangle, in reading order. Empty for the ordinary
+    # single-rectangle passage, and on results written before continuations
+    # existed. `evidence_image` stays the first image, so every consumer that
+    # reads only that one keeps working.
+    continuation_images: list[str] = field(default_factory=list)
     anchor_located: bool | None = None
 
     @property
@@ -732,6 +738,9 @@ class ClaimResult:
     source_block: str | None = None  # block id in the source's source_map
     anchor_phrases: list[str] = field(default_factory=list)  # phrases to box in red
     evidence_image: str | None = None  # relative path, filled by highlight step
+    # the rest of the passage where it crosses a column or page break — see
+    # SourceJudgement.continuation_images. Follows the deciding judgement.
+    continuation_images: list[str] = field(default_factory=list)
     # one entry per AVAILABLE cited source, each judged in its own model call
     judgements: list[SourceJudgement] = field(default_factory=list)
     # co-cited refs that could NOT be obtained, so were never opened. They must
@@ -822,6 +831,10 @@ class ClaimResult:
         self.source_block = d.source_block
         self.anchor_phrases = list(d.anchor_phrases)
         self.evidence_image = d.evidence_image
+        # with the primary, never apart from it: the headline showing one
+        # source's opening beside another's continuation is the mismatch this
+        # method exists to prevent
+        self.continuation_images = list(d.continuation_images)
         self.anchor_located = d.anchor_located
 
     def judgement_summary(self) -> dict[str, int]:

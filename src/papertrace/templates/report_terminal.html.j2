@@ -134,7 +134,10 @@
       <div class="note"><span class="a">└─</span> {{ j.note }}</div>
 {% endif %}
 {% if j.evidence_image %}
-      <div class="imgwrap" data-src="{{ j.source_slug }} · page {{ j.source_page }}"><img src="{{ j.evidence_image }}"></div>
+      <div class="imgwrap" data-src="{{ j.source_slug }} · page {{ j.source_page }}{% if j.continuation_images %} · image 1 of {{ j.continuation_images|length + 1 }} — the passage opens here{% endif %}"><img src="{{ j.evidence_image }}"></div>
+{% for img in j.continuation_images %}
+      <div class="imgwrap" data-src="{{ j.source_slug }} · continued · image {{ loop.index + 1 }} of {{ j.continuation_images|length + 1 }} — crosses a column or page break"><img src="{{ img }}"></div>
+{% endfor %}
 {% endif %}
 {% for d in judgement_disclosures(j) %}
       <div class="cl-meta"><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
@@ -142,7 +145,10 @@
 {% endfor %}
 {% else %}
 {% if c.evidence_image %}
-      <div class="imgwrap" data-src="{{ c.source_slug }} · page {{ c.source_page }}"><img src="{{ c.evidence_image }}"></div>
+      <div class="imgwrap" data-src="{{ c.source_slug }} · page {{ c.source_page }}{% if c.continuation_images %} · image 1 of {{ c.continuation_images|length + 1 }} — the passage opens here{% endif %}"><img src="{{ c.evidence_image }}"></div>
+{% for img in c.continuation_images %}
+      <div class="imgwrap" data-src="{{ c.source_slug }} · continued · image {{ loop.index + 1 }} of {{ c.continuation_images|length + 1 }} — crosses a column or page break"><img src="{{ img }}"></div>
+{% endfor %}
 {% endif %}
 {% for d in claim_disclosures(c) if d.key == "anchor" %}
       <div class="cl-meta"><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>

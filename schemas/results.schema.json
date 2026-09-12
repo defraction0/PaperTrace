@@ -38,16 +38,18 @@
           },
           "claim": {
             "type": "string",
-            "description": "The claim tightly paraphrased \u2014 what a report headline reads well."
+            "description": "The claim tightly paraphrased — what a report headline reads well."
           },
           "ctx_ids": {
             "type": "array",
-            "description": "Ids of the citation occurrences this claim was extracted from, resolved from the `ctx_NNNN` labels the inventory offered the extractor. Empty when the model named none or named one not in the inventory \u2014 never back-filled by guessing which occurrence of the label was meant. Absent before 0.5.0.",
-            "items": { "type": "string" }
+            "description": "Ids of the citation occurrences this claim was extracted from, resolved from the `ctx_NNNN` labels the inventory offered the extractor. Empty when the model named none or named one not in the inventory — never back-filled by guessing which occurrence of the label was meant. Absent before 0.5.0.",
+            "items": {
+              "type": "string"
+            }
           },
           "quote": {
             "type": "string",
-            "description": "The manuscript's own sentence carrying the claim, verbatim. This is what the judge rules on: a paraphrase can drop the population, the interval or the hedging that decides whether a source supports the statement. Empty string when extraction returned no quote \u2014 never back-filled from `claim`, and absent entirely in files written before 0.5.0."
+            "description": "The manuscript's own sentence carrying the claim, verbatim. This is what the judge rules on: a paraphrase can drop the population, the interval or the hedging that decides whether a source supports the statement. Empty string when extraction returned no quote — never back-filled from `claim`, and absent entirely in files written before 0.5.0."
           },
           "location": {
             "type": "string"
@@ -111,9 +113,15 @@
             "description": "One entry per AVAILABLE cited source, each judged in its own model call. Absent on results.json written before multi-source checking, where the claim-level fields were the whole answer.",
             "items": {
               "type": "object",
-              "required": ["source_slug", "ref", "verdict"],
+              "required": [
+                "source_slug",
+                "ref",
+                "verdict"
+              ],
               "properties": {
-                "source_slug": { "type": "string" },
+                "source_slug": {
+                  "type": "string"
+                },
                 "ref": {
                   "type": "string",
                   "description": "The citation label this source answers for, e.g. \"3\". A supplement answers for the label its parent article carries; the audited paper's own supplement answers for none and carries \"\"."
@@ -123,7 +131,11 @@
                   "description": "For a supplement: did anything establish that it belongs to the work it was attached to? True when the file's own title or DOI named that work; false when it was attached because its filename carried the reference's tokens and nothing read it. Always false for an article, whose identity is recorded in the manifest's title_check instead. Absent on files written before 0.6.0, meaning false."
                 },
                 "kind": {
-                  "enum": ["article", "supplement", "own_supplement"],
+                  "enum": [
+                    "article",
+                    "supplement",
+                    "own_supplement"
+                  ],
                   "description": "Which document this verdict was read from: the cited article, supplementary material accompanying it, or supplementary material belonging to the audited paper itself. Absent on files written before 0.6.0, where every judgement was an article. A reader holding only results.json needs this to tell a verdict resting on an appendix from one resting on the paper of record — and note that a supplement is attached by filename with NO identity check, so its provenance is weaker than an article's."
                 },
                 "verdict": {
@@ -136,12 +148,46 @@
                     "unchecked"
                   ]
                 },
-                "note": { "type": "string" },
-                "source_page": { "type": ["integer", "null"] },
-                "source_block": { "type": ["string", "null"] },
-                "anchor_phrases": { "type": "array", "items": { "type": "string" } },
-                "evidence_image": { "type": ["string", "null"] },
-                "anchor_located": { "type": ["boolean", "null"] }
+                "note": {
+                  "type": "string"
+                },
+                "source_page": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "source_block": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "anchor_phrases": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "evidence_image": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "anchor_located": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "continuation_images": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The rest of the passage where it crosses a column or page break: one image per further rectangle, in reading order, each with its own matched text boxed. `evidence_image` is the first image and is not repeated here. Absent or empty means the passage fits one rectangle — or that the source map predates per-rectangle provenance, in which case only one was ever knowable."
+                }
               }
             }
           },
@@ -158,17 +204,24 @@
               "null"
             ],
             "description": "False when no anchor phrase was found on the evidence page — the crop exists but carries no red box. null before the highlight step runs."
+          },
+          "continuation_images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The rest of the passage where it crosses a column or page break: one image per further rectangle, in reading order, each with its own matched text boxed. `evidence_image` is the first image and is not repeated here. Absent or empty means the passage fits one rectangle — or that the source map predates per-rectangle provenance, in which case only one was ever knowable."
           }
         }
       }
     },
     "converter": {
       "type": "string",
-      "description": "The ingest backend that read the AUDITED PAPER. Says nothing about the cited sources \u2014 see source_converters."
+      "description": "The ingest backend that read the AUDITED PAPER. Says nothing about the cited sources — see source_converters."
     },
     "source_converters": {
       "type": "object",
-      "description": "Document slug -> the converter that read it. Keyed by document and not by reference, so a supplement appears under its own slug beside the article it accompanies. Sources are ingested with the same backend as the paper, but a case folder can hold a map from an earlier run whose PDF is now gone, so the two can differ. An empty object or an absent key means the run did not record this (every file written before 0.5.0) \u2014 which is NOT the same as every source having been read flat.",
+      "description": "Document slug -> the converter that read it. Keyed by document and not by reference, so a supplement appears under its own slug beside the article it accompanies. Sources are ingested with the same backend as the paper, but a case folder can hold a map from an earlier run whose PDF is now gone, so the two can differ. An empty object or an absent key means the run did not record this (every file written before 0.5.0) — which is NOT the same as every source having been read flat.",
       "additionalProperties": {
         "type": "string"
       }
@@ -190,7 +243,7 @@
           },
           "quote": {
             "type": "string",
-            "description": "The manuscript's own sentence, verbatim \u2014 the wording the reviewer has to judge. Empty when extraction returned no quote; absent before 0.5.0."
+            "description": "The manuscript's own sentence, verbatim — the wording the reviewer has to judge. Empty when extraction returned no quote; absent before 0.5.0."
           },
           "location": {
             "type": "string"
@@ -225,33 +278,52 @@
         "schema": {
           "type": "string",
           "description": "'coverage/3' since 0.5.0: attribution is a lookup of the context ids extraction returned. 'coverage/2' was the same occurrence keys with similarity-based attribution and its two thresholds. Absent means the label-level audit that shipped before either. Both occurrence versions are accepted so an older results.json still validates.",
-          "enum": ["coverage/2", "coverage/3"]
+          "enum": [
+            "coverage/2",
+            "coverage/3"
+          ]
         },
         "unit": {
           "type": "string",
-          "enum": ["occurrence"]
+          "enum": [
+            "occurrence"
+          ]
         },
         "source": {
           "type": "string",
           "description": "Where occurrences were read from. source_map is authoritative (block, page, heading path); clean.md is the fallback for a case folder with no map and carries neither block nor page.",
-          "enum": ["source_map", "clean.md", "none"]
+          "enum": [
+            "source_map",
+            "clean.md",
+            "none"
+          ]
         },
         "labels_partially_covered": {
           "type": "array",
           "description": "Labels reached by a claim in one place and not in another. A gold case sitting on such an occurrence is an extraction gap, not an alignment failure.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "labels_uncertain_only": {
           "type": "array",
           "description": "Labels whose every occurrence is `uncertain`: a claim cites the label and the tool cannot say which place it came from.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "occurrences": {
           "type": "object",
           "properties": {
-            "total": { "type": "integer" },
-            "covered": { "type": "integer" },
-            "uncovered": { "type": "integer" },
+            "total": {
+              "type": "integer"
+            },
+            "covered": {
+              "type": "integer"
+            },
+            "uncovered": {
+              "type": "integer"
+            },
             "uncertain": {
               "type": "integer",
               "description": "Never counted as covered and never as uncovered. A third status, always printed beside the ratio."
@@ -260,21 +332,58 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["id", "label", "status"],
+                "required": [
+                  "id",
+                  "label",
+                  "status"
+                ],
                 "properties": {
                   "id": {
                     "type": "string",
                     "description": "block:offset:label, or clean:offset:label under the clean.md fallback. A group [7,8] yields two occurrences sharing block and offset, distinct by label."
                   },
-                  "label": { "type": "string" },
-                  "block": { "type": ["string", "null"] },
-                  "page": { "type": ["integer", "null"] },
-                  "offset": { "type": "integer" },
-                  "group": { "type": "string", "description": "The bracketed group as printed, e.g. '7,8'." },
-                  "section": { "type": "string" },
-                  "sentence": { "type": "string", "description": "The sentence carrying the marker, clipped to ±120 chars around it." },
-                  "status": { "enum": ["covered", "uncovered", "uncertain"] },
-                  "claim_id": { "type": ["integer", "null"] }
+                  "label": {
+                    "type": "string"
+                  },
+                  "block": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "page": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "offset": {
+                    "type": "integer"
+                  },
+                  "group": {
+                    "type": "string",
+                    "description": "The bracketed group as printed, e.g. '7,8'."
+                  },
+                  "section": {
+                    "type": "string"
+                  },
+                  "sentence": {
+                    "type": "string",
+                    "description": "The sentence carrying the marker, clipped to ±120 chars around it."
+                  },
+                  "status": {
+                    "enum": [
+                      "covered",
+                      "uncovered",
+                      "uncertain"
+                    ]
+                  },
+                  "claim_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
                 }
               }
             }
@@ -282,17 +391,23 @@
         },
         "attribution": {
           "type": "object",
-          "description": "How claims were placed on occurrences. Since coverage/3 this is a lookup, not a match: extraction is shown the occurrence inventory as `ctx_NNNN` and returns the ids it used, so there are no similarity thresholds to report. Reading-order zipping remains deliberately unused \u2014 the order is unverified and degrades silently on one skipped claim.",
+          "description": "How claims were placed on occurrences. Since coverage/3 this is a lookup, not a match: extraction is shown the occurrence inventory as `ctx_NNNN` and returns the ids it used, so there are no similarity thresholds to report. Reading-order zipping remains deliberately unused — the order is unverified and degrades silently on one skipped claim.",
           "properties": {
-            "method": { "type": "string" },
+            "method": {
+              "type": "string"
+            },
             "claims_unattributed": {
               "type": "array",
-              "description": "Claims citing a label but naming none of that label's own contexts \u2014 a surplus claim, an empty `ctx`, or a `ctx` that was not in the inventory. Their label's unreached occurrences are `uncertain`, never `uncovered`.",
+              "description": "Claims citing a label but naming none of that label's own contexts — a surplus claim, an empty `ctx`, or a `ctx` that was not in the inventory. Their label's unreached occurrences are `uncertain`, never `uncovered`.",
               "items": {
                 "type": "object",
                 "properties": {
-                  "claim_id": { "type": "integer" },
-                  "label": { "type": "string" }
+                  "claim_id": {
+                    "type": "integer"
+                  },
+                  "label": {
+                    "type": "string"
+                  }
                 }
               }
             }

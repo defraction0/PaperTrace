@@ -957,7 +957,10 @@ def _downgrade_unshowable(anchor) -> bool:
     Returns True when it downgraded, so the caller can say so on the console.
     """
     substantive = ("supported", "partial", "contradicted")
-    if anchor.verdict not in substantive or anchor.evidence_image:
+    # `or continuation_images`: a passage crossing a column break can have its
+    # boxes in the continuation, and that verdict CAN be shown — downgrading it
+    # would discard a judgement the reader is perfectly able to check
+    if anchor.verdict not in substantive or anchor.evidence_image or anchor.continuation_images:
         return False
     anchor.verdict = "unchecked"
     anchor.note = (
@@ -993,8 +996,8 @@ def highlight(
         # behind each verdict. A results.json written before multi-source
         # checking has no judgements; its own headline anchor is the one target.
         for a in c.judgements or [c]:
-            img = crop_for_anchor(a, c.id, case / "sources_resolved", case / "ingest", out_dir)
-            if img is None and a.source_slug:
+            imgs = crop_for_anchor(a, c.id, case / "sources_resolved", case / "ingest", out_dir)
+            if not imgs and a.source_slug:
                 # sources provided by the user live elsewhere — try the manifest
                 # path. `document()` and not a scan of `entries`: a supplement is
                 # never in `entries`, so scanning them left every supplement
@@ -1007,13 +1010,20 @@ def highlight(
                     if src.exists() and not tmp.exists():
                         tmp.parent.mkdir(parents=True, exist_ok=True)
                         tmp.write_bytes(src.read_bytes())
-                        img = crop_for_anchor(
+                        imgs = crop_for_anchor(
                             a, c.id, case / "sources_resolved", case / "ingest", out_dir
                         )
             tag = f"claim {c.id}" + (f" · {a.source_slug}" if c.is_multi_source() else "")
-            if img:
-                a.evidence_image = str(Path(img).relative_to(case / "out"))
-                done += 1
+            if imgs:
+                rel = [str(Path(i).relative_to(case / "out")) for i in imgs]
+                a.evidence_image, a.continuation_images = rel[0], rel[1:]
+                done += len(rel)
+                if a.continuation_images:
+                    n = len(rel)
+                    console.print(
+                        f"  [cyan]↳ {tag}: the passage crosses a break — {n} images"
+                        f"[/cyan]"
+                    )
                 # `is True` / `is False` / `is None` — never truthiness. None
                 # means nothing was ever searched for, and calling that "not
                 # found" asserts a search that did not happen.
