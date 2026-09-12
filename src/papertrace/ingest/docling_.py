@@ -32,7 +32,7 @@ try:
 except ImportError:  # pragma: no cover — older PyMuPDF exposes only `fitz`
     import fitz
 
-from ..models import Block
+from ..models import Block, Region
 
 _HEADING_LABELS = {"section_header", "title"}
 _LIST_LABELS = {"list_item"}
@@ -59,9 +59,32 @@ def _to_top_left(bbox, page_height: float) -> tuple[float, float, float, float]:
     return (round(left, 2), round(y0, 2), round(right, 2), round(y1, 2))
 
 
-def _item_prov(item):
-    prov = getattr(item, "prov", None) or []
-    return prov[0] if prov else None
+def _item_regions(item, page_heights: dict[int, float]) -> list[Region]:
+    """Every rectangle docling gives this item, in the order it states them.
+
+    `prov` is a list and used to be read as `prov[0]`, so a paragraph continuing
+    into the next column or onto the next page kept only the rectangle its
+    opening sat in — measured on one paper, 14,367 characters outside the box
+    their block claimed. Each entry carries its own `page_no`, so the height
+    used to flip the origin is looked up per entry and not once per block.
+
+    `charspan` is taken as given rather than recomputed: it is docling's own
+    statement of which characters that rectangle holds, and it is the only thing
+    that orders two rectangles sharing a page.
+    """
+    out: list[Region] = []
+    for prov in getattr(item, "prov", None) or []:
+        page = int(prov.page_no)
+        span = getattr(prov, "charspan", None) or (0, 0)
+        out.append(
+            Region(
+                page=page,
+                bbox=_to_top_left(prov.bbox, page_heights.get(page, 842.0)),
+                char_start=int(span[0]),
+                char_end=int(span[1]),
+            )
+        )
+    return out
 
 
 def _caption_of(item, doc) -> str:
@@ -94,11 +117,11 @@ def blocks_from_docling(doc, page_heights: dict[int, float]) -> list[Block]:
         label = str(getattr(item, "label", "text")).split(".")[-1].lower()
         if label in _SKIP_LABELS:
             continue
-        prov = _item_prov(item)
-        if prov is None:
+        regions = _item_regions(item, page_heights)
+        if not regions:
             continue
-        page = int(prov.page_no)
-        bbox = _to_top_left(prov.bbox, page_heights.get(page, 842.0))
+        # the first region IS `page`/`bbox` — every existing consumer reads those
+        page, bbox = regions[0].page, regions[0].bbox
 
         kind = getattr(item, "__class__", type(item)).__name__.lower()
         if "table" in kind:
@@ -133,6 +156,7 @@ def blocks_from_docling(doc, page_heights: dict[int, float]) -> list[Block]:
                 bbox=bbox,
                 heading_path=list(heading_stack),
                 text=text,
+                regions=regions,
             )
         )
     return blocks

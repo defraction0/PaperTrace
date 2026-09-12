@@ -16,7 +16,7 @@ try:
 except ImportError:  # pragma: no cover - older PyMuPDF exposes only `fitz`
     import fitz
 
-from ..models import Block, SourceMap, is_references_heading, looks_like_reference
+from ..models import Block, Region, SourceMap, is_references_heading, looks_like_reference
 
 _HEADING_MAX_LEN = 120
 
@@ -83,6 +83,11 @@ def ingest_blocks_pymupdf(pdf_path: Path) -> tuple[int, list[Block]]:
                 bbox=bbox,
                 heading_path=list(heading_stack),
                 text=text,
+                # one region, and it is the truth here: a PyMuPDF text block is
+                # one on-page rectangle and never merges across a column or a
+                # page, so there is no second rectangle to record. Populated
+                # anyway so nothing downstream has to branch on the backend.
+                regions=[Region(page=page, bbox=bbox, char_start=0, char_end=len(text))],
             )
         )
 

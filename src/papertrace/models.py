@@ -231,6 +231,28 @@ def citation_labels(text: str) -> set[str]:
     return labels
 
 
+@dataclass(frozen=True)
+class Region:
+    """One rectangle of a block, and the slice of its text that rectangle holds.
+
+    A paragraph that continues into the next column or onto the next page
+    occupies several rectangles, and docling states all of them — `page_no`,
+    `bbox` and `charspan` per provenance entry. Ingest used to keep `prov[0]`
+    and drop the rest, so a block's bbox bounded only its opening: measured on
+    one 14-page paper, 14,367 characters sat outside the rectangle their block
+    claimed, and five blocks were on two pages at once.
+
+    `char_start`/`char_end` are what put these in reading order. y-coordinates
+    cannot: two rectangles can share a page, and the continuation is usually
+    HIGHER up it than the opening, because it is the top of the next column.
+    """
+
+    page: int  # 1-based
+    bbox: tuple[float, float, float, float]  # x0, y0, x1, y1 (top-left origin)
+    char_start: int  # offset into Block.text, inclusive
+    char_end: int  # offset into Block.text, exclusive
+
+
 @dataclass
 class Block:
     """One layout block of a source document, with page-level provenance.
@@ -246,6 +268,13 @@ class Block:
     bbox: tuple[float, float, float, float]  # x0, y0, x1, y1 (PDF points, top-left origin)
     heading_path: list[str]
     text: str
+    # every rectangle this block's text occupies, in reading order. `page` and
+    # `bbox` above are the FIRST of these and keep their old meaning, so every
+    # consumer that reads them is unaffected. EMPTY means "not recorded" — a map
+    # written before regions existed — and never "this block has no
+    # continuation": a reader that finds it empty falls back to the single
+    # rectangle, which is what it would have done anyway.
+    regions: list[Region] = field(default_factory=list)
 
     @property
     def preview(self) -> str:
@@ -280,7 +309,13 @@ class SourceMap:
             "source_sha256": self.source_sha256,
             "declared_title": self.declared_title,
             "blocks": [
-                {**asdict(b), "bbox": list(b.bbox), "text_preview": b.preview} for b in self.blocks
+                {
+                    **asdict(b),
+                    "bbox": list(b.bbox),
+                    "regions": [{**asdict(r), "bbox": list(r.bbox)} for r in b.regions],
+                    "text_preview": b.preview,
+                }
+                for b in self.blocks
             ],
         }
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -296,6 +331,17 @@ class SourceMap:
                 bbox=tuple(b["bbox"]),
                 heading_path=b.get("heading_path", []),
                 text=b.get("text", ""),
+                # absent on maps written before regions were recorded: empty
+                # means not recorded, never "no continuation"
+                regions=[
+                    Region(
+                        page=r["page"],
+                        bbox=tuple(r["bbox"]),
+                        char_start=r.get("char_start", 0),
+                        char_end=r.get("char_end", 0),
+                    )
+                    for r in b.get("regions", [])
+                ],
             )
             for b in data["blocks"]
         ]
