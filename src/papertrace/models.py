@@ -300,6 +300,13 @@ class SourceMap:
     # the metadata carried the exact title for six of the seven. Recording it
     # raw is provenance; deciding whether it is usable is `paper_title`'s job.
     declared_title: str = ""
+    # fidelity warnings the table converter raised while reading this file,
+    # verbatim — a cell it could not place is text missing from the document.
+    # THREE answers: a list of messages (losses), `[]` (watched, nothing lost),
+    # and `None` (nobody watched — a map written before this, or a backend with
+    # no table model). Reading `None` as "nothing lost" would be exactly the
+    # reassurance this codebase refuses to invent.
+    table_warnings: list[str] | None = None
 
     def to_json(self, path: Path) -> None:
         payload = {
@@ -308,6 +315,7 @@ class SourceMap:
             "converter": self.converter,
             "source_sha256": self.source_sha256,
             "declared_title": self.declared_title,
+            "table_warnings": self.table_warnings,
             "blocks": [
                 {
                     **asdict(b),
@@ -354,6 +362,8 @@ class SourceMap:
             # "unknown", never "matches", so a reader must re-establish it
             source_sha256=data.get("source_sha256"),
             declared_title=data.get("declared_title", ""),
+            # absent means NOT RECORDED, never "nothing was lost"
+            table_warnings=data.get("table_warnings"),
         )
 
     def find(self, block_id: str) -> Block | None:
@@ -882,6 +892,10 @@ class RunResults:
     # table. An EMPTY dict means the run never recorded this (every 0.4.x
     # file), which is not the same as "all of them were read flat".
     source_converters: dict[str, str] = field(default_factory=dict)
+    # per source slug, the fidelity warnings its table converter raised. Only
+    # sources that lost something appear; an empty dict means the run did not
+    # record this, never that no source lost anything.
+    source_table_warnings: dict[str, list[str]] = field(default_factory=dict)
     claims: list[ClaimResult] = field(default_factory=list)
     uncited: list[UncitedClaim] = field(default_factory=list)
     # deterministic citation-label audit: which [N] labels appear in the text,
@@ -912,6 +926,7 @@ class RunResults:
             "refs": {"total": self.refs_total, "available": self.refs_available},
             "converter": self.converter,
             "source_converters": self.source_converters,
+            "source_table_warnings": self.source_table_warnings,
             "counts": self.counts(),
             "claims": [asdict(c) for c in self.claims],
             "uncited": [asdict(u) for u in self.uncited],
@@ -931,6 +946,7 @@ class RunResults:
             refs_available=data.get("refs", {}).get("available", 0),
             converter=data.get("converter", "pymupdf"),
             source_converters=data.get("source_converters", {}),
+            source_table_warnings=data.get("source_table_warnings", {}),
             claims=[_claim_from(c) for c in data["claims"]],
             uncited=[UncitedClaim(**u) for u in data.get("uncited", [])],
             coverage=data.get("coverage", {}),

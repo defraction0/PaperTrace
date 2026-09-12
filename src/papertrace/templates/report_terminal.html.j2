@@ -79,6 +79,9 @@
 {% for d in disclosures if d.key == "source_fidelity" %}
     <div class="log"><span class="step">▸ sources</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
+{% for d in disclosures if d.key == "table_loss" %}
+    <div class="log"><span class="step">▸ sources</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
 {% for d in disclosures if d.key == "supplement_identity" %}
     <div class="log"><span class="step">▸ sources</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}

@@ -886,8 +886,13 @@ def _check_pipeline(
     # converter above says nothing about them, and until this was carried the
     # markdown and HTML reports said nothing about them either.
     source_converters: dict[str, str] = {}
+    source_table_warnings: dict[str, list[str]] = {}
     for doc in manifest.documents():
         sp = case / "ingest" / doc.slug / "source_map.json"
+        if sp.exists() and doc.slug not in source_table_warnings:
+            _tw = SourceMap.from_json(sp).table_warnings
+            if _tw:  # None = nobody watched, [] = watched and clean
+                source_table_warnings[doc.slug] = _tw
         if sp.exists() and doc.slug not in source_converters:
             source_converters[doc.slug] = SourceMap.from_json(sp).converter
 
@@ -901,6 +906,7 @@ def _check_pipeline(
         refs_available=len(manifest.retrieved),
         converter=converter,
         source_converters=source_converters,
+        source_table_warnings=source_table_warnings,
         claims=claims,
         uncited=uncited,
         coverage=coverage,

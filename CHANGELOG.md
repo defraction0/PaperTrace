@@ -126,6 +126,53 @@ is the guard working, not a regression.
 
 Judgement quality here is **unmeasured**, like everything since ADR 0001.
 
+### Fixed — a dropped table cell is a disclosure, not console noise
+
+A real audit printed roughly two hundred lines of this during ingest:
+
+```
+MatchingPostProcessor WARNING  Orphan pdf_cell 186 recovered to col=6 by
+                               nearest-column fallback (row=11, x=620.5)
+```
+
+They come from docling's TableFormer post-processor via
+`logging.getLogger("MatchingPostProcessor")` — a bare top-level name whose
+**parent is `root`**, which the library levels itself and to which it attaches
+its own `StreamHandler(sys.stdout)`. `_quiet_third_party_loggers` levels
+`"docling"`, so it could never reach it.
+
+Those are repairs and they are noise. Buried among them was one that is not:
+
+```
+5 of 65 pdf cells matched neither a row nor a column band of the 24x4 grid
+and were dropped from the table
+```
+
+That is text missing from a cited source's table, reaching the user only as a
+stray line from a third-party library. **Silencing the logger without surfacing
+that would have hidden a fidelity loss**, so the same filter does both: it
+swallows the logger's output and captures what is not a repair.
+
+The classification **defaults to surfacing**. Only the self-describing recovery
+messages count as noise; anything else that logger emits is kept and reported.
+The wording belongs to `docling-ibm-models` and changes between versions — the
+message above does not exist in the version resolved by `docling>=2.0` at the
+time of writing — so matching the loss literally would under-report silently on
+a version nobody has seen. Matching the *repair* fails the safe way.
+
+A `logging.Filter` rather than a level, because the library calls `setLevel` on
+that logger itself while the models load, overwriting anything set beforehand;
+filters are consulted after the level check. It is installed for one conversion
+and removed even when the conversion raises.
+
+Wire format: `SourceMap.table_warnings` and `RunResults.source_table_warnings`,
+both schema-declared. `table_warnings` has **three** answers —
+messages (something was lost), `[]` (watched, nothing lost), and `null` (nobody
+watched: a map written before this, or a backend with no table model). `null`
+must never be read as "nothing was lost". The new `table_loss` disclosure
+carries the converter's own count verbatim, because "5 of 65" is the finding and
+"cells were dropped" is not.
+
 ### Fixed — a passage crossing a column or page break is shown in full
 
 An evidence crop was one rectangle on one page, so a passage continuing into the

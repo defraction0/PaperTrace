@@ -429,6 +429,16 @@
           }
         }
       }
+    },
+    "source_table_warnings": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "description": "Per source slug, the fidelity warnings its table converter raised. Only sources that lost something appear. Absent or empty means the run did not record it, which is not the same as no source having lost anything."
     }
   }
 }
