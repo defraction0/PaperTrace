@@ -4,7 +4,10 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [0.6.0] — unreleased
+## [0.6.0] — 2026-09-13 (beta)
+
+Carries 0.4.1 and 0.5.0 with it. Neither was ever published, so neither has a
+tag; their sections below are the record of what went out in this release.
 
 ### Added — an interactive report viewer: `--format viewer`
 
@@ -446,9 +449,11 @@ The committed demo has exactly one uncited assertion, so a single-item fixture
 had been testing the separator between items vacuously for as long as the
 section has existed.
 
-## [0.5.0] — unreleased
+## [0.5.0] — shipped in 0.6.0
 
-0.4.1 was never released, so its entries below ship together with these.
+Never published on its own, so there is no `v0.5.0` tag. 0.4.1 was not
+published either, so its entries below ship together with these — all of it
+went out in 0.6.0.
 
 ### Added — `papertrace --version`
 
@@ -764,7 +769,9 @@ is why it is here and not only in a commit message.
   of seven papers with unconfirmed numbering, is unaffected and remains the
   higher-value work here.
 
-## [0.4.1] — unreleased
+## [0.4.1] — shipped in 0.6.0
+
+Never published on its own, so there is no `v0.4.1` tag.
 
 ### Added — the reference list is now checked against what the paper cites
 
@@ -1864,6 +1871,7 @@ Versions 0.1–0.2 were developed under the working name *ManuscriptAgent*
 (manuscript-review focus). 0.3.0 reframes the tool to post-publication paper
 auditing: published papers by design, retrieval gaps as first-class results.
 
+[0.6.0]: https://github.com/defraction0/PaperTrace/releases/tag/v0.6.0
 [0.4.0]: https://github.com/defraction0/PaperTrace/releases/tag/v0.4.0
 [0.3.1]: https://github.com/defraction0/PaperTrace/releases/tag/v0.3.1
 [0.3.0]: https://github.com/defraction0/PaperTrace/releases/tag/v0.3.0
