@@ -47,6 +47,14 @@ Internally a selection is an array of claim ids — `--max-claims 5` is
 scope — so cherry-picking claims by number is a different array on the same
 parameter, not a new mechanism. That route is open and not yet a flag.
 
+### Changed — the README at half its length, the viewer first
+
+The README is condensed to its essentials — the same technical statements,
+each said once — and opens on the viewer's detail view, which is the picture
+that explains the tool. The three ways in share one quick start, the flags
+that matter have one section, and the does / does-not list is the honest
+scope in a line or two per item rather than a paragraph.
+
 ### Changed — extraction is a stage of its own, and `check` reuses it
 
 `papertrace extract` writes every claim the extractor found — numbered in
