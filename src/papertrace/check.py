@@ -345,6 +345,62 @@ def extract_claims(
 
 
 # ---------------------------------------------------------------------------
+# a slice of the audit, on request
+# ---------------------------------------------------------------------------
+
+
+def select_claims(claims: list[ClaimResult], ids: list[int] | None) -> list[ClaimResult]:
+    """The claims an audit was asked to judge, in reading order.
+
+    The array is the contract. `--max-claims 5` arrives here as `[1, 2, 3, 4,
+    5]`, and a cherry-picked `[3, 7]` will travel the same road — which is why
+    this takes ids rather than a count. An id the extraction never produced is
+    simply absent from the result: nothing is invented to fill the request.
+    `None` means the whole paper, and is not the same as `[]`, which means
+    nothing.
+    """
+    if ids is None:
+        return list(claims)
+    wanted = set(ids)
+    return [c for c in claims if c.id in wanted]
+
+
+def audit_scope(
+    requested: list[int] | None,
+    extracted: list[ClaimResult],
+    judged: list[ClaimResult],
+    manifest: RefManifest,
+) -> dict:
+    """What this run left out on request — `results.scope`, empty when nothing.
+
+    Two limits are recorded from two places. The claims selection is this
+    stage's own; the sources side is read off the manifest, because `refs`
+    made those choices and this stage may have been asked for a different
+    selection than references were resolved for. Both go into `results.json`
+    so the report can state them without either file in hand.
+    """
+    scope: dict = {}
+    if requested is not None:
+        scope["claims"] = {
+            "requested": list(requested),
+            "judged": [c.id for c in judged],
+            "extracted": len(extracted),
+        }
+    limits = manifest.limits or {}
+    skipped = [e for e in manifest.entries if e.status == "skipped"]
+    if limits or skipped:
+        sources: dict = {}
+        if limits.get("max_sources") is not None:
+            sources["max"] = int(limits["max_sources"])
+        if limits.get("claims") is not None:
+            sources["for_claims"] = [int(i) for i in limits["claims"]]
+        sources["skipped_for_claims"] = [e.num for e in skipped if e.skipped_by == "claims"]
+        sources["skipped_by_cap"] = [e.num for e in skipped if e.skipped_by == "sources"]
+        scope["sources"] = sources
+    return scope
+
+
+# ---------------------------------------------------------------------------
 # deterministic citation-label coverage audit
 # ---------------------------------------------------------------------------
 
@@ -904,7 +960,13 @@ def check_claims(
                     "provided — pass it with --supplement"
                 )
             else:
-                reasons = {e.status for _, e in pairs if e}
+                # a skipped source is a choice, not a retrieval failure, and the
+                # status word alone reads as one — the run-level scope note
+                # carries the limit that made the choice
+                reasons = {
+                    "skipped on request" if e.status == "skipped" else e.status
+                    for _, e in pairs if e
+                }
                 c.note = (
                     f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
                 )

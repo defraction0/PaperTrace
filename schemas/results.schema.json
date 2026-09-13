@@ -439,6 +439,66 @@
         }
       },
       "description": "Per source slug, the fidelity warnings its table converter raised. Only sources that lost something appear. Absent or empty means the run did not record it, which is not the same as no source having lost anything."
+    },
+    "scope": {
+      "type": "object",
+      "description": "What this run left out ON REQUEST (`--max-claims`, `--max-sources`), as opposed to what it could not do. Absent or empty means the whole paper was audited — which is what every file written before 0.7.0 means. Whatever is here is restated at the end of every report format.",
+      "properties": {
+        "claims": {
+          "type": "object",
+          "description": "Present when `check` judged a selection. `requested` is the array asked for (`--max-claims 5` is [1, 2, 3, 4, 5]); `judged` the ids of it that exist and were checked; `extracted` how many claims the extractor found in all. `claims` in this file holds the judged ones only — the rest are in out/claims.json, unjudged.",
+          "required": [
+            "requested",
+            "judged",
+            "extracted"
+          ],
+          "properties": {
+            "requested": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            },
+            "judged": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            },
+            "extracted": {
+              "type": "integer"
+            }
+          }
+        },
+        "sources": {
+          "type": "object",
+          "description": "Present when the retrieval manifest ran under a limit or skipped anything. `max` is the cap on sources obtained; `for_claims` the claim selection references were resolved for; `skipped_for_claims` the labels no selected claim cites; `skipped_by_cap` the labels past the cap. Every label listed is `skipped` in refs_manifest.json, never `paywalled` — nothing was tried.",
+          "properties": {
+            "max": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "for_claims": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            },
+            "skipped_for_claims": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "skipped_by_cap": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

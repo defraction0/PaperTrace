@@ -21,7 +21,8 @@ from rich.prompt import Prompt
 
 from . import __version__
 from .brand import BANNER
-from .models import ClaimResult, RefManifest, RunResults, manuscript_fingerprint
+from .disclosures import ids_span
+from .models import ClaimExtraction, ClaimResult, RefManifest, RunResults, manuscript_fingerprint
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich", invoke_without_command=True)
 console = Console()
@@ -34,7 +35,42 @@ STATUS_MARK = {
     "no_doi": "[yellow]⚠[/yellow]",
     "unpublished": "[yellow]⚠[/yellow]",
     "error": "[red]✗[/red]",
+    "skipped": "[dim]–[/dim]",  # left out on request: not a failure, so not a warning glyph
 }
+
+
+def _int(value) -> int | None:
+    """An option's integer, or None — never Typer's `OptionInfo` sentinel.
+
+    A direct call that omits an option (the tests, and any stage calling
+    another) hands the function the declared default object rather than the
+    value the help screen shows. Every limit passes through here so that
+    object can never be read as a number.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _first_n(n) -> list[int] | None:
+    """`--max-claims N` as the array the stages take: the first N claim ids.
+
+    The array is the contract — a later cherry-pick hands `[3, 7]` down the
+    same parameter — and the flag is one way of writing it.
+    """
+    n = _int(n)
+    return list(range(1, n + 1)) if n is not None else None
+
+
+def _require_claude() -> None:
+    """The judge is `claude -p`: without the CLI there is nothing to extract or check with."""
+    from .check import claude_available
+
+    if not claude_available():
+        console.print(
+            "[red]The `claude` CLI is required for batch checking[/red] — "
+            "install Claude Code (https://claude.com/claude-code) and log in, "
+            "or run the interactive `/review` skill instead."
+        )
+        raise typer.Exit(2)
 
 
 CASE_NAME_MAX = 60  # a folder name, not a title — some journals' stems run long
@@ -90,7 +126,7 @@ def _open_case(case: Path) -> Path:
 def _stage_case(case: Path | None) -> Path:
     """Which case folder a stage that has no manuscript works on.
 
-    `check`, `highlight`, `report` and `scout` take no paper, so they have no
+    `extract`, `check`, `highlight`, `report` and `scout` take no paper, so they have no
     name to derive and there is nothing honest to default to: picking one of
     several audits in the current directory is exactly the mixing `_guard_case`
     exists to prevent. `case/` is still accepted when it is there, because it
@@ -461,6 +497,125 @@ def ingest(
     _ingest_pipeline(pdf=pdf, out=out, case=case, backend=backend)
 
 
+def _extract_pipeline(
+    *,
+    case: Path | None = None,
+    model: str | None = None,
+) -> ClaimExtraction:
+    """`extract`'s work: the claims, numbered in reading order, into out/claims.json.
+
+    Keyword-only for the reason every pipeline function is. A stage of its own
+    so `run` can extract BEFORE resolving references — a claims limit then
+    retrieves only what the selected claims cite — and so `check` reads the
+    list back rather than extracting a second time, which would renumber the
+    claims between retrieval and judging.
+    """
+    from .check import Truncations, extract_claims, last_model
+    from .models import SourceMap
+
+    case = _stage_case(case)
+    _require_claude()
+    slot = case / "ingest" / "manuscript"
+    if not (slot / "annotated.md").exists():
+        console.print(
+            f"[red]{slot / 'annotated.md'} not found[/red] — run "
+            f"[cyan]papertrace ingest <paper.pdf> -c {case}[/cyan] first"
+        )
+        raise typer.Exit(1)
+    truncations = Truncations()  # one accumulator per run — never module state
+    with console.status("extracting claims (cited + uncited)…"):
+        claims, uncited = extract_claims(case, model, truncations=truncations)
+    smap_path = slot / "source_map.json"
+    smap = SourceMap.from_json(smap_path) if smap_path.exists() else None
+    extraction = ClaimExtraction(
+        manuscript=smap.doc if smap else "",
+        # the paper this list belongs to — what lets `check` reuse it safely
+        manuscript_sha256=smap.source_sha256 if smap else None,
+        extractor=f"claude -p · {model or last_model() or 'account default model'}",
+        date=str(datetime.date.today()),
+        claims=claims,
+        uncited=uncited,
+        truncated=truncations.report(),
+    )
+    (case / "out").mkdir(parents=True, exist_ok=True)
+    extraction.to_json(case / "out" / "claims.json")
+    console.print(
+        f"[green]✓[/green] {len(claims)} citation-backed claims · "
+        f"{len(uncited)} uncited assertions flagged → "
+        f"[cyan]{case / 'out' / 'claims.json'}[/cyan]"
+    )
+    return extraction
+
+
+@app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
+def extract(
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder holding the audit (required unless ./case exists)",
+    ),
+    model: str = typer.Option(None, "--model", help="Model override for claude -p"),
+) -> None:
+    """Extract the citation-backed claims and uncited assertions into out/claims.json, numbered in reading order (claude -p)."""
+    _extract_pipeline(case=case, model=model)
+
+
+def _extraction_for(case: Path, model: str | None) -> ClaimExtraction:
+    """`out/claims.json` when it is this paper's; a fresh extraction otherwise.
+
+    Reused on purpose, and only on a content match. Reuse is what keeps the
+    claim numbers stable — between the retrieval a selection was resolved for
+    and the judging, across a `check` re-run after a failed call, and for a
+    later cherry-pick that names claims by number. The hash is what makes
+    that safe: a folder identified by file name can hold another paper's
+    list, and judging that would judge the wrong claims. An unhashed map is
+    no match, for the reason `_stale_ingest` treats one as stale.
+    """
+    from .models import SourceMap
+
+    path = case / "out" / "claims.json"
+    if path.exists():
+        smap_path = case / "ingest" / "manuscript" / "source_map.json"
+        sha = SourceMap.from_json(smap_path).source_sha256 if smap_path.exists() else None
+        try:
+            extraction = ClaimExtraction.from_json(path)
+        except (OSError, ValueError, KeyError, TypeError):
+            extraction = None
+        if extraction is not None and sha and extraction.manuscript_sha256 == sha:
+            console.print(
+                f"[green]✓[/green] {len(extraction.claims)} citation-backed claims · "
+                f"{len(extraction.uncited)} uncited assertions flagged — reusing "
+                f"[cyan]{path}[/cyan] (extracted {extraction.date or 'earlier'}); "
+                "delete it to extract afresh"
+            )
+            return extraction
+        console.print(
+            f"[yellow]⚠ {path} is not this paper's extraction, or nothing can say whose "
+            "it is — extracting afresh[/yellow]"
+        )
+    return _extract_pipeline(case=case, model=model)
+
+
+def _labels_for_claims(case: Path, claims: list[int]) -> set[str]:
+    """The citation labels the selected claims cite, read from out/claims.json.
+
+    Refuses without it. Which references the first five claims cite is a fact
+    `extract` wrote down; retrieving everything while claiming a limit would be
+    the silent downgrade this codebase refuses, so the missing record is named
+    and the run stops.
+    """
+    from .check import select_claims
+
+    path = case / "out" / "claims.json"
+    if not path.exists():
+        console.print(
+            f"[red]--max-claims needs the extracted claims, and {path} is not there[/red] — "
+            f"run [cyan]papertrace extract -c {case}[/cyan] first (`run` does this for you)"
+        )
+        raise typer.Exit(2)
+    selected = select_claims(ClaimExtraction.from_json(path).claims, claims)
+    return {r for c in selected for r in c.refs}
+
+
 def _body_citation_labels(smap, citation_labels, is_references_heading) -> set[str]:
     """The `[N]` markers the manuscript's body actually cites.
 
@@ -503,6 +658,8 @@ def _refs_pipeline(
     backend: str = "auto",
     doi: str | None = None,
     supplement: list[Path] | None = None,
+    claims: list[int] | None = None,
+    max_sources: int | None = None,
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest.
 
@@ -512,6 +669,11 @@ def _refs_pipeline(
     tests do) with a shifted or omitted argument used to take that sentinel as
     the value. This function is what they actually call; `refs()` is a thin CLI
     adapter over it.
+
+    `claims` restricts retrieval to the references those claims cite (read from
+    out/claims.json — see `_labels_for_claims`); `max_sources` caps how many are
+    obtained. Both are recorded in the manifest's `limits`, and every reference
+    left out is `skipped` with its reason, so the report can say so.
     """
     from .ingest import ingest_pdf, references_span
     from .models import SourceMap, citation_labels, is_references_heading, paper_title
@@ -692,13 +854,42 @@ def _refs_pipeline(
     for s in own:
         console.print(f"  [cyan]+[/cyan] {Path(s.pdf_path).name} → this paper's own supplement")
 
-    resolve_all(entries, dest, _email(email), provided_dir=provided, progress=tick, taken=taken)
+    # a claims selection retrieves only what those claims cite — from the record
+    # `extract` wrote, never guessed from the bibliography
+    only_labels = _labels_for_claims(case, claims) if claims is not None else None
+    if only_labels is not None:
+        console.print(
+            f"[bold]scope[/bold]  retrieving only the {len(only_labels)} reference"
+            f"{'' if len(only_labels) == 1 else 's'} cited by claims "
+            f"{ids_span(claims) if claims else 'none'} — the rest are skipped, and the "
+            "report will say so"
+        )
+    if max_sources is not None:
+        console.print(
+            f"[bold]scope[/bold]  obtaining at most {max_sources} source"
+            f"{'' if max_sources == 1 else 's'}, in bibliography order — the rest are "
+            "skipped, and the report will say so"
+        )
+    # the limits travel only when set: "no limit" is the absence of the
+    # argument, and every fake of this seam that predates them keeps working
+    limits_kw: dict = {}
+    if only_labels is not None:
+        limits_kw["only_labels"] = only_labels
+    if max_sources is not None:
+        limits_kw["limit"] = max_sources
+    resolve_all(entries, dest, _email(email), provided_dir=provided, progress=tick, taken=taken,
+                **limits_kw)
 
     # a file the user deliberately put in the folder that then did nothing is the
     # quietest possible failure — they would go on believing it had been read
     for pdf, why in unused_provided(entries, provided):
         console.print(f"  [yellow]⚠ {pdf.name} set aside — {why}[/yellow]")
 
+    limits: dict = {}
+    if claims is not None:
+        limits["claims"] = list(claims)
+    if max_sources is not None:
+        limits["max_sources"] = max_sources
     manifest = RefManifest(
         manuscript=manuscript.name,
         entries=entries,
@@ -709,13 +900,16 @@ def _refs_pipeline(
         numbering_verified=rec.verified,
         numbering_note=rec.note,
         unverified_from=rec.unverified_from,
+        limits=limits,
     )
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)
-    misses = len(entries) - ok
+    skipped = sum(1 for e in entries if e.status == "skipped")
+    misses = len(entries) - ok - skipped  # skipped is neither: nobody tried
     console.print(
         f"\n[bold]{ok}/{len(entries)} sources available[/bold]"
         + (f" · [yellow]{misses} not obtainable[/yellow] (see refs_manifest.json)" if misses else "")
+        + (f" · [dim]{skipped} skipped on request[/dim]" if skipped else "")
     )
     console.print("[dim]not obtainable is a recorded result — those claims will be reported as"
                   " unverifiable, never guessed.[/dim]")
@@ -747,10 +941,22 @@ def refs(
              "supplement needs no flag — drop it in the sources folder named after "
              "the reference, e.g. pyrros-2023-supplement.pdf",
     ),
+    max_claims: int = typer.Option(
+        None, "--max-claims", min=1,
+        help="Retrieve only the references cited by the first N extracted claims "
+             "(needs out/claims.json from `papertrace extract`); the rest are skipped, "
+             "and every report says so",
+    ),
+    max_sources: int = typer.Option(
+        None, "--max-sources", min=1,
+        help="Obtain at most N cited sources, in bibliography order; the rest are "
+             "skipped — not retrieved, not judged — and every report says so",
+    ),
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest."""
     _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
-                    parse_only=parse_only, backend=backend, doi=doi, supplement=supplement)
+                    parse_only=parse_only, backend=backend, doi=doi, supplement=supplement,
+                    claims=_first_n(max_claims), max_sources=_int(max_sources))
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
@@ -823,6 +1029,7 @@ def _check_pipeline(
     case: Path | None = None,
     model: str | None = None,
     backend: str = "auto",
+    claims: list[int] | None = None,
 ) -> None:
     """`check`'s work, with ordinary Python defaults.
 
@@ -832,26 +1039,30 @@ def _check_pipeline(
     `ingest_pdf`, which refuses an unrecognised value loudly, so a sentinel
     arriving here would fail an audit at the judging step after the retrieval
     work was already done.
+
+    `claims` is the selection to judge, as ids; None is the whole paper. The
+    claims come from out/claims.json — this paper's, or extracted now — so the
+    numbers a selection names are the numbers `extract` gave.
     """
-    from .check import Truncations, check_claims, claude_available, extract_claims
+    from .check import Truncations, audit_scope, check_claims, select_claims
 
     case = _stage_case(case)
-    if not claude_available():
-        console.print(
-            "[red]The `claude` CLI is required for batch checking[/red] — "
-            "install Claude Code (https://claude.com/claude-code) and log in, "
-            "or run the interactive `/review` skill instead."
-        )
-        raise typer.Exit(2)
+    _require_claude()
 
     manifest = RefManifest.from_json(case / "refs_manifest.json")
+    extraction = _extraction_for(case, model)
+    # the extraction's own cuts travel into this run's disclosure: the report
+    # is written from results.json alone and must still say what was never read
     truncations = Truncations()  # one accumulator per run — never module state
-    with console.status("extracting claims (cited + uncited)…"):
-        claims, uncited = extract_claims(case, model, truncations=truncations)
-    console.print(
-        f"[green]✓[/green] {len(claims)} citation-backed claims · "
-        f"{len(uncited)} uncited assertions flagged"
-    )
+    truncations.cuts.update(extraction.truncated)
+    selected = select_claims(extraction.claims, claims)
+    if claims is not None:
+        console.print(
+            f"[bold]scope[/bold]  judging claims "
+            f"{ids_span([c.id for c in selected]) if selected else 'none'} of "
+            f"{len(extraction.claims)} extracted — the rest stay unjudged, and the report "
+            "will say so"
+        )
 
     def tick(slug, group):
         console.print(f"  checked against [cyan]{slug}[/cyan]: {_tick_marks(slug, group)}")
@@ -865,14 +1076,17 @@ def _check_pipeline(
 
     with console.status("reading claims against their cited pages…"):
         check_claims(
-            claims, manifest, case, model, progress=tick, on_error=fail,
+            selected, manifest, case, model, progress=tick, on_error=fail,
             truncations=truncations, backend=backend,
         )
 
     from .check import coverage_audit
     from .models import SourceMap
 
-    coverage = coverage_audit(case, claims)
+    # over EVERY extracted claim, judged or not: coverage measures whether
+    # extraction reached each citation, and a claim left unjudged on request
+    # did reach its citation. The scope note says the figure is read that way.
+    coverage = coverage_audit(case, extraction.claims)
     smap_path = case / "ingest" / "manuscript" / "source_map.json"
     converter = SourceMap.from_json(smap_path).converter if smap_path.exists() else "pymupdf"
     # how each cited source was read, recorded per slug. The manuscript's
@@ -900,15 +1114,23 @@ def _check_pipeline(
         converter=converter,
         source_converters=source_converters,
         source_table_warnings=source_table_warnings,
-        claims=claims,
-        uncited=uncited,
+        claims=selected,
+        uncited=extraction.uncited,
         coverage=coverage,
         truncated=truncations.report(),
+        scope=audit_scope(claims, extraction.claims, selected, manifest),
     )
     (case / "out").mkdir(parents=True, exist_ok=True)
     results.to_json(case / "out" / "results.json")
 
     console.print(_verdict_line(results.counts()))
+    if results.scope:
+        # the same sentence the report ends with, so the console cannot promise
+        # more than the report delivers
+        from .disclosures import run_disclosures
+
+        scope = next(d for d in run_disclosures(results, manifest) if d.key == "scope")
+        console.print(f"[yellow]scope: {scope.short}[/yellow]")
     from .disclosures import coverage_headline
 
     occ = coverage.get("occurrences") or {}
@@ -922,13 +1144,15 @@ def _check_pipeline(
             f"[{'yellow' if unresolved else 'green'}]coverage: {headline}"
             f"[/{'yellow' if unresolved else 'green'}]"
         )
-    elif claims:
+    elif extraction.claims:
         console.print(
             "[yellow]coverage: no bracketed numeric citation markers found — only "
             "[12]/[7,8]/[9-11] styles are audited; coverage not audited[/yellow]"
         )
-    if uncited:
-        console.print(f"[cyan]{len(uncited)} uncited assertions[/cyan] — see report section")
+    if extraction.uncited:
+        console.print(
+            f"[cyan]{len(extraction.uncited)} uncited assertions[/cyan] — see report section"
+        )
 
 
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
@@ -939,9 +1163,14 @@ def check(
     ),
     model: str = typer.Option(None, "--model", help="Model override for claude -p"),
     backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+    max_claims: int = typer.Option(
+        None, "--max-claims", min=1,
+        help="Judge only the first N extracted claims (reading order); the rest stay "
+             "unjudged, and every report says so",
+    ),
 ) -> None:
-    """Extract citation-backed claims and judge each against its cited source (claude -p)."""
-    _check_pipeline(case=case, model=model, backend=backend)
+    """Judge each extracted claim against its cited source (claude -p) — reusing out/claims.json when it is this paper's, extracting first when not."""
+    _check_pipeline(case=case, model=model, backend=backend, claims=_first_n(max_claims))
 
 
 def _downgrade_unshowable(anchor) -> bool:
@@ -1173,10 +1402,25 @@ def run(
              "supplement needs no flag — drop it in the sources folder named after "
              "the reference, e.g. pyrros-2023-supplement.pdf",
     ),
+    max_claims: int = typer.Option(
+        None, "--max-claims", min=1,
+        help="Check only the first N extracted claims, in reading order; only the "
+             "references they cite are retrieved, and every report says so",
+    ),
+    max_sources: int = typer.Option(
+        None, "--max-sources", min=1,
+        help="Obtain and judge against at most N cited sources (PDFs), in bibliography "
+             "order; the rest are skipped, and every report says so",
+    ),
 ) -> None:
-    """Full pipeline: ingest → refs → scout → check → highlight → report."""
+    """Full pipeline: ingest → extract → refs → scout → check → highlight → report."""
     console.print(BANNER)
     email = _email(email)  # fail fast — before the ingest models load, not after
+    # the limits as the stages take them: an array of claim ids and a count.
+    # Through `_int`, so a direct call that omits either cannot hand a stage
+    # Typer's sentinel as a number
+    selection = _first_n(max_claims)
+    cap = _int(max_sources)
     # resolved once, here, and passed down by keyword: a stage that re-derived
     # its own folder could put the same question six times, or disagree
     case = _resolve_case(case, manuscript)
@@ -1196,6 +1440,12 @@ def run(
     # convention-only, and each should be split the next time it gains a
     # parameter.
     _ingest_pipeline(pdf=manuscript, out=case / "ingest" / "manuscript", case=case, backend=backend)
+    # extraction BEFORE references, so a claims limit can retrieve only what
+    # the selected claims cite; `check` reads the same list back, so the
+    # numbers a selection refers to hold still between the two. Always, not
+    # only under a limit: one order for every run, and a missing `claude` now
+    # fails before any network work rather than after all of it
+    _extract_pipeline(case=case, model=model)
     # detected once, here, and handed to both consumers. `refs` detects for
     # itself when called alone, so forwarding the raw option left the scout
     # guessing by title on the very runs where the paper's DOI was sitting on
@@ -1203,10 +1453,11 @@ def run(
     # without erroring.
     doi = doi or _detected_doi(manuscript)
     _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
-                    parse_only=False, backend=backend, doi=doi, supplement=supplement)
+                    parse_only=False, backend=backend, doi=doi, supplement=supplement,
+                    claims=selection, max_sources=cap)
     if with_scout:
         scout(case=case, doi=doi, email=email)
-    _check_pipeline(case=case, model=model, backend=backend)
+    _check_pipeline(case=case, model=model, backend=backend, claims=selection)
     highlight(case=case, claim=None)
     _report_pipeline(case=case, png=png, formats=formats)
     # a four-minute run should not need scrolling to learn how the paper was
@@ -1222,10 +1473,15 @@ def run(
         where = f"[cyan]{case/'out'/'report_viewer.html'}[/cyan] in a browser"
     else:
         where = f"[cyan]{case/'out'/'report.md'}[/cyan]"
+    limited = (
+        " · [yellow]limited on request — the report ends by saying what was left out[/yellow]"
+        if selection is not None or cap is not None else ""
+    )
     console.print(
         f"\n[bold green]done[/bold green] — open {where}"
         f" · read with [bold]{backend_used}[/bold]"
         " · the gap register is part of the result."
+        + limited
     )
 
 

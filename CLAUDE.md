@@ -26,6 +26,12 @@ Every subsystem encodes this, and most past bugs have been breaches of it:
   `anchor_located = False` and is captioned as unboxed.
 - A flat-text ingest fallback stamps `converter: pymupdf` into the source map so
   the fidelity loss appears in the report.
+- A limit set on request (`--max-claims`, `--max-sources`) is recorded — every
+  reference nobody tried is `skipped` with `skipped_by` and a reason, the
+  manifest carries `limits`, `results.json` carries `scope` — and
+  `disclosures._scope` states it at the **end** of every format as well as
+  with the caveats at the top. A limited run must never read as a smaller
+  paper; `tests/test_audit_limits.py` is the contract.
 
 When you add a feature, ask what it does when it fails. If the answer is "falls
 back to something reasonable", that is a bug in this codebase.
@@ -79,13 +85,24 @@ first use, not on install, and every test pins `backend="pymupdf"`
 
 ## Architecture
 
-Six stages, each a CLI subcommand, chained by `run`. Every stage writes a
+Seven stages, each a CLI subcommand, chained by `run`. Every stage writes a
 JSON/markdown artifact to the case folder and the next stage reads only that —
 there is no in-memory pipeline object:
 
 ```
-ingest → refs → scout → check → highlight → report
+ingest → extract → refs → scout → check → highlight → report
 ```
+
+- **`extract`** (`cli._extract_pipeline`, over `check.extract_claims`) —
+  writes `out/claims.json`: every claim numbered in reading order, with its
+  quote, location, `ctx_ids` and cited labels, and **no verdict field** — a
+  default `not_retrieved` written there would be a finding nobody made. It
+  runs BEFORE `refs` so `--max-claims` can retrieve only what the selected
+  claims cite, and `check` reads the list back (`cli._extraction_for`, on a
+  manuscript-hash match only) rather than extracting again, so the numbers a
+  selection names hold still. `check.select_claims` takes an **array of ids**
+  — `--max-claims 5` is `[1, 2, 3, 4, 5]`, and a cherry-pick is any other
+  array on the same parameter; do not add a count-shaped API beside it.
 
 - **`ingest/`** — two backends behind one contract: `pymupdf_.py` (flat text,
   tables linearized) and `docling_.py` (layout-aware, ~500 MB model download on
@@ -122,6 +139,11 @@ ingest → refs → scout → check → highlight → report
   three characters so `nce-2023`/`ma-2023`/`ren-2023` all collapse to the year.
   Do not restore token containment as an acceptance route: it is a proposal, and
   the veto behind it has no precision on a single-subject bibliography.
+  **Limits** arrive as `resolve_all(only_labels=, limit=)`: a reference no
+  selected claim cites, or one past the cap on sources *obtained* (successes,
+  not attempts), is `_skip`ped — status `skipped`, `skipped_by`, a reason —
+  and never resolved, provided file or not. The CLI passes those kwargs only
+  when set, so every fake of the seam that predates them keeps working.
 - **`check.py`** — the **only** module that calls a model, and only through the
   `_ask()` seam (`claude -p` subprocess; inherits the user's Claude Code login,
   no API key). Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per

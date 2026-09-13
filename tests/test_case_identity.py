@@ -266,6 +266,7 @@ def test_run_derives_one_case_folder_and_hands_it_to_every_stage(tmp_path, offli
     # function, the plain function `run` actually calls — see cli.py's comment
     # on `run()`.
     monkeypatch.setattr(cli, "_ingest_pipeline", lambda **kw: seen.__setitem__("ingest", kw))
+    monkeypatch.setattr(cli, "_extract_pipeline", lambda **kw: seen.__setitem__("extract", kw))
     monkeypatch.setattr(cli, "_refs_pipeline", lambda **kw: seen.__setitem__("refs", kw))
     monkeypatch.setattr(cli, "_report_pipeline", lambda **kw: seen.__setitem__("report", kw))
     monkeypatch.setattr(cli, "_check_pipeline", lambda **kw: seen.__setitem__("check", kw))
@@ -276,7 +277,7 @@ def test_run_derives_one_case_folder_and_hands_it_to_every_stage(tmp_path, offli
             png=False, backend="pymupdf", with_scout=True, doi=None)
 
     derived = tmp_path / "papers" / "zeta"
-    assert set(seen) == {"ingest", "refs", "scout", "check", "highlight", "report"}
+    assert set(seen) == {"ingest", "extract", "refs", "scout", "check", "highlight", "report"}
     assert {n: kw["case"] for n, kw in seen.items()} == dict.fromkeys(seen, derived)
 
 

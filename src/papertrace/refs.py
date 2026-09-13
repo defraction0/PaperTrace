@@ -1326,7 +1326,10 @@ def unused_provided(
             continue
         for pdf in _supplement_candidates(e, provided_dir):
             unavailable.setdefault(
-                pdf, f"[{e.num}] is not available ({e.status}), so nothing can be judged against it"
+                pdf,
+                f"[{e.num}] was skipped on request, so nothing is judged against it"
+                if e.status == "skipped"
+                else f"[{e.num}] is not available ({e.status}), so nothing can be judged against it",
             )
     # asked here rather than carried down from `resolve_all`, so there is ONE
     # place that explains why a file went unused. Re-running inference over the
@@ -1340,12 +1343,22 @@ def unused_provided(
             continue
         why = (reasons or {}).get(pdf) or unavailable.get(pdf) or inferred.get(pdf)
         if why is None and (found := identified.get(pdf)) is not None:
-            # it WAS recognised — another file got there first. A spare copy of
-            # a paper already matched is not a mystery and must not read as one.
-            why = (
-                f"it is [{found.entry.num}], recognised by its {found.signal}, but "
-                f"[{found.entry.num}] already has a file — this one was not needed"
-            )
+            if found.entry.status == "skipped":
+                # it IS that paper, and that paper was left out on request —
+                # the true reason, not "already has a file", which it does not
+                why = (
+                    f"it is [{found.entry.num}], recognised by its {found.signal}, but "
+                    f"[{found.entry.num}] was skipped on request — "
+                    + found.entry.reason.removeprefix("skipped on request: ")
+                )
+            else:
+                # it WAS recognised — another file got there first. A spare copy
+                # of a paper already matched is not a mystery and must not read
+                # as one.
+                why = (
+                    f"it is [{found.entry.num}], recognised by its {found.signal}, but "
+                    f"[{found.entry.num}] already has a file — this one was not needed"
+                )
         out.append((pdf, why or "could not tell which reference this is"))
     return out
 
@@ -1667,6 +1680,12 @@ def _resolve_by_retrieval(
     return entry
 
 
+def _skip(entry: RefEntry, by: str, reason: str) -> None:
+    """Record a reference left out on request — nothing tried, nothing guessed."""
+    entry.status, entry.skipped_by, entry.reason = "skipped", by, reason
+    entry.resolver, entry.pdf_path = None, None
+
+
 def resolve_all(
     entries: list[RefEntry],
     dest_dir: Path,
@@ -1674,7 +1693,22 @@ def resolve_all(
     provided_dir: Path | None = None,
     progress: ProgressCb | None = None,
     taken: set[str] | None = None,
+    *,
+    only_labels: set[str] | None = None,
+    limit: int | None = None,
 ) -> list[RefEntry]:
+    """Resolve every reference in place — or, on request, only some of them.
+
+    `only_labels` restricts retrieval to the references a claims selection
+    cites; `limit` caps how many sources are OBTAINED, in bibliography order.
+    The cap counts successes, not attempts: a paywalled reference was never
+    retrieved, so it uses no slot and the next one is tried. Whatever is left
+    out is `skipped`, with the limit named in its reason and `skipped_by`
+    saying which — a recorded choice, never a status that reads as a failure
+    to retrieve. A provided file for a skipped reference is not attached
+    either: the count is a promise about what was judged, and a file nobody
+    asked to be read must not slip in under it.
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
     # one registry for the whole run, seeded with the article slugs `_unique_slugs`
     # already fixed at parse time — supplements are only discovered here, so they
@@ -1729,14 +1763,27 @@ def resolve_all(
     for e in entries:
         for p in _exact_stem_claims(e, provided_dir):
             owners[p] = e.num
+    obtained = 0
     with _client() as client:
         for entry in entries:
-            resolve_entry(entry, dest_dir, email, client, provided_dir,
-                          content_match=articles.get(entry.num), owners=owners)
-            # after resolution, never before: whether a supplement may attach at
-            # all depends on the status `resolve_entry` just decided
-            attach_supplements(entry, provided_dir, taken,
-                               content=supplements.get(entry.num, []))
+            if only_labels is not None and entry.num not in only_labels:
+                _skip(entry, "claims",
+                      "skipped on request: none of the claims selected for this audit "
+                      "cites it, so it was neither retrieved nor judged")
+            elif limit is not None and obtained >= limit:
+                _skip(entry, "sources",
+                      f"skipped on request: past the limit of {limit} "
+                      f"source{'' if limit == 1 else 's'} obtained (--max-sources {limit}), "
+                      "so it was neither retrieved nor judged")
+            else:
+                resolve_entry(entry, dest_dir, email, client, provided_dir,
+                              content_match=articles.get(entry.num), owners=owners)
+                # after resolution, never before: whether a supplement may attach
+                # at all depends on the status `resolve_entry` just decided
+                attach_supplements(entry, provided_dir, taken,
+                                   content=supplements.get(entry.num, []))
+                if entry.status in ("retrieved", "provided"):
+                    obtained += 1
             if progress:
                 progress(entry)
     return entries
