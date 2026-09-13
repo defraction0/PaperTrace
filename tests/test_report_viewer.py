@@ -277,8 +277,15 @@ def test_a_mistyped_viewer_flag_is_still_refused(tmp_path):
 def test_every_surface_that_offers_the_viewer_is_documented():
     """The README is a correctness surface: each way in has to be written down,
     and each screenshot it embeds has to be a file in the repo — a raw URL to a
-    missing PNG renders as nothing, silently."""
+    missing PNG renders as nothing, silently.
+
+    A repo invariant, not an artefact one: the sdist ships neither `docs/` (3.8
+    MB, and every README image is an absolute raw URL precisely so it need not)
+    nor `.claude/`, so from inside an extracted archive this can only fail.
+    """
     root = Path(__file__).resolve().parent.parent
+    if not (root / "docs").is_dir() or not (root / ".claude").is_dir():
+        pytest.skip("repo-only directory")
     readme = (root / "README.md").read_text()
     assert "-f viewer" in readme
     assert "report_viewer.html" in readme
