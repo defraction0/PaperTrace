@@ -17,11 +17,13 @@ audit craft. This file choreographs the session.
 Print this banner (verbatim, in a fenced code block), then the one-liner:
 
 ```
-  ┌──────────────────────────┐
-  │  ▛▀▜ PaperTrace          │
-  │  ▌█▐ every claim, traced │
-  │  ▙▄▟ back to its source  │
-  └──────────────────────────┘
+  ┌──────────────────────────────────┐
+  │  ━━━ ●─┐                         │
+  │  ━━    └─┐   PaperTrace          │
+  │  ━  ┌────┴┐  every claim, traced │
+  │     │ ━━  │  back to its source  │
+  │     └─────┘                      │
+  └──────────────────────────────────┘
 ```
 
 > Point me at a paper. I'll retrieve what it cites, read every

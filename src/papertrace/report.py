@@ -11,11 +11,13 @@ Optional PNGs of the editor and terminal looks via render.html_to_png.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from collections.abc import Sequence
 from functools import partial
 from importlib import resources
 from pathlib import Path
+from urllib.parse import quote
 
 from jinja2 import Environment, FileSystemLoader
 from markupsafe import Markup
@@ -170,6 +172,9 @@ def write_reports(
         )
         ctx["viewer_logic"] = _script("viewer_logic.js")
         ctx["viewer_app"] = _script("viewer_app.js")
+        mark = _brand_svg("papertrace-icon.svg")
+        ctx["viewer_mark"] = mark
+        ctx["viewer_favicon"] = _favicon(mark)
 
     for look in html:
         name = f"report_{look}"
@@ -308,3 +313,25 @@ def _script(name: str) -> Markup:
     on the network.
     """
     return Markup((TEMPLATES / name).read_text())
+
+
+# the manifest block and the namespace declared for it — the second is dead
+# weight once the first is gone
+_PROVENANCE = re.compile(r'<metadata>.*?</metadata>|\s+xmlns:c2pa="[^"]*"', re.S)
+
+
+def _brand_svg(name: str) -> Markup:
+    """One of the brand vectors, inlined — without its content-credentials block.
+
+    The delivered files each carry an 8 KB signed manifest. It stays in the
+    package copy, where it is provenance; inside an HTML page it verifies
+    nothing and would ride along in every report, so it is stripped here. The
+    drawing itself is the designer's, byte for byte.
+    """
+    svg = (TEMPLATES / "brand" / name).read_text()
+    return Markup(_PROVENANCE.sub("", svg))
+
+
+def _favicon(svg: Markup) -> str:
+    """The icon as a data URI, so the tab gets a favicon with no file to fetch."""
+    return "data:image/svg+xml," + quote(str(svg), safe="/:=,. -")

@@ -1,8 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/assets/logo.png" width="180" alt="PaperTrace — pixel-art logo: a paper page under a magnifying glass, one line boxed in red">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/defraction0/PaperTrace/main/src/papertrace/templates/brand/papertrace-logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/src/papertrace/templates/brand/papertrace-logo-light.svg" width="336" alt="PaperTrace — the mark: a dot on a line of the paper, traced like a circuit into a red box around the evidence">
+  </picture>
 </p>
-
-<h1 align="center">PaperTrace</h1>
 
 <p align="center">
   <a href="https://github.com/defraction0/PaperTrace/actions/workflows/ci.yml"><img src="https://github.com/defraction0/PaperTrace/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>

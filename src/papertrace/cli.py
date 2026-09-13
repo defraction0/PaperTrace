@@ -20,18 +20,11 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from . import __version__
+from .brand import BANNER
 from .models import ClaimResult, RefManifest, RunResults, manuscript_fingerprint
 
 app = typer.Typer(add_completion=False, rich_markup_mode="rich", invoke_without_command=True)
 console = Console()
-
-BANNER = r"""[bold]
-  ┌──────────────────────────┐
-  │  ▛▀▜ PaperTrace          │
-  │  ▌█▐ claims traced back  │
-  │  ▙▄▟ to their sources    │
-  └──────────────────────────┘[/bold]
-"""
 
 STATUS_MARK = {
     "retrieved": "[green]✓[/green]",

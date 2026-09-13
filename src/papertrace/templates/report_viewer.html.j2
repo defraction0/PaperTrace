@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ r.manuscript }} — PaperTrace</title>
+<link rel="icon" type="image/svg+xml" href="{{ viewer_favicon }}">
 {# One file, no network: the case data and both scripts are inlined below and
    the fonts ride in assets/ like the other HTML looks. A report on an
    unpublished manuscript must not phone a font host the moment it is opened. #}
@@ -39,7 +40,8 @@ noscript{display:block;padding:40px;color:var(--muted)}
 .hdr{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--border)}
 .hdr-row1{display:flex;align-items:center;gap:14px;padding:10px 20px;min-height:48px}
 .brand{display:flex;align-items:center;gap:8px;flex:none}
-.logo{width:22px;height:22px;border-radius:6px;background:var(--fg);color:var(--bg);display:grid;place-items:center;font-weight:700;font-size:12px;letter-spacing:-.02em}
+.logo{width:22px;height:22px;display:block;flex:none}
+.logo svg{width:100%;height:100%;display:block}
 .wordmark{font-weight:600}
 .titleblock{min-width:0;flex:1;display:flex;flex-direction:column}
 .ptitle{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -259,7 +261,7 @@ kbd{font:11px var(--mono);color:var(--muted);border:1px solid var(--border);bord
 <div class="root" id="pt-root">
  <header id="pt-header" class="hdr" data-noprint>
   <div class="hdr-row1">
-   <div class="brand"><span class="logo">Pt</span><span class="wordmark">PaperTrace</span></div>
+   <div class="brand"><span class="logo" aria-hidden="true">{{ viewer_mark }}</span><span class="wordmark">PaperTrace</span></div>
    <div class="titleblock"><span class="ptitle" id="pt-title">{{ r.manuscript }}</span><span class="meta" id="pt-meta"></span></div>
    <div class="tools">
     <div class="search-wrap"><span class="search-glyph">⌕</span><input id="pt-search" class="search" type="search" placeholder="Search claims, sources…  /" aria-label="Search claims and sources"></div>

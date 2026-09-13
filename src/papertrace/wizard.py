@@ -25,6 +25,7 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
 from . import config
+from .brand import BANNER
 from .check import ASK_ATTEMPTS, claude_available
 from .ingest import _docling_available as docling_available
 from .models import _LABEL_GROUP, _expand_label_group, is_references_heading
@@ -429,7 +430,8 @@ def run_wizard() -> None:
         )
         raise typer.Exit(2)
 
-    console.print("\n[bold]PaperTrace[/bold] · guided audit\n")
+    console.print(BANNER)
+    console.print("[dim]guided audit — one question at a time[/dim]\n")
     console.print("[bold]Checking your setup[/bold]")
     checks = preflight()
     for c in checks:
