@@ -11,9 +11,10 @@
 
 <p align="center"><b>Check what a scientific paper claims against what its cited sources actually say.</b></p>
 
-<p align="center">PaperTrace retrieves the legally available cited PDFs, checks each citation-backed<br>
-claim against the text of the cited page, and shows the evidence — the matched text<br>
-boxed in red on the real page — in a viewer beside the paper itself.</p>
+<p align="center">PaperTrace retrieves the available cited PDFs, checks each citation-backed<br>
+claim against the text of the cited page, and shows the evidence: the matched text<br>
+boxed in red on the real page, beside the paper. The crop is cut from the PDF by code,<br>
+not written by the model, so a verdict cannot rest on a hallucinated source.</p>
 
 <p align="center"><b>An unread source never receives a verdict.<br>
 A missed citation is reported, not silently skipped.</b></p>
@@ -229,31 +230,25 @@ the numbering against, and pins the literature scout. An unpublished manuscript
 has none: pass `--no-scout` rather than reading an empty scan as "nothing to
 find".
 
-**Audit a slice on request.** `--max-claims N` checks the first N extracted
-claims, in reading order, and retrieves only the references they cite;
-`--max-sources N` obtains at most N cited sources, in bibliography order,
-counting successes rather than attempts. The two compose. To make the first
-possible, `run` extracts before it resolves references: extraction is a stage
-of its own, `papertrace extract`, writing the numbered claims to
-`out/claims.json`, which `check` reads back rather than extracting again, so
-the numbers a selection names hold still. Every reference left out is recorded
-as `skipped` with the reason, never as paywalled; `results.json` records the
-scope; and every report ends with a *Scope of this audit* section stating, in
-numbers, which claims of how many were checked, which references were skipped
-and why, and that every count above describes the slice, not the paper.
-Internally a selection is an array of claim ids, so cherry-picking claims by
-number is a different array on the same parameter — open, and not yet a flag.
+**Limits.** `--max-claims 5` checks the first five claims and fetches only the
+references they cite. `--max-sources 6` fetches at most six cited sources, in
+bibliography order, and a paywalled one does not use up a slot. Both can be
+set at once. Claims are numbered in `out/claims.json`, extracted before any
+reference is fetched, so the numbers stay put. Whatever is left out is written
+down: each skipped reference in the manifest with its reason, and a *Scope of
+this audit* section at the end of every report saying what was checked and
+what was not. The counts in a limited report describe the slice, not the
+paper.
 
-**One case folder per paper.** The default is a folder named after the PDF,
-beside it; `-c` chooses another. Re-running the same paper into its case is
-fine; pointing a different paper at a used case is refused.
+**One case folder per paper.** By default it sits beside the PDF and takes
+its name; `-c` picks another. Re-running the same paper into its folder is
+fine. A different paper is refused.
 
-**The model.** Checking runs on headless Claude Code (`claude -p`) with
-`--safe-mode` and no tool access, from a neutral directory; `--model` pins the
-judge. It is the only step that calls a model — ingest, crops and reports are
-deterministic. Retrieval and the scout query Crossref, Unpaywall, Europe PMC
-and arXiv live, so a re-run a month later can legitimately produce a different
-manifest.
+**The model.** Checking runs on headless Claude Code (`claude -p`) in safe
+mode with no tools; `--model` chooses the model. Nothing else calls one, and
+ingest, crops and reports give the same output for the same input. Retrieval
+and the scout query live services, so a re-run months later can find a
+different set of sources.
 
 ## Tables and figures are evidence too
 
