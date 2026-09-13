@@ -37,6 +37,7 @@ pytest                            # whole suite: offline, no model calls, CI-saf
 pytest tests/test_refs.py -q      # one module
 pytest tests/test_refs.py::test_paywalled_is_honest -q   # one test
 pytest -k coverage -q             # by name
+pytest tests/test_report_viewer_js.py -q   # the viewer's browser logic, under node (skips without it)
 ruff check src tests scripts evals
 uv build                          # sdist + wheel (python -m build is NOT installed)
 ```
@@ -57,8 +58,10 @@ python examples/demo/make_manuscript.py
 # `claude -p` takes the account default, which silently changed the judge
 # from opus to haiku between two regenerations of examples/demo/output/
 papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
-    --model claude-opus-5 --format terminal --png
+    --model claude-opus-5 --format terminal --format viewer --png
 # expect: 1 supported · 2 contradicted · 1 not retrieved · 1 uncited assertion
+# and out/report_viewer.html beside report.md — open it in a browser; the
+# README's viewer screenshots come from scripts/make_viewer_shots.py on it
 # 4 claims, not 5: the sentence citing [2] and [3] comes back as ONE
 # multi-source claim, because 0.5.0 asks extraction for the verbatim sentence.
 # Reproduced on both claude-opus-5 and claude-haiku-4-5, so it is the prompt
@@ -94,7 +97,7 @@ ingest → refs → scout → check → highlight → report
   map from an earlier run with the other backend is rebuilt rather than reused.
   **Cited sources are ingested with the same backend as the paper** (0.5.0);
   each source's converter travels in `RunResults.source_converters` and a
-  flat-read source is named in all three reports.
+  flat-read source is named in all four reports.
 - **`refs.py`** — resolves citations through legal open-access routes only
   (Crossref → Unpaywall → Europe PMC → arXiv), with a title sanity check that
   rejects a mismatched download rather than judging against the wrong paper.
@@ -150,10 +153,20 @@ ingest → refs → scout → check → highlight → report
   paper's own behind one interface, so no consumer hand-rolls
   `next(e for e in entries if e.slug == slug)` — that shape can only ever find
   an article, and every supplement would be invisible to it.
-- **`report.py`** — Jinja2 over `src/papertrace/templates/` (three templates:
-  markdown, editor HTML, terminal HTML). Templates are **package data** loaded
-  via `importlib.resources`, not a repo-relative path — an installed wheel has
-  no repo. Any new disclosure field must be surfaced in all three templates.
+- **`report.py`** — Jinja2 over `src/papertrace/templates/` (four templates:
+  markdown, editor HTML, terminal HTML, and the interactive viewer). Templates
+  are **package data** loaded via `importlib.resources`, not a repo-relative
+  path — an installed wheel has no repo. Any new disclosure field must be
+  surfaced in all four templates; the viewer renders the embedded disclosure
+  list generically (run-level in its Summary tab, claim-level in the claim's
+  caveats, the anchor state as the crop set's caption), so a new key reaches it
+  without a template branch. The viewer embeds the case data as JSON escaped
+  for a `<script>` context (`_script_json` — `<`, never `&lt;`, and the
+  manifest without `pdf_path`) and inlines two scripts: `viewer_logic.js`, a
+  DOM-free module (parsing `annotated.md`, anchoring quotes with the claim's
+  `ctx_ids` block searched first, crop sets, filters, the claim map) that
+  `tests/test_report_viewer_js.py` runs under node, and `viewer_app.js`, which
+  only draws. Disclosures are never re-derived in JS.
 
 The `case/` folder is the unit of work: one case per paper, guarded by
 `_guard_case`. It is gitignored by design — manuscripts stay local.

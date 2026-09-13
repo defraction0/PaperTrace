@@ -17,11 +17,13 @@ audit craft. This file choreographs the session.
 Print this banner (verbatim, in a fenced code block), then the one-liner:
 
 ```
-  ┌──────────────────────────┐
-  │  ▛▀▜ PaperTrace          │
-  │  ▌█▐ every claim, traced │
-  │  ▙▄▟ back to its source  │
-  └──────────────────────────┘
+  ┌──────────────────────────────────┐
+  │  ━━━ ●─┐                         │
+  │  ━━    └─┐   PaperTrace          │
+  │  ━  ┌────┴┐  every claim, traced │
+  │     │ ━━  │  back to its source  │
+  │     └─────┘                      │
+  └──────────────────────────────────┘
 ```
 
 > Point me at a paper. I'll retrieve what it cites, read every
@@ -192,7 +194,11 @@ unsure.
 Write to `<case>/out/`:
 
 - `results.json` — every claim with verdict + anchors (schema in `schemas/`)
-- `fact_check_report.md` + rendered looks: `papertrace report -c <case>`
+- `report.md` and the interactive viewer:
+  `papertrace report -c <case> -f viewer` (add `-f editor` / `-f terminal`
+  only if the user wants the shareable looks). The viewer needs
+  `<case>/ingest/manuscript/annotated.md` from step 2 to show the whole
+  paper; without it the page shows the audited sentences alone and says so.
 - `questions.md` — the user's questions, now answered
 - `findings.md` — the audit narrative: what holds, what doesn't, what
   couldn't be checked, what the scout surfaced
@@ -206,8 +212,17 @@ bundle in place of `findings.md`:
 - `confidential_to_editor.md` — reasoning for the editor (never in the
   author-facing text)
 
-Present the bundle with the summary counts and the three findings you'd want
-a busy reader to look at first. Close with:
+**Hand over the viewer.** Tell the user to open `<case>/out/report_viewer.html`
+in their browser — it runs from the file, offline — and say what it is in two
+sentences: the manuscript with every audited sentence underlined in its
+verdict's colour, and beside whichever sentence they click, the source's page
+crop with the matched text boxed in red, the rationale and the caveats. Mention
+the *Mark as reviewed* checkbox (kept in their browser, exported from the
+page's Export menu) and the keys `j`/`k`/`r`. If they want to send the audit
+to someone, they send the `out/` folder, not the one file.
+
+Present the bundle with the summary counts, the path to the viewer, and the
+three findings you'd want a busy reader to look at first. Close with:
 
 > The gap is an output, not a silence. The judgement is yours — please
 > verify the flagged items before you rely on them.

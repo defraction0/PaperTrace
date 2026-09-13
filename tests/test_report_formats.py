@@ -39,12 +39,12 @@ def test_write_reports_still_writes_every_format_by_default(tmp_path):
     green while it silently stopped comparing anything."""
     paths = write_reports(_results(), None, tmp_path, png=False)
     assert {p.name for p in paths} == {
-        "report.md", "report_editor.html", "report_terminal.html"
+        "report.md", "report_editor.html", "report_terminal.html", "report_viewer.html"
     }
 
 
 def test_the_format_vocabulary_is_published(tmp_path):
-    assert FORMATS == ("md", "editor", "terminal")
+    assert FORMATS == ("md", "editor", "terminal", "viewer")
 
 
 # --- asking for less -------------------------------------------------------

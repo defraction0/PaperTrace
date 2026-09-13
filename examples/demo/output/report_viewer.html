@@ -1,0 +1,1276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>demo_manuscript.pdf — PaperTrace</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 width=%22512%22 height=%22512%22 fill=%22none%22%3E%0A  %3Crect width=%2224%22 height=%2224%22 rx=%226%22 fill=%22%231f2328%22%3E%3C/rect%3E%0A  %3Crect x=%223%22 y=%225%22 width=%227%22 height=%222%22 rx=%221%22 fill=%22%23f4f1ea%22%3E%3C/rect%3E%0A  %3Crect x=%223%22 y=%229.5%22 width=%225%22 height=%222%22 rx=%221%22 fill=%22%238b949e%22%3E%3C/rect%3E%0A  %3Crect x=%223%22 y=%2214%22 width=%224%22 height=%222%22 rx=%221%22 fill=%22%238b949e%22%3E%3C/rect%3E%0A  %3Ccircle cx=%2211.5%22 cy=%226%22 r=%221.4%22 fill=%22%23e5484d%22%3E%3C/circle%3E%0A  %3Cpath d=%22M11.5 6 H14.5 Q16 6 16 7.5 V10.5 Q16 12 17.5 12 H19%22 stroke=%22%23e5484d%22 stroke-width=%221.6%22 stroke-linecap=%22round%22%3E%3C/path%3E%0A  %3Crect x=%2211%22 y=%2212%22 width=%2210%22 height=%227%22 rx=%221.2%22 stroke=%22%23e5484d%22 stroke-width=%221.6%22%3E%3C/rect%3E%0A  %3Crect x=%2213%22 y=%2214.7%22 width=%226%22 height=%221.6%22 rx=%22.8%22 fill=%22%23f4f1ea%22%3E%3C/rect%3E%0A%3C/svg%3E">
+<style>
+@font-face{font-family:"Source Serif 4";src:url("assets/SourceSerif4-Regular.ttf") format("truetype");font-weight:400;font-style:normal}
+@font-face{font-family:"Source Serif 4";src:url("assets/SourceSerif4-Semibold.ttf") format("truetype");font-weight:600;font-style:normal}
+body{margin:0;-webkit-font-smoothing:antialiased;
+ --bg:#ffffff;--canvas:#f6f8fa;--border:#d0d7de;--border-soft:#e7ebef;--fg:#1f2328;--muted:#656d76;--faint:#8c959f;
+ --accent:#1f6feb;--accent-bg:#ddf4ff;--sel-bg:#fff3b0;--hover-bg:#eef1f4;--red:#e5484d;
+ --v-supported:#1a7f37;--vb-supported:#dafbe1;--v-partial:#9a6700;--vb-partial:#fff8c5;--v-contradicted:#cf222e;--vb-contradicted:#ffebe9;
+ --v-not_addressed:#8250df;--vb-not_addressed:#fbefff;--v-not_retrieved:#6e7781;--vb-not_retrieved:#eaeef2;--v-unchecked:#6e7781;--vb-unchecked:#eaeef2;--v-uncited:#bf3989;--vb-uncited:#ffeff7;
+ --ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;--serif:"Source Serif 4",Georgia,serif;
+ background:var(--bg);color:var(--fg);font:13px/1.5 var(--ui)}
+body[data-theme="dark"]{--bg:#0d1117;--canvas:#161b22;--border:#30363d;--border-soft:#21262d;--fg:#e6edf3;--muted:#8b949e;--faint:#6e7681;
+ --accent:#58a6ff;--accent-bg:#121d2f;--sel-bg:#3a3410;--hover-bg:#1c2128;--red:#ff7b72;
+ --v-supported:#3fb950;--vb-supported:#12261e;--v-partial:#d29922;--vb-partial:#272115;--v-contradicted:#f85149;--vb-contradicted:#2d1214;
+ --v-not_addressed:#a371f7;--vb-not_addressed:#221a33;--v-not_retrieved:#8b949e;--vb-not_retrieved:#21262d;--v-unchecked:#8b949e;--vb-unchecked:#21262d;--v-uncited:#db61a2;--vb-uncited:#2d1522}
+.v-supported{--c:var(--v-supported);--cb:var(--vb-supported)}.v-partial{--c:var(--v-partial);--cb:var(--vb-partial)}
+.v-contradicted{--c:var(--v-contradicted);--cb:var(--vb-contradicted)}.v-not_addressed{--c:var(--v-not_addressed);--cb:var(--vb-not_addressed)}
+.v-not_retrieved{--c:var(--v-not_retrieved);--cb:var(--vb-not_retrieved)}.v-unchecked{--c:var(--v-unchecked);--cb:var(--vb-unchecked)}
+.v-uncited{--c:var(--v-uncited);--cb:var(--vb-uncited)}.v-other{--c:var(--muted);--cb:var(--border-soft)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+input,select,button{font:inherit;color:inherit}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+::selection{background:var(--accent-bg)}
+button{cursor:pointer}
+[hidden]{display:none !important}
+.root{min-height:100vh;display:flex;flex-direction:column}
+.fail{padding:40px;color:var(--v-contradicted)}
+noscript{display:block;padding:40px;color:var(--muted)}
+
+/* header */
+.hdr{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--border)}
+.hdr-row1{display:flex;align-items:center;gap:14px;padding:10px 20px;min-height:48px}
+.brand{display:flex;align-items:center;gap:8px;flex:none}
+.logo{width:22px;height:22px;display:block;flex:none}
+.logo svg{width:100%;height:100%;display:block}
+.wordmark{font-weight:600}
+.titleblock{min-width:0;flex:1;display:flex;flex-direction:column}
+.ptitle{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tools{display:flex;align-items:center;gap:8px;flex:none}
+.search-wrap{position:relative}
+.search-glyph{position:absolute;left:8px;top:6px;color:var(--faint);font-size:12px;pointer-events:none}
+.search{width:220px;padding:5px 8px 5px 24px;border:1px solid var(--border);border-radius:6px;background:var(--canvas);font-size:12.5px;box-sizing:content-box}
+.btn{height:30px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:var(--canvas);font-size:12px}
+.btn:hover{background:var(--hover-bg)}
+.export-wrap{position:relative}
+.menu{position:absolute;right:0;top:34px;min-width:200px;background:var(--bg);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(31,35,40,.15);padding:4px;display:flex;flex-direction:column;z-index:10}
+.menu button{text-align:left;padding:6px 10px;border:none;background:transparent;border-radius:5px}
+.menu button:hover{background:var(--hover-bg)}
+.hdr-row2{display:flex;align-items:center;gap:6px;padding:0 20px 8px;flex-wrap:wrap}
+.chips{display:contents}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border-radius:13px;font-size:12px;font-weight:500;border:1px solid var(--border);background:transparent;color:var(--muted)}
+.chip:hover{filter:brightness(.97)}
+.chip.on{border-color:transparent;background:var(--cb);color:var(--c)}
+.chip .dot{width:8px;height:8px;border-radius:50%;background:var(--c);opacity:.4}
+.chip.on .dot{opacity:1}
+.chip .n{font-variant-numeric:tabular-nums;opacity:.75;margin-left:2px}
+.pill-all{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:13px;font-size:12px;font-weight:500;border:1px solid var(--border-soft);background:transparent;color:var(--faint);cursor:default}
+.pill-all.live{border-color:var(--accent);background:var(--accent-bg);color:var(--accent);cursor:pointer}
+.vdiv{width:1px;height:18px;background:var(--border);margin:0 4px}
+.sec{height:26px;padding:0 6px;border:1px solid var(--border);border-radius:6px;background:var(--canvas);font-size:12px;max-width:220px}
+.status{margin-left:auto;color:var(--muted);font-size:12px;display:flex;align-items:center;gap:8px}
+.status .vdiv2{width:1px;height:14px;background:var(--border)}
+.status .rv{display:inline-flex;align-items:center;gap:6px}
+.bar{width:80px;height:6px;border-radius:3px;background:var(--border-soft);overflow:hidden;display:inline-block}
+.bar span{display:block;height:100%;background:var(--v-supported);transition:width .2s}
+
+/* the two columns */
+.main{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,38%);flex:1;align-items:start}
+.ms{padding:28px 48px 80px;max-width:760px;width:100%;box-sizing:border-box;justify-self:center;font-family:var(--serif);font-size:15.5px;line-height:1.65}
+.ms-title{font-size:24px;line-height:1.25;margin:0 0 6px;font-weight:600;letter-spacing:-.01em;text-wrap:pretty}
+.ms-sub{margin:0 0 28px;color:var(--muted);font:12px/1.5 var(--ui)}
+.ms-h{display:flex;align-items:baseline;gap:10px;margin:28px 0 8px;font-family:var(--ui)}
+.ms-h h2{font-size:15px;font-weight:600;margin:0}
+.pg{font-size:11px;color:var(--faint);margin-left:auto;font-family:var(--mono)}
+.ms-p{margin:0 0 14px;text-wrap:pretty}
+.ms-p.bullet{padding-left:14px}
+.ms-p.multi{white-space:pre-line}
+.seg{cursor:pointer;transition:background .12s;border-radius:2px}
+body[data-mark="underline"] .seg{border-bottom:2px solid var(--c);padding-bottom:1px}
+body[data-mark="underline"] .seg.dotted{border-bottom-style:dotted}
+body[data-mark="underline"] .seg.dashed{border-bottom-style:dashed}
+body[data-mark="highlight"] .seg{background:var(--cb);box-shadow:inset 0 -2px 0 var(--c)}
+.seg:hover{background:var(--hover-bg)}
+.seg.on,body[data-mark="highlight"] .seg.on{background:var(--sel-bg);box-shadow:0 0 0 3px var(--sel-bg)}
+.seg.dim{opacity:.35}
+.fig{margin:6px 0 14px;padding:10px 12px;border:1px dashed var(--border);border-radius:6px;background:var(--canvas);font:12px/1.5 var(--ui);color:var(--muted)}
+.fig b,.tbl summary b{font-weight:600;color:var(--fg)}
+.tbl{margin:6px 0 14px;border:1px solid var(--border);border-radius:6px;background:var(--canvas);font:12px/1.5 var(--ui)}
+.tbl summary{padding:8px 12px;cursor:pointer;color:var(--muted)}
+.tbl summary .id{font-family:var(--mono);font-size:11px;color:var(--faint)}
+.tbl pre{margin:0;padding:8px 12px 12px;overflow:auto;font:11px/1.45 var(--mono);color:var(--fg)}
+.ref{display:flex;gap:10px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--border-soft);font-size:13px;line-height:1.45}
+.ref .num{font:11.5px var(--mono);color:var(--muted);width:28px;flex:none}
+.ref .txt{flex:1;min-width:0}
+.ref .tag{font:11px var(--mono);color:var(--accent);white-space:nowrap}
+.ref .tag.nr{font:11px var(--ui);color:var(--faint)}
+
+/* right panel */
+.aside{position:sticky;top:var(--hdr,93px);height:calc(100vh - var(--hdr,93px));overflow:auto;border-left:1px solid var(--border);background:var(--canvas);box-sizing:border-box}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;padding:10px 12px 0;border-bottom:1px solid var(--border);background:var(--canvas);position:sticky;top:0;z-index:2}
+.tab{padding:6px 8px 8px;border:none;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font-weight:500;font-size:12.5px;margin-bottom:-1px;display:inline-flex;align-items:center}
+.tab:hover{color:var(--fg)}
+.tab.on{border-bottom-color:var(--accent);color:var(--fg);font-weight:600}
+.tab .cnt{margin-left:6px;padding:0 6px;border-radius:9px;background:var(--border-soft);font-size:11px;font-variant-numeric:tabular-nums}
+.pane{padding:16px 18px 40px}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:16px}
+.card-v{display:flex;flex-direction:column;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);text-align:left;color:var(--c);border-top:3px solid var(--c)}
+.card-v:hover{border-color:var(--accent)}
+.card-v .big{font-size:22px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.card-v .lbl{font-size:11.5px;color:var(--muted);margin-top:4px;text-wrap:balance}
+.stack{display:flex;flex-direction:column;gap:10px;font-size:12.5px;line-height:1.55}
+.card{padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+.card.map{padding:12px 12px 10px}
+.card.warn{border-left:3px solid var(--v-partial)}
+.card p{margin:4px 0 0;color:var(--muted)}
+.card b{font-weight:600}
+.kicker{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:6px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-bottom:12px;font-size:11.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+.sw{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid transparent;background:var(--c)}
+.sw.none{background:var(--border-soft);border-color:var(--border)}
+.sw.rev{background:var(--muted);color:var(--bg);font:700 10px/14px var(--ui);text-align:center}
+.mgroups{display:flex;flex-direction:column;gap:10px}
+.mlabel{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.cells{display:flex;flex-wrap:wrap;gap:3px}
+.cell{width:18px;height:18px;padding:0;border-radius:3px;display:grid;place-items:center;transition:transform .1s;border:1px solid transparent;background:var(--c)}
+.cell:hover{transform:scale(1.15);z-index:1}
+.cell.para{background:var(--border-soft);border-color:var(--border)}
+.cell.on{outline:2px solid var(--accent);outline-offset:1px}
+.cell .ck{font:700 11px/1 var(--ui);color:var(--bg)}
+.progress{height:6px;border-radius:3px;background:var(--border-soft);overflow:hidden}
+.progress span{display:block;height:100%;background:var(--v-supported);transition:width .2s}
+.btnrow{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.btn-primary{padding:5px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;font-size:12px;font-weight:500}
+.btn-outline{padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--canvas);font-size:12px}
+.btn-outline:hover{background:var(--hover-bg)}
+.note{margin:4px 0 0;color:var(--faint);font-size:11.5px}
+.disc{margin:6px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;color:var(--muted)}
+.disc li{display:flex;gap:6px;align-items:flex-start}
+.disc .lv{flex:none;width:12px;text-align:center}
+.disc .lv.warn{color:var(--v-partial)}
+.disc ul{margin:4px 0 0;padding-left:16px;color:var(--faint);font-size:11.5px}
+.list{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:8px;background:var(--bg);overflow:hidden}
+.row{display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border:none;border-bottom:1px solid var(--border-soft);background:transparent;text-align:left;width:100%;font-size:12.5px;line-height:1.45;color:var(--fg)}
+.row:hover{background:var(--hover-bg)}
+.row.on{background:var(--accent-bg)}
+.row .dot{width:8px;height:8px;border-radius:50%;background:var(--c);flex:none;margin-top:5px}
+.row.single{align-items:center}
+.row.single .dot{margin-top:0}
+.row .id{font:11.5px var(--mono);color:var(--muted);width:26px;flex:none}
+.row .txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.row.rv .txt{color:var(--muted)}
+.row .sub{font-size:11px;color:var(--faint)}
+.row .ck{color:var(--v-supported);font-size:12px;width:14px;flex:none;text-align:right}
+.empty{color:var(--muted);margin:0}
+.intro{margin:0 0 10px;font-size:12px;color:var(--muted)}
+.src-card{border:1px solid var(--border);border-radius:8px;background:var(--bg);overflow:hidden}
+.src-head{padding:8px 12px;border-bottom:1px solid var(--border-soft);display:flex;flex-direction:column;gap:2px}
+.src-head .line{display:flex;align-items:center;gap:8px}
+.slug{font:12px var(--mono);color:var(--accent);font-weight:600}
+.src-head .cited,.src-head .cnt{font-size:11.5px;color:var(--muted)}
+.src-head .cnt{margin-left:auto}
+.src-head .rt{font-size:12px;color:var(--muted);line-height:1.45}
+.h3{font-size:12px;font-weight:600;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.h3 span{font-weight:400}
+.miss{display:flex;gap:10px;align-items:baseline;padding:7px 12px;border-bottom:1px solid var(--border-soft);font-size:12px;line-height:1.45}
+.miss .num{font:11.5px var(--mono);color:var(--muted);width:26px;flex:none}
+.miss .txt{flex:1;min-width:0;color:var(--fg)}
+.miss .why{font-size:11px;color:var(--faint);white-space:nowrap}
+.sc-row{padding:8px 12px;border-bottom:1px solid var(--border-soft);display:flex;flex-direction:column;gap:2px;font-size:12.5px}
+.sc-row .k{display:flex;gap:8px;font-size:11px;color:var(--muted)}
+.kind{font-weight:600}
+.kind.newer{color:var(--v-supported)}.kind.overlooked{color:var(--accent)}.kind.same{color:var(--v-partial)}
+.sc-row .t{line-height:1.45}
+.sc-row .venue{font-size:11.5px;color:var(--muted)}
+.sc-row .doi{font-family:var(--mono);font-size:11px}
+
+/* claim detail */
+.det{padding:14px 18px 40px}
+.det-top{display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:12px;color:var(--muted)}
+.back{border:none;background:transparent;color:var(--accent);padding:0;font-size:12px}
+.pos{margin-left:auto;font-variant-numeric:tabular-nums}
+.nav{width:24px;height:24px;border:1px solid var(--border);border-radius:5px;background:var(--bg);font-size:11px;padding:0}
+.nav:hover{background:var(--hover-bg)}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600;color:var(--c);background:var(--cb);white-space:nowrap;border:none}
+.det-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.det-meta .where{font-size:12px;color:var(--muted)}
+.det-claim{margin:0 0 6px;font-size:13px;font-weight:500;line-height:1.45}
+.q{margin:0 0 14px;padding:8px 12px;border-left:3px solid var(--border);background:var(--bg);border-radius:0 6px 6px 0;font-family:var(--serif);font-size:13.5px;line-height:1.5;color:var(--muted);cursor:pointer}
+.q:hover{border-left-color:var(--accent)}
+.q .nl{display:block;margin-top:4px;font:11px var(--ui);color:var(--v-partial)}
+.rvlbl{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;margin-bottom:16px;user-select:none}
+.rvlbl:hover{background:var(--hover-bg)}
+.rvlbl input{width:14px;height:14px;accent-color:var(--accent);margin:0}
+.rvlbl span{font-weight:500}
+kbd{font:11px var(--mono);color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:0 5px;background:var(--canvas)}
+.rvlbl kbd{margin-left:auto}
+.gapbox{padding:10px 12px;border:1px dashed var(--border);border-radius:6px;font-size:12.5px;color:var(--muted);line-height:1.5;margin-bottom:14px}
+.gapbox b{color:var(--fg);font-weight:600}
+.src{border:1px solid var(--border);border-radius:8px;background:var(--bg);margin-bottom:12px;overflow:hidden}
+.src-hd{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap;cursor:pointer}
+.src-hd:hover{background:var(--hover-bg)}
+.src-hd .cited{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.src-hd .badge{margin-left:auto}
+.crops{padding:10px 12px 0}
+.cropset{display:flex;flex-direction:column;gap:4px}
+.crop{display:flex;flex-direction:column;gap:4px}
+.cont{display:flex;align-items:center;gap:8px;font:11px var(--mono);color:var(--faint)}
+.cont i{flex:1;height:1px;background:var(--border-soft)}
+.cropbtn{display:block;width:100%;padding:0;border:1px solid var(--border);border-radius:4px;overflow:hidden;background:#fff;cursor:zoom-in}
+.cropbtn img{display:block;width:100%;max-height:260px;object-fit:contain;background:#fff}
+.cropbtn .lost{display:block;padding:10px 12px;font:11px var(--ui);color:var(--v-partial);background:var(--bg);text-align:left}
+.cap{font:11px var(--mono);color:var(--faint)}
+.cropmeta{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;margin-top:6px;font:11px var(--mono);color:var(--muted)}
+.cropmeta .jump{border:none;background:transparent;padding:0;color:var(--accent);font:inherit;white-space:nowrap}
+.anc{margin-left:auto;text-align:right}
+.anc.ok{color:var(--red)}
+.anc.warn{color:var(--v-partial)}
+.phrases{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.phrase{font:11px var(--serif);padding:1px 6px;border:1px solid var(--red);border-radius:2px;color:var(--fg);background:var(--bg)}
+.rationale{margin:0;padding:10px 12px 12px;font-size:12.5px;line-height:1.55;color:var(--fg)}
+.srcnote{margin:0;padding:8px 12px 0;font-size:11.5px;color:var(--muted)}
+.srcnote.warn{color:var(--v-partial)}
+.cav{border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:12.5px}
+.cav summary{padding:8px 12px;cursor:pointer;color:var(--muted);display:flex;align-items:center;gap:8px;list-style:none}
+.cav summary::-webkit-details-marker{display:none}
+.cav summary .w{color:var(--v-partial)}
+.cav summary .show{margin-left:auto;font-size:11px}
+.cav ul{margin:0;padding:0 12px 10px 28px;color:var(--muted);line-height:1.5;display:flex;flex-direction:column;gap:6px}
+.keys{margin:16px 0 0;font-size:11.5px;color:var(--faint)}
+
+/* lightbox */
+.lb{position:fixed;inset:0;z-index:50;background:rgba(15,18,22,.82);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;cursor:zoom-out;box-sizing:border-box}
+.lb img{max-width:100%;max-height:calc(100vh - 110px);background:#fff;border-radius:4px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.lb .cap{margin-top:12px;color:#e6edf3;font:12px var(--mono)}
+
+@media (max-width:760px){
+ .main{grid-template-columns:1fr}
+ .aside{position:static;height:auto;border-left:none;border-top:1px solid var(--border)}
+ .ms{padding:20px 20px 40px}
+ .hdr-row1{flex-wrap:wrap;gap:8px 14px}
+ .titleblock{flex-basis:100%;order:3}
+ .tools{margin-left:auto}
+ .search{width:120px}
+}
+@media print{[data-noprint]{display:none !important}[data-print-full]{position:static !important;height:auto !important;overflow:visible !important;border:none !important}}
+</style>
+</head>
+<body data-theme="light" data-mark="underline">
+<div class="root" id="pt-root">
+ <header id="pt-header" class="hdr" data-noprint>
+  <div class="hdr-row1">
+   <div class="brand"><span class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="512" height="512" fill="none">
+  <rect width="24" height="24" rx="6" fill="#1f2328"></rect>
+  <rect x="3" y="5" width="7" height="2" rx="1" fill="#f4f1ea"></rect>
+  <rect x="3" y="9.5" width="5" height="2" rx="1" fill="#8b949e"></rect>
+  <rect x="3" y="14" width="4" height="2" rx="1" fill="#8b949e"></rect>
+  <circle cx="11.5" cy="6" r="1.4" fill="#e5484d"></circle>
+  <path d="M11.5 6 H14.5 Q16 6 16 7.5 V10.5 Q16 12 17.5 12 H19" stroke="#e5484d" stroke-width="1.6" stroke-linecap="round"></path>
+  <rect x="11" y="12" width="10" height="7" rx="1.2" stroke="#e5484d" stroke-width="1.6"></rect>
+  <rect x="13" y="14.7" width="6" height="1.6" rx=".8" fill="#f4f1ea"></rect>
+</svg></span><span class="wordmark">PaperTrace</span></div>
+   <div class="titleblock"><span class="ptitle" id="pt-title">demo_manuscript.pdf</span><span class="meta" id="pt-meta"></span></div>
+   <div class="tools">
+    <div class="search-wrap"><span class="search-glyph">⌕</span><input id="pt-search" class="search" type="search" placeholder="Search claims, sources…  /" aria-label="Search claims and sources"></div>
+    <button class="btn" id="pt-theme" data-act="theme" title="Toggle dark mode (t)">Dark</button>
+    <div class="export-wrap">
+     <button class="btn" data-act="export-toggle">Export ▾</button>
+     <div class="menu" id="pt-menu" hidden>
+      <button data-act="export-md">Markdown report (.md)</button>
+      <button data-act="export-pdf">Print / save as PDF</button>
+      <button data-act="export-json">Review checklist (.json)</button>
+     </div>
+    </div>
+   </div>
+  </div>
+  <div class="hdr-row2">
+   <div class="chips" id="pt-chips"></div>
+   <span class="vdiv"></span>
+   <select class="sec" id="pt-section" aria-label="Filter by section"><option value="all">All sections</option></select>
+   <span class="status" id="pt-status"></span>
+  </div>
+ </header>
+ <div class="main" id="pt-main">
+  <article class="ms" id="pt-article"></article>
+  <aside class="aside" id="pt-aside" data-print-full></aside>
+ </div>
+</div>
+<div id="pt-lightbox" hidden></div>
+<noscript>This page needs JavaScript to show the audit. The same audit, without the interactive manuscript view, is in <b>report.md</b> beside this file.</noscript>
+<script id="pt-data" type="application/json">{"version":"0.6.0","results":{"manuscript":"demo_manuscript.pdf","checker":"claude -p · claude-opus-5","date":"2026-09-13","refs":{"total":4,"available":3},"converter":"docling 2.118.1","source_converters":{"pyrros-2023":"docling 2.118.1","sudlow-2015":"docling 2.118.1","littlejohns-2020":"docling 2.118.1"},"source_table_warnings":{},"counts":{"supported":1,"partial":0,"contradicted":2,"not_addressed":0,"not_retrieved":1,"unchecked":0},"claims":[{"id":1,"claim":"Deep learning on frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94.","quote":"Deep learning applied to frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94 [1].","own_supplement":false,"location":"Background","ctx_ids":["block_0007:205:1"],"refs":["1"],"verdict":"contradicted","note":"The source reports external validation at a separate institution (Emory) yielding a ROC AUC of 0.77, not 0.94; internal prospective AUC was 0.84.","source_slug":"pyrros-2023","source_page":4,"source_block":"block_0050","anchor_phrases":["we observed an AUC of 0.77","external dataset of ambulatory frontal CXRs at Emory"],"evidence_image":"evidence/claim_01_pyrros-2023_p4.png","continuation_images":[],"judgements":[{"source_slug":"pyrros-2023","ref":"1","kind":"article","verified":false,"verdict":"contradicted","note":"The source reports external validation at a separate institution (Emory) yielding a ROC AUC of 0.77, not 0.94; internal prospective AUC was 0.84.","source_page":4,"source_block":"block_0050","anchor_phrases":["we observed an AUC of 0.77","external dataset of ambulatory frontal CXRs at Emory"],"evidence_image":"evidence/claim_01_pyrros-2023_p4.png","continuation_images":[],"anchor_located":true}],"unjudged_refs":[],"anchor_located":true},{"id":2,"claim":"Regulatory clearances of AI systems for clinical imaging are accelerating.","quote":"Regulators are clearing AI systems for clinical imaging use at an accelerating pace [4].","own_supplement":false,"location":"Background","ctx_ids":["block_0007:294:4"],"refs":["4"],"verdict":"not_retrieved","note":"cited source not available (paywalled)","source_slug":null,"source_page":null,"source_block":null,"anchor_phrases":[],"evidence_image":null,"continuation_images":[],"judgements":[],"unjudged_refs":[],"anchor_located":null},{"id":3,"claim":"UK Biobank recruited approximately 500,000 adults aged 40-69 years, and its imaging enhancement targets 100,000 participants.","quote":"Dedicated cohorts complement such opportunistic reuse: the UK Biobank cohort profile describes recruitment of approximately 500,000 adults aged 40-69 years [2], and its imaging enhancement targets 100,000 participants [3].","own_supplement":false,"location":"Population imaging","ctx_ids":["block_0009:156:2","block_0009:218:3"],"refs":["2","3"],"verdict":"supported","note":"Source states UK Biobank recruited over 500,000 participants aged 40-69 years in 2006-2010, and that multimodal imaging is planned in a subset of 100,000 participants (also Table 3, block_0054: 'Multimodal imaging | 100,000').","source_slug":"sudlow-2015","source_page":1,"source_block":"block_0018","anchor_phrases":["over 500,000 participants aged 40","recruited in 2006"],"evidence_image":"evidence/claim_03_sudlow-2015_p1.png","continuation_images":[],"judgements":[{"source_slug":"sudlow-2015","ref":"2","kind":"article","verified":false,"verdict":"supported","note":"Source states UK Biobank recruited over 500,000 participants aged 40-69 years in 2006-2010, and that multimodal imaging is planned in a subset of 100,000 participants (also Table 3, block_0054: 'Multimodal imaging | 100,000').","source_page":1,"source_block":"block_0018","anchor_phrases":["over 500,000 participants aged 40","recruited in 2006"],"evidence_image":"evidence/claim_03_sudlow-2015_p1.png","continuation_images":[],"anchor_located":true},{"source_slug":"littlejohns-2020","ref":"3","kind":"article","verified":false,"verdict":"supported","note":"The source states the enhancement aims to image 100,000 of the existing 500,000 UK Biobank participants, a cohort of half a million aged 40-69 recruited 2006-2010, matching both figures.","source_page":2,"source_block":"block_0013","anchor_phrases":["100,000 of the existing 500,000 UKB participants","before the end of 2023"],"evidence_image":"evidence/claim_03_littlejohns-2020_p2.png","continuation_images":[],"anchor_located":true}],"unjudged_refs":[],"anchor_located":true},{"id":4,"claim":"Nearly one in five confirmed UK Biobank participants had not attended an imaging assessment centre.","quote":"Attendance logistics remain a bottleneck, however - nearly one in five confirmed participants had not attended an imaging assessment centre [3].","own_supplement":false,"location":"Population imaging","ctx_ids":["block_0009:363:3"],"refs":["3"],"verdict":"contradicted","note":"The source reports that of those eligible who booked an appointment, 97% attended an imaging assessment centre (i.e. ~3% non-attendance), not nearly one in five; the only ~20% figure is the required attendance rate of the 500,000 cohort needed to reach 100,000 scans.","source_slug":"littlejohns-2020","source_page":3,"source_block":"block_0023","anchor_phrases":["97% have attended an imaging assessment centre","attendance rate of at least 20% of the 500,000 UKB participants"],"evidence_image":"evidence/claim_04_littlejohns-2020_p3.png","continuation_images":["evidence/claim_04_littlejohns-2020_p3_cont2.png"],"judgements":[{"source_slug":"littlejohns-2020","ref":"3","kind":"article","verified":false,"verdict":"contradicted","note":"The source reports that of those eligible who booked an appointment, 97% attended an imaging assessment centre (i.e. ~3% non-attendance), not nearly one in five; the only ~20% figure is the required attendance rate of the 500,000 cohort needed to reach 100,000 scans.","source_page":3,"source_block":"block_0023","anchor_phrases":["97% have attended an imaging assessment centre","attendance rate of at least 20% of the 500,000 UKB participants"],"evidence_image":"evidence/claim_04_littlejohns-2020_p3.png","continuation_images":["evidence/claim_04_littlejohns-2020_p3_cont2.png"],"anchor_located":true}],"unjudged_refs":[],"anchor_located":true}],"uncited":[{"id":1,"claim":"Routine imaging archives are among the largest untapped screening resources in medicine.","quote":"Routine imaging archives are among the largest untapped screening resources in medicine.","location":"Background"}],"coverage":{"labels_in_text":["1","2","3","4"],"covered":["1","2","3","4"],"missing":[],"schema":"coverage/3","unit":"occurrence","source":"source_map","labels_partially_covered":[],"labels_uncertain_only":[],"occurrences":{"total":5,"covered":5,"uncovered":0,"uncertain":0,"items":[{"id":"block_0007:205:1","label":"1","block":"block_0007","page":1,"offset":205,"group":"1","section":"Background","sentence":"Deep learning applied to frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94 [1].","status":"covered","claim_id":1},{"id":"block_0007:294:4","label":"4","block":"block_0007","page":1,"offset":294,"group":"4","section":"Background","sentence":"Regulators are clearing AI systems for clinical imaging use at an accelerating pace [4].","status":"covered","claim_id":2},{"id":"block_0009:156:2","label":"2","block":"block_0009","page":1,"offset":156,"group":"2","section":"Population imaging","sentence":"…portunistic reuse: the UK Biobank cohort profile describes recruitment of approximately 500,000 adults aged 40-69 years [2], and its imaging enhancement targets 100,000 participants [3].","status":"covered","claim_id":3},{"id":"block_0009:218:3","label":"3","block":"block_0009","page":1,"offset":218,"group":"3","section":"Population imaging","sentence":"…ruitment of approximately 500,000 adults aged 40-69 years [2], and its imaging enhancement targets 100,000 participants [3].","status":"covered","claim_id":3},{"id":"block_0009:363:3","label":"3","block":"block_0009","page":1,"offset":363,"group":"3","section":"Population imaging","sentence":"…remain a bottleneck, however - nearly one in five confirmed participants had not attended an imaging assessment centre [3].","status":"covered","claim_id":4}]},"attribution":{"method":"context id returned by extraction, resolved against the inventory","claims_unattributed":[]}},"truncated":{}},"annotated":"## SYNTHETIC DEMO PAPER - FICTIONAL MINI-REVIEW, FOR TOOL DEMONSTRATION ONLY  \u003c!-- block_0001, page 1 --\u003e\n\n## Opportunistic Disease Detection in Routine and Population Imaging: a Fictional Mini-Review  \u003c!-- block_0002, page 1 --\u003e\n\nA. Placeholder, B. Example, C. Fixture · Institute for Synthetic Examples · Correspondence: demo@example.org · This mini-review is invented; only its references are real.  \u003c!-- block_0003, page 1 --\u003e\n\n## Abstract  \u003c!-- block_0004, page 1 --\u003e\n\nWe sketch, in wholly invented prose, how images acquired for one purpose can be reused to look for something else. Every synthesis in this document is fabricated for demonstration purposes; only the cited references are real.  \u003c!-- block_0005, page 1 --\u003e\n\n## Background  \u003c!-- block_0006, page 1 --\u003e\n\nRoutine imaging archives are among the largest untapped screening resources in medicine. Deep learning applied to frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94 [1]. Regulators are clearing AI systems for clinical imaging use at an accelerating pace [4].  \u003c!-- block_0007, page 1 --\u003e\n\n## Population imaging  \u003c!-- block_0008, page 1 --\u003e\n\nDedicated cohorts complement such opportunistic reuse: the UK Biobank cohort profile describes recruitment of approximately 500,000 adults aged 40-69 years [2], and its imaging enhancement targets 100,000 participants [3]. Attendance logistics remain a bottleneck, however - nearly one in five confirmed participants had not attended an imaging assessment centre [3].  \u003c!-- block_0009, page 1 --\u003e\n\n## Discussion  \u003c!-- block_0010, page 1 --\u003e\n\nThis fictional mini-review demonstrates nothing about screening - it exists so that PaperTrace has something realistic to check. Its errors are planted: one number contradicts the cited paper, one logistics claim contradicts the cited flow chart, one headline rests on a reference that is not openly accessible, and one assertive sentence carries no citation at all.  \u003c!-- block_0011, page 1 --\u003e\n\n## References  \u003c!-- block_0012, page 1 --\u003e\n\n- Pyrros A, Borstelmann SM, Mantravadi R, et al (2023) Opportunistic detection of type 2 diabetes using deep learning from frontal chest radiographs. Nat Commun 14:4039. doi:10.1038/s41467-023-39631-x  \u003c!-- block_0013, page 1 --\u003e\n\n- Sudlow C, Gallacher J, Allen N, et al (2015) UK Biobank: An Open Access Resource for Identifying the Causes of a Wide Range of Complex Diseases of Middle and Old Age. PLoS Med 12:e1001779. doi:10.1371/journal.pmed.1001779  \u003c!-- block_0014, page 1 --\u003e\n\n- Littlejohns TJ, Holliday J, Gibson LM, et al (2020) The UK Biobank imaging enhancement of 100,000 participants: rationale, data collection, management and future directions. Nat Commun 11:2624. doi:10.1038/s41467-020-15948-9  \u003c!-- block_0015, page 1 --\u003e\n\n- Rajpurkar P, Lungren MP (2023) The Current and Future State of AI Interpretation of Medical Images. N Engl J Med 388:1981-1990. doi:10.1056/NEJMra2301725  \u003c!-- block_0016, page 1 --\u003e\n","scout":{"paper":{"title":"","doi":"","year":null,"resolved_via":"","identity":""},"query":"","date":"2026-09-13","counts":{"newer":0,"overlooked":0,"same_year":0},"newer":[],"overlooked":[],"same_year":[],"error":"paper not identified in Europe PMC — pass --doi to pin it (title heuristics can miss)"},"manifest":{"manuscript":"demo_manuscript.pdf","reference_source":"parsed","numbering_verified":true,"numbering_note":"the parsed list has 4 references and the manuscript cites [1]-[4] — they agree; no DOI for the manuscript itself, so the publisher's deposited reference list could not be looked up — usual for a paper under review, which is this tool's main case. Pass --doi if the paper does have one","unverified_from":null,"references_resumed":false,"entries":[{"num":"1","raw":"Pyrros A, Borstelmann SM, Mantravadi R, et al (2023) Opportunistic detection of type 2 diabetes using deep learning from frontal chest radiographs. Nat Commun 14:4039. doi:10.1038/s41467-023-39631-x","doi":"10.1038/s41467-023-39631-x","status":"retrieved","reason":"open-access copy via Unpaywall · title check: 11/11 reference tokens on its first page","resolver":"unpaywall","slug":"pyrros-2023","title_check":"verified","supplements":[]},{"num":"2","raw":"Sudlow C, Gallacher J, Allen N, et al (2015) UK Biobank: An Open Access Resource for Identifying the Causes of a Wide Range of Complex Diseases of Middle and Old Age. PLoS Med 12:e1001779. doi:10.1371/journal.pmed.1001779","doi":"10.1371/journal.pmed.1001779","status":"retrieved","reason":"open-access copy via Unpaywall · title check: 12/12 reference tokens on its first page","resolver":"unpaywall","slug":"sudlow-2015","title_check":"verified","supplements":[]},{"num":"3","raw":"Littlejohns TJ, Holliday J, Gibson LM, et al (2020) The UK Biobank imaging enhancement of 100,000 participants: rationale, data collection, management and future directions. Nat Commun 11:2624. doi:10.1038/s41467-020-15948-9","doi":"10.1038/s41467-020-15948-9","status":"retrieved","reason":"open-access copy via Unpaywall · title check: 12/12 reference tokens on its first page","resolver":"unpaywall","slug":"littlejohns-2020","title_check":"verified","supplements":[]},{"num":"4","raw":"Rajpurkar P, Lungren MP (2023) The Current and Future State of AI Interpretation of Medical Images. N Engl J Med 388:1981-1990. doi:10.1056/NEJMra2301725","doi":"10.1056/NEJMra2301725","status":"paywalled","reason":"DOI resolved but no legal open-access copy found","resolver":null,"slug":"rajpurkar-2023","title_check":null,"supplements":[]}],"manuscript_supplements":[]},"disclosures":{"run":[{"key":"converter","level":"info","token":"converter: docling 2.118.1","text":"Ingest `converter: docling 2.118.1` — layout-aware.","short":"converter: docling 2.118.1","rows":[]},{"key":"coverage","level":"info","token":"reached by an extracted claim","text":"5/5 citation occurrences reached by an extracted claim, across 4 labels — 0 unaddressed, 0 uncertain. Coverage counts places an extracted claim *reached*, not sources that were read.","short":"5/5 citation occurrences reached by an extracted claim, across 4 labels — 0 unaddressed, 0 uncertain","rows":[]},{"key":"coverage_attribution","level":"warn","token":"attribution is the context the extractor named","text":"How to read that figure: attribution is the context the extractor named. Extraction is shown every place this paper cites something and returns which of them each claim came from, so the pointer is no longer a text comparison — but naming it is still a model step, and a claim can be placed on the wrong sentence. A claim that names no place at all leaves that reference's remaining places counted as NOT covered, never as covered, so the figure understates coverage there. And detection still reads bracketed numeric markers only — a citation style it cannot see contributes no occurrences at all, which makes this ratio look better than reality, not worse.","short":"attribution is the context the extractor named, which is still a model step; a claim placed nowhere counts as not covered; unseen citation styles contribute no occurrences, so the ratio flatters the run","rows":[]}],"claims":{"1":[{"key":"anchor","level":"info","token":"red box = matched text","text":"red box = matched text — the anchor phrase was located by text search, not placed by hand or by the model.","short":"red box = matched text","rows":[]}],"2":[],"3":[{"key":"sources","level":"info","token":"cited sources checked","text":"2 cited sources checked for this claim: 2 fully support it.","short":"2 cited sources checked: 2 fully support it","rows":["cited as [2] sudlow-2015 — supported (p1)","cited as [3] littlejohns-2020 — supported (p2)"]},{"key":"anchor","level":"info","token":"red box = matched text","text":"red box = matched text — the anchor phrase was located by text search, not placed by hand or by the model.","short":"red box = matched text","rows":[]}],"4":[{"key":"anchor","level":"info","token":"red box = matched text","text":"red box = matched text — the anchor phrase was located by text search, not placed by hand or by the model.","short":"red box = matched text","rows":[]}]},"judgements":{"1":[[{"key":"anchor","level":"info","token":"red box = matched text","text":"red box = matched text — the anchor phrase was located by text search, not placed by hand or by the model.","short":"red box = matched text","rows":[]}]],"2":[],"3":[[{"key":"anchor","level":"info","token":"red box = matched text","text":"red box = matched text — the anchor phrase was located by text search, not placed by hand or by the model.","short":"red box = matched text","rows":[]}],[{"key":"anchor","level":"info","token":"red box = matched text","text":"red box = matched text — the anchor phrase was located by text search, not placed by hand or by the model.","short":"red box = matched text","rows":[]}]],"4":[[{"key":"anchor","level":"info","token":"red box = matched text","text":"red box = matched text — the anchor phrase was located by text search, not placed by hand or by the model.","short":"red box = matched text","rows":[]}]]}}}</script>
+<script>/* PaperTrace report viewer — the half that decides things.
+
+   No DOM in here. This module reads the embedded case data (results.json,
+   annotated.md, scout.json, the retrieval manifest and the disclosures decided
+   in Python) and turns it into the view model the page renders: which block is
+   a heading, where each audited sentence sits in the text, what a crop set
+   looks like, which claims a filter keeps. It runs under node for the tests
+   (tests/test_report_viewer_js.py) and in the page for the reader, unchanged.
+
+   Rules worth not re-breaking:
+   - a quote that cannot be found is not anchored, and the page counts it as
+     such — there is no "nearest sentence" fallback;
+   - a claim's `ctx_ids` name the block the extractor read it from, and that
+     block is searched first, so a sentence the paper repeats lands where it
+     was cited and not on the first paragraph that happens to carry it;
+   - disclosures are read from the payload, never re-derived here: a second
+     copy of disclosures.py would drift from the other three looks unseen.
+*/
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.PaperTraceLogic = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  // order matters everywhere: chips, cards, legend and the markdown export
+  const VERDICTS = [
+    { key: 'supported', label: 'Supported', short: 'Supported' },
+    { key: 'partial', label: 'Partially supported', short: 'Partial' },
+    { key: 'contradicted', label: 'Contradicted', short: 'Contradicted' },
+    { key: 'not_addressed', label: 'Does not address the claim', short: 'Does not address' },
+    { key: 'not_retrieved', label: 'Not retrieved', short: 'Not retrieved' },
+    { key: 'unchecked', label: 'Check failed', short: 'Check failed' },
+    { key: 'uncited', label: 'No citation', short: 'Uncited' },
+  ];
+  const VMAP = Object.fromEntries(VERDICTS.map(v => [v.key, v]));
+  const ALL_KEYS = VERDICTS.map(v => v.key);
+
+  // a verdict this page has no name for is shown as it is — never mapped onto
+  // the nearest one it knows
+  function verdictInfo(v) { return VMAP[v] || { key: v, label: String(v), short: String(v) }; }
+
+  function sectionOf(loc) { return (loc || 'Unlocated').split(/,|¶/)[0].trim() || 'Unlocated'; }
+
+  function stripTags(s) { return String(s || '').replace(/<[^>]+>|&lt;[^&]+&gt;/g, ''); }
+
+  // how a judgement names its document — the same three phrasings as
+  // SourceJudgement.origin, so the page and report.md agree
+  function originOf(j) {
+    if (j.kind === 'own_supplement') return "this paper's own supplement";
+    if (j.kind === 'supplement') return `supplement to [${j.ref}]`;
+    return `cited as [${j.ref}]`;
+  }
+
+  // ---- annotated.md → blocks ---------------------------------------------
+
+  // headings that open the body: the run of headings above the first of these
+  // (and above the first long paragraph) is the paper's title
+  const SECTION_RE = /^(abstract|summary|key\s+(results|points|findings)|highlights?|importance|introduction|background|keywords?|abbreviations|graphical abstract|objectives?|purpose|materials and methods|methods|results|discussion|conclusions?)\b/i;
+  const MARKER_RE = /<!--\s*(block_\d+),\s*page\s*(\d+)(,\s*table)?\s*-->/g;
+
+  function parseAnnotated(md) {
+    const blocks = [];
+    if (!md) return { blocks, title: '' };
+    let last = 0, pendingTable = null, m, refMode = false, refNum = 0;
+    const push = (text, id, page) => {
+      text = text.trim();
+      if (!text) return;
+      if (/^##\s+/.test(text)) {
+        const t = text.replace(/^##\s+/, '').trim();
+        refMode = /^references/i.test(t);
+        refNum = 0;
+        blocks.push({ id, page, type: 'heading', text: t });
+        return;
+      }
+      if (refMode && /^-\s+/.test(text)) {
+        blocks.push({ id, page, type: 'ref', num: ++refNum, text: text.replace(/^-\s+/, '') });
+        return;
+      }
+      if (/^\[FIGURE/.test(text)) {
+        blocks.push({ id, page, type: 'figure', text: text.replace(/^\[FIGURE:?\s*/, '').replace(/\]$/, '') || 'image' });
+        return;
+      }
+      // the caption paragraph that follows a figure placeholder duplicates it
+      const prev = blocks[blocks.length - 1];
+      if (prev && prev.type === 'figure' && prev.text === text) return;
+      blocks.push({ id, page, type: 'para', text: text.replace(/^-\s+■?\s*/gm, '• ') });
+    };
+    const flushTable = (seg) => {
+      const lines = seg.split('\n');
+      let lt = -1;
+      lines.forEach((l, i) => { if (/^\s*\|/.test(l) || /^\*\*/.test(l)) lt = i; });
+      const tbl = lines.slice(0, lt + 1).join('\n').trim();
+      const cap = (tbl.match(/^\*\*(.+?)\*\*/) || [])[1] || (tbl.match(/^\|\s*([^|]+)\|/) || [])[1] || '';
+      blocks.push({
+        id: pendingTable.id, page: pendingTable.page, type: 'table',
+        text: tbl.replace(/^\*\*.+\*\*\n*/, '').replace(/^Table \d+:.*\n*/m, '').trim(),
+        caption: cap.trim().slice(0, 90),
+      });
+      pendingTable = null;
+      return lines.slice(lt + 1).join('\n');
+    };
+    // a block's marker follows its text; a table's marker precedes it
+    while ((m = MARKER_RE.exec(md))) {
+      const seg = md.slice(last, m.index);
+      last = MARKER_RE.lastIndex;
+      if (pendingTable) {
+        const rest = flushTable(seg);
+        if (m[3]) { push(rest, 'orphan-' + m[1], +m[2]); pendingTable = { id: m[1], page: +m[2] }; }
+        else push(rest, m[1], +m[2]);
+      } else if (m[3]) {
+        push(seg, 'orphan-' + m[1], +m[2]);
+        pendingTable = { id: m[1], page: +m[2] };
+      } else {
+        push(seg, m[1], +m[2]);
+      }
+    }
+    if (pendingTable) flushTable(md.slice(last)); // a table that ends the document
+    MARKER_RE.lastIndex = 0;
+
+    // title: the headings above the first body paragraph or section heading.
+    // A heading shorter than 12 characters up there is a journal name or a
+    // running head, and is dropped rather than shown as a section
+    const parts = [];
+    for (const b of blocks) {
+      if (b.type === 'para' && b.text.length > 200) break;
+      if (b.type !== 'heading') continue;
+      if (SECTION_RE.test(b.text)) break;
+      if (b.text.length >= 12) parts.push(b.text);
+      b.type = 'skip';
+    }
+    return { blocks: blocks.filter(b => b.type !== 'skip'), title: parts.join(' ').replace(/\s+/g, ' ') };
+  }
+
+  // ---- anchoring quotes to the text --------------------------------------
+
+  // lowercase alphanumerics only, parenthetical numeric citations removed —
+  // and a map from each kept character back to its original offset
+  function norm(text) {
+    const skip = new Array(text.length).fill(false);
+    for (const c of text.matchAll(/\(\s*\d[\d,\s\-]*\)/g)) {
+      for (let i = c.index; i < c.index + c[0].length; i++) skip[i] = true;
+    }
+    let out = '';
+    const map = [];
+    for (let i = 0; i < text.length; i++) {
+      if (skip[i]) continue;
+      const ch = text[i].toLowerCase();
+      if (/[a-z0-9]/.test(ch)) { out += ch; map.push(i); }
+    }
+    return { out, map };
+  }
+
+  function ctxBlocks(c) { return (c.ctx_ids || []).map(x => String(x).split(':')[0]); }
+
+  // sets `claim.anchor` ({block, start, end} or null) and `block.segments` on
+  // every paragraph; returns how many claims were located
+  function anchorClaims(blocks, claims) {
+    const paras = blocks.filter(b => b.type === 'para').map(b => ({ b, n: norm(b.text) }));
+    const byId = new Map();
+    paras.forEach(p => { if (!byId.has(p.b.id)) byId.set(p.b.id, p); });
+    for (const c of claims) {
+      c.anchor = null;
+      if (!c.quote) continue;
+      const q = norm(c.quote).out;
+      if (q.length < 12) continue; // too little to identify a sentence by
+      const first = ctxBlocks(c).map(id => byId.get(id)).filter(Boolean);
+      const order = first.concat(paras.filter(p => first.indexOf(p) < 0));
+      for (const { b, n } of order) {
+        let s = n.out.indexOf(q), e = s >= 0 ? s + q.length - 1 : -1;
+        if (s < 0) {
+          // a quote the extractor trimmed in the middle still opens and
+          // closes verbatim: match its first and last 40 characters, in one
+          // paragraph, no further apart than the quote's own length allows
+          const head = q.slice(0, 40), tail = q.slice(-40);
+          const hs = n.out.indexOf(head);
+          if (hs >= 0) {
+            const ts = n.out.indexOf(tail, hs);
+            if (ts >= 0 && ts - hs < q.length * 1.6) { s = hs; e = ts + tail.length - 1; }
+          }
+        }
+        if (s < 0) continue;
+        let start = n.map[s], end = n.map[e] + 1;
+        // extend over the citation and the full stop, so the underline covers `(10).`
+        const trail = b.text.slice(end).match(/^\s*(\(\s*\d[\d,\s\-]*\))?\s*[.,;:]?/);
+        if (trail) end += trail[0].length;
+        c.anchor = { block: b.id, start, end };
+        break;
+      }
+    }
+    // segments per paragraph; several claims can share one sentence (one per
+    // cited reference) and then share its span
+    for (const { b } of paras) {
+      const hits = claims.filter(c => c.anchor && c.anchor.block === b.id)
+        .sort((x, y) => x.anchor.start - y.anchor.start);
+      const segs = [];
+      let pos = 0, lastSeg = null;
+      for (const c of hits) {
+        if (lastSeg && c.anchor.start < pos) {
+          if (c.anchor.start === lastSeg.start) { lastSeg.claims.push(c.key); c.anchor.shared = lastSeg.claim; }
+          else c.anchor = null; // overlapping but different: the earlier one keeps the text
+          continue;
+        }
+        if (c.anchor.start > pos) segs.push({ text: b.text.slice(pos, c.anchor.start) });
+        lastSeg = { text: b.text.slice(c.anchor.start, c.anchor.end), claim: c.key, claims: [c.key], start: c.anchor.start };
+        segs.push(lastSeg);
+        pos = c.anchor.end;
+      }
+      if (pos < b.text.length) segs.push({ text: b.text.slice(pos) });
+      b.segments = segs;
+    }
+    return claims.filter(c => c.anchor).length;
+  }
+
+  // ---- the view model ------------------------------------------------------
+
+  function gapReason(c) {
+    if (c.verdict === 'unchecked') return 'check failed';
+    return (String(c.note || '').match(/\(([^)]+)\)/) || [])[1] || 'not retrieved';
+  }
+
+  function judgementOf(j, c, disclosures) {
+    return {
+      slug: j.source_slug, ref: String(j.ref || (c.refs || [])[0] || ''), kind: j.kind || 'article',
+      verified: !!j.verified, verdict: j.verdict || c.verdict, note: j.note || c.note || '',
+      page: j.source_page, block: j.source_block, anchors: j.anchor_phrases || [],
+      images: j.evidence_image ? [j.evidence_image].concat(j.continuation_images || []) : [],
+      located: j.anchor_located, disclosures: disclosures || [],
+      origin: originOf({ kind: j.kind || 'article', ref: String(j.ref || (c.refs || [])[0] || '') }),
+    };
+  }
+
+  function buildModel(payload) {
+    const results = payload.results || {};
+    const md = payload.annotated || '';
+    const scout = payload.scout || null;
+    const manifest = payload.manifest || null;
+    const disc = payload.disclosures || {};
+    const claimDisc = disc.claims || {}, judgeDisc = disc.judgements || {};
+
+    const claims = (results.claims || []).map(c => {
+      const id = String(c.id);
+      const own = claimDisc[id] || [];
+      let judgements;
+      if (c.judgements && c.judgements.length) {
+        judgements = c.judgements.map((j, i) => judgementOf(j, c, (judgeDisc[id] || [])[i] || []));
+      } else if (c.source_slug) {
+        // a results.json from before per-source judgements: the claim's own
+        // anchor is the one crop, and its anchor disclosure captions it
+        judgements = [judgementOf(c, c, own.filter(d => d.key === 'anchor'))];
+      } else {
+        judgements = [];
+      }
+      return {
+        key: id, id, kind: 'claim', claim: c.claim || '', quote: c.quote || '',
+        location: c.location || '', section: sectionOf(c.location), refs: (c.refs || []).map(String),
+        verdict: c.verdict, note: c.note || '', unjudged: (c.unjudged_refs || []).map(String),
+        ctx_ids: c.ctx_ids || [], ownSupplement: !!c.own_supplement, judgements, disclosures: own,
+      };
+    }).concat((results.uncited || []).map(u => ({
+      key: 'U' + u.id, id: 'U' + u.id, kind: 'uncited', claim: u.claim || '', quote: u.quote || '',
+      location: u.location || '', section: sectionOf(u.location), refs: [], verdict: 'uncited',
+      note: '', unjudged: [], ctx_ids: [], ownSupplement: false, judgements: [], disclosures: [],
+    })));
+
+    const parsed = parseAnnotated(md);
+    const synthetic = !parsed.blocks.length;
+    if (synthetic) {
+      // no annotated.md: a skeleton of the audited sentences, one heading per
+      // section and one paragraph per distinct sentence, in claim order
+      const order = [], bySec = new Map();
+      for (const c of claims) {
+        if (!bySec.has(c.section)) { bySec.set(c.section, []); order.push(c.section); }
+        bySec.get(c.section).push(c);
+      }
+      let n = 0;
+      for (const s of order) {
+        parsed.blocks.push({ id: 'syn_' + (++n), page: 0, type: 'heading', text: s });
+        const seen = new Set();
+        for (const c of bySec.get(s)) {
+          const t = c.quote || c.claim;
+          const k = norm(t).out;
+          if (!t || seen.has(k)) continue;
+          seen.add(k);
+          parsed.blocks.push({ id: 'syn_' + (++n), page: 0, type: 'para', text: t });
+        }
+      }
+    }
+    const anchored = anchorClaims(parsed.blocks, claims);
+
+    // reference text: the manifest's parsed entry, else the manuscript's own list
+    const refsList = parsed.blocks.filter(b => b.type === 'ref');
+    const manifestByNum = new Map(((manifest && manifest.entries) || []).map(e => [String(e.num), e]));
+    const refText = n => {
+      const e = manifestByNum.get(String(n));
+      if (e && e.raw) return e.raw;
+      const r = refsList.find(b => String(b.num) === String(n));
+      return r ? r.text : '';
+    };
+    // every document a claim was judged against, and every source that was
+    // available — keyed by slug, valued by the label it answers for
+    const slugRef = {}, slugKind = {};
+    claims.forEach(c => c.judgements.forEach(j => { if (j.slug) { slugRef[j.slug] = j.ref; slugKind[j.slug] = j.kind; } }));
+    if (manifest) {
+      for (const e of manifest.entries || []) {
+        if (e.slug && (e.status === 'retrieved' || e.status === 'provided') && !(e.slug in slugRef)) { slugRef[e.slug] = String(e.num); slugKind[e.slug] = 'article'; }
+      }
+    }
+    // references nobody could read, with the reason: the manifest's own
+    // status, or — without a manifest — what the claim's note says
+    const missing = {}, missingReason = {};
+    if (manifest) {
+      for (const e of manifest.entries || []) {
+        if (e.status !== 'retrieved' && e.status !== 'provided') {
+          missing[String(e.num)] = String(e.status || 'not retrieved').replace(/_/g, ' ');
+          missingReason[String(e.num)] = e.reason || '';
+        }
+      }
+    } else {
+      const judgedRefs = new Set(Object.values(slugRef));
+      claims.filter(c => c.verdict === 'not_retrieved' || c.verdict === 'unchecked')
+        .forEach(c => c.refs.forEach(r => { if (!judgedRefs.has(r) && !missing[r]) missing[r] = gapReason(c); }));
+      claims.forEach(c => c.unjudged.forEach(r => { if (!missing[r] && !judgedRefs.has(r)) missing[r] = 'co-cited, not obtained'; }));
+    }
+
+    const cov = results.coverage || {};
+    const occ = cov.occurrences || {};
+    const title = (scout && scout.paper && stripTags(scout.paper.title).trim()) || parsed.title || results.manuscript || 'Manuscript';
+    const scoutRows = scout
+      ? [].concat(
+        (scout.newer || []).map(s => ({ ...s, kind: 'newer' })),
+        (scout.overlooked || []).map(s => ({ ...s, kind: 'overlooked' })),
+        (scout.same_year || []).map(s => ({ ...s, kind: 'same year' })),
+      ).map(s => ({ ...s, title: stripTags(s.title) }))
+      : [];
+
+    return {
+      synthetic, anchored, title,
+      caseId: (results.manuscript || 'case').replace(/\.pdf$/i, '').slice(0, 80),
+      meta: {
+        manuscript: results.manuscript || '', checker: results.checker || '', date: results.date || '',
+        converter: results.converter || '', refs: results.refs || {}, version: payload.version || '',
+      },
+      claims, blocks: parsed.blocks, refText, slugRef, slugKind, missing, missingReason,
+      coverage: {
+        total: occ.total || 0, covered: occ.covered || 0, uncovered: occ.uncovered || 0,
+        uncertain: occ.uncertain || 0, labels: (cov.labels_in_text || []).length,
+        hasOccurrences: !!cov.occurrences, audited: !!(cov.labels_in_text || []).length || !!occ.total,
+      },
+      scout: scoutRows, scoutQuery: scout ? (scout.query || '') : '', scoutError: scout ? (scout.error || '') : '',
+      scoutPresent: !!scout, manifestPresent: !!manifest, manifest,
+      disclosures: disc.run || [],
+    };
+  }
+
+  // ---- filtering ------------------------------------------------------------
+
+  function matches(c, f) {
+    const vs = f.verdicts instanceof Set ? f.verdicts : new Set(f.verdicts || ALL_KEYS);
+    if (!vs.has(c.verdict)) return false;
+    if (f.section && f.section !== 'all' && c.section !== f.section) return false;
+    const q = (f.query || '').trim().toLowerCase();
+    if (q) {
+      const hay = [c.id, c.claim, c.quote, c.location]
+        .concat(c.refs.map(x => '[' + x + ']'), c.judgements.map(j => j.slug + ' ' + j.note))
+        .join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }
+
+  // ---- evidence crops -------------------------------------------------------
+
+  // one passage, possibly split over several rectangles (the next column or
+  // the next page). The first image opens the passage; the red box may sit in
+  // a later one, so the set is captioned once and each crop only says where it
+  // continues
+  function cropsOf(j) {
+    const images = j.images || [];
+    const n = images.length, multi = n > 1;
+    const pageOf = (img, k) => {
+      if (k === 0) return j.page;
+      const m = String(img).match(/_p(\d+)(?:_cont\d+)?\.[a-z]+$/i);
+      return m ? +m[1] : j.page;
+    };
+    return images.map((image, k) => {
+      const page = pageOf(image, k);
+      const prev = k ? pageOf(images[k - 1], k - 1) : null;
+      const divider = k === 0 ? '' : (String(page) !== String(prev) ? `continues on p.${page} →` : 'continues →');
+      const cap = multi ? (k === 0 ? `crop 1 of ${n} · the passage opens here` : `crop ${k + 1} of ${n} · p.${page}`) : '';
+      return { index: k, image, page, divider, cap };
+    });
+  }
+
+  // ---- the claim map --------------------------------------------------------
+
+  const TOP_RE = /^(abstract|introduction|background|materials and methods|methods|results|discussion|conclusions?)\b/i;
+  const STOP_RE = /^(references|author affiliations|acknowledg|funding|supplemental)/i;
+
+  // one cell per audited claim in reading order, grouped by top-level section;
+  // a paragraph with nothing flagged is one neutral cell
+  function mapGroups(data) {
+    const byKey = new Map(data.claims.map(c => [c.key, c]));
+    const groups = [];
+    let cur = { key: 'front', label: data.synthetic ? 'Front matter' : 'Abstract · Introduction', cells: [] };
+    for (const b of data.blocks) {
+      if (b.type === 'heading') {
+        if (STOP_RE.test(b.text)) break;
+        if (TOP_RE.test(b.text)) {
+          if (cur.cells.length) groups.push(cur);
+          cur = { key: b.id, label: b.text, cells: [] };
+        }
+        continue;
+      }
+      if (b.type !== 'para') continue;
+      const cs = (b.segments || []).filter(s => s.claim).flatMap(s => s.claims || [s.claim])
+        .map(k => byKey.get(k)).filter(Boolean);
+      if (!cs.length) {
+        cur.cells.push({ kind: 'para', key: b.id, block: b.id, page: b.page, text: b.text });
+        continue;
+      }
+      for (const c of cs) {
+        cur.cells.push({
+          kind: 'claim', key: b.id + '-' + c.key, claim: c.key, id: c.id, uncited: c.kind === 'uncited',
+          verdict: c.verdict, quote: c.quote || c.claim, page: b.page, location: c.location, block: b.id,
+        });
+      }
+    }
+    if (cur.cells.length) groups.push(cur);
+    return groups;
+  }
+
+  // ---- the markdown export: report.md's structure, plus the reviewed marks ----
+
+  function markdownReport(d, reviewed) {
+    const R = reviewed || {};
+    const L = [];
+    const flag = dis => (dis.level === 'warn' ? '⚠️ ' : '') + dis.text;
+    L.push('# Fact-Check Report', '', `**${d.title}**`, '',
+      `Checker: ${d.meta.checker} · ${d.meta.date} · Sources: ${d.meta.refs.available} / ${d.meta.refs.total}`, '');
+    for (const v of VERDICTS) {
+      const n = d.claims.filter(c => c.verdict === v.key).length;
+      if (n) L.push(`- ${v.label}: ${n}`);
+    }
+    L.push('');
+    for (const dis of d.disclosures) L.push(`> ${flag(dis)}`, '');
+    for (const c of d.claims.filter(c => c.kind === 'claim' && c.judgements.length)) {
+      L.push(`## Claim ${c.id}: “${c.claim}”`, '', `Status: ${verdictInfo(c.verdict).label}${R[c.key] ? ' · reviewed' : ''}`, '');
+      if (c.quote) L.push(`> ${c.quote}`, '');
+      for (const dis of c.disclosures.filter(x => x.key !== 'anchor')) L.push(`> ${flag(dis)}`, '');
+      for (const j of c.judgements) {
+        L.push(`### ${verdictInfo(j.verdict).label} — ${j.slug} (${j.origin})`);
+        if (j.page) L.push(`Source: page ${j.page} (${j.block})`);
+        if (j.note) L.push(j.note);
+        for (const img of j.images) L.push(`![evidence](${img})`);
+        for (const dis of j.disclosures) L.push(`*${flag(dis)}*`);
+        L.push('');
+      }
+    }
+    L.push('## Assertions without citation', '');
+    d.claims.filter(c => c.kind === 'uncited').forEach(c => L.push(`- [${c.id}] ${c.claim} — ${c.location}`));
+    L.push('', '## Not verified — source not retrieved, or check failed', '');
+    d.claims.filter(c => c.verdict === 'not_retrieved' || c.verdict === 'unchecked')
+      .forEach(c => L.push(`- Claim ${c.id}: ${c.claim} (${c.note || c.verdict})`));
+    return L.join('\n');
+  }
+
+  return {
+    VERDICTS, VMAP, ALL_KEYS, verdictInfo, sectionOf, stripTags, originOf,
+    parseAnnotated, norm, anchorClaims, buildModel, matches, cropsOf, gapReason,
+    mapGroups, markdownReport,
+  };
+});
+</script>
+<script>/* PaperTrace report viewer — the half that draws.
+
+   Everything decided lives in viewer_logic.js; this file only puts it on the
+   page and reacts to the reader. State is a handful of values; every change
+   re-renders the header's filter row and the right-hand panel from them, and
+   restyles the audited spans in the manuscript column (which is built once,
+   because rebuilding it would lose the reader's scroll position).
+
+   Reviewed marks and the theme are the reader's own and stay in this browser
+   (localStorage); export them from the Export menu.
+*/
+(function () {
+  'use strict';
+  const PT = window.PaperTraceLogic;
+  // `markStyle` is how audited sentences are marked: underline (the default),
+  // highlight, or margin (no mark until selected). `showCaveats` hides the
+  // per-claim caveat box when false.
+  const OPTIONS = { markStyle: 'underline', showCaveats: true };
+  const REVIEW_ORDER = ['supported', 'partial', 'contradicted', 'not_addressed'];
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const vcls = (v) => PT.VMAP[v] ? 'v-' + v : 'v-other';
+  const refsLabel = (refs) => refs.map(x => '[' + x + ']').join(', ');
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  let data = null;
+  const state = {
+    tab: 'summary', selected: null, verdicts: new Set(PT.ALL_KEYS), section: 'all', query: '',
+    reviewed: {}, theme: 'light', exportOpen: false, lightbox: null,
+  };
+
+  // ---- boot -----------------------------------------------------------------
+
+  function fail(msg) {
+    $('pt-article').innerHTML = `<div class="fail">Could not load the case: ${esc(msg)}</div>`;
+  }
+
+  function load() {
+    let payload;
+    try { payload = JSON.parse($('pt-data').textContent); }
+    catch (e) { fail('the embedded case data could not be parsed — ' + e.message); return; }
+    try { data = PT.buildModel(payload); }
+    catch (e) { fail('the case data could not be read — ' + e.message); return; }
+    try { state.reviewed = JSON.parse(localStorage.getItem('papertrace:reviewed:' + data.caseId) || '{}') || {}; } catch (e) { state.reviewed = {}; }
+    try { const t = localStorage.getItem('papertrace:theme'); if (t === 'dark' || t === 'light') state.theme = t; } catch (e) { /* no storage: light */ }
+    document.body.dataset.theme = state.theme;
+    document.body.dataset.mark = OPTIONS.markStyle;
+    document.title = data.title + ' — PaperTrace';
+    $('pt-title').textContent = data.title;
+    $('pt-meta').textContent = `${data.meta.date} · ${data.meta.checker} · ${data.meta.refs.available} / ${data.meta.refs.total} cited sources retrieved`;
+    const sel = $('pt-section');
+    const secCounts = {};
+    data.claims.forEach(c => { secCounts[c.section] = (secCounts[c.section] || 0) + 1; });
+    Object.keys(secCounts).forEach(s => {
+      const o = document.createElement('option');
+      o.value = s; o.textContent = `${s} (${secCounts[s]})`;
+      sel.appendChild(o);
+    });
+    renderArticle();
+    renderAll();
+    bind();
+  }
+
+  // ---- derived ---------------------------------------------------------------
+
+  const all = () => data.claims;
+  const byKey = (k) => data.claims.find(c => c.key === String(k));
+  const filters = () => ({ verdicts: state.verdicts, section: state.section, query: state.query });
+  const visible = () => data.claims.filter(c => PT.matches(c, filters()));
+  const allOn = () => state.verdicts.size === PT.ALL_KEYS.length;
+  const filtersActive = () => !allOn() || state.section !== 'all' || !!state.query.trim();
+  const counts = () => Object.fromEntries(PT.ALL_KEYS.map(k => [k, data.claims.filter(c => c.verdict === k).length]));
+  const reviewedCount = () => data.claims.filter(c => state.reviewed[c.key]).length;
+  const isGap = (c) => c.verdict === 'not_retrieved' || c.verdict === 'unchecked';
+
+  // ---- rendering: header -----------------------------------------------------
+
+  function renderHeader() {
+    const n = counts();
+    const chips = PT.VERDICTS.filter(v => n[v.key] > 0 || v.key === 'contradicted').map(v => {
+      const on = state.verdicts.has(v.key);
+      return `<button class="chip ${vcls(v.key)} ${on ? 'on' : ''}" data-act="chip" data-v="${v.key}" title="${esc(v.label)} — click to show only this; shift-click to toggle"><span class="dot"></span>${esc(v.short)}<span class="n">${n[v.key]}</span></button>`;
+    }).join('');
+    const live = !allOn();
+    $('pt-chips').innerHTML = chips + `<button class="pill-all ${live ? 'live' : ''}" data-act="all" ${live ? '' : 'disabled'} title="Show all claim types">All</button>`;
+    $('pt-section').value = state.section;
+    const vis = visible(), total = all().length, rv = reviewedCount();
+    const shown = filtersActive() ? `${vis.length} of ${total} claims shown` : `${total} claims`;
+    $('pt-status').innerHTML = `<span>${esc(shown)}</span><span class="vdiv2"></span><span class="rv"><span class="bar"><span style="width:${total ? Math.round(100 * rv / total) : 0}%"></span></span>${rv} / ${total} reviewed</span>`;
+    $('pt-theme').textContent = state.theme === 'dark' ? 'Light' : 'Dark';
+    $('pt-menu').hidden = !state.exportOpen;
+  }
+
+  // ---- rendering: the manuscript column (built once) -----------------------
+
+  function segHtml(s) {
+    if (!s.claim) return esc(s.text);
+    const keys = s.claims || [s.claim];
+    const c = byKey(s.claim);
+    const dash = c.verdict === 'not_retrieved' || c.verdict === 'unchecked' ? ' dotted' : c.verdict === 'uncited' ? ' dashed' : '';
+    const title = keys.length > 1 ? ` title="${keys.length} claims share this sentence — click again to cycle"` : '';
+    return `<span class="seg ${vcls(c.verdict)}${dash}" data-act="seg" data-claim="${esc(s.claim)}" data-claims="${esc(keys.join(','))}"${title}>${esc(s.text)}</span>`;
+  }
+
+  function renderArticle() {
+    const parts = [];
+    parts.push(`<h1 class="ms-title">${esc(data.title)}</h1>`);
+    const sub = (data.synthetic
+      ? 'Audited sentences only — the case folder has no ingest/manuscript/annotated.md, so the full manuscript is not shown · '
+      : '') + `Ingest ${esc(data.meta.converter || 'not recorded')} · ${data.anchored} of ${all().length} audited sentences located in the text · underlines mark audited sentences; click one to see its evidence.`;
+    parts.push(`<p class="ms-sub">${sub}</p>`);
+    for (const b of data.blocks) {
+      const id = `blk-${esc(b.id)}`;
+      const pg = b.page ? `<span class="pg">p.${b.page}</span>` : '';
+      if (b.type === 'heading') parts.push(`<div class="ms-h" id="${id}"><h2>${esc(b.text)}</h2>${pg}</div>`);
+      else if (b.type === 'para') {
+        const cls = ['ms-p', b.text.startsWith('• ') ? 'bullet' : '', b.text.includes('\n') ? 'multi' : ''].filter(Boolean).join(' ');
+        parts.push(`<p class="${cls}" id="${id}">${(b.segments || [{ text: b.text }]).map(segHtml).join('')}</p>`);
+      } else if (b.type === 'figure') parts.push(`<div class="fig" id="${id}"><b>Figure</b> · ${esc(b.text)}</div>`);
+      else if (b.type === 'table') parts.push(`<details class="tbl" id="${id}"><summary><b>Table</b> · ${esc(b.caption)} <span class="id">${esc(b.id)} · p.${b.page}</span></summary><pre>${esc(b.text)}</pre></details>`);
+      else if (b.type === 'ref') {
+        const slug = Object.keys(data.slugRef).find(s => String(data.slugRef[s]) === String(b.num) && data.slugKind[s] !== 'supplement');
+        const tag = slug ? `<span class="tag">${esc(slug)}</span>` : (data.missing[b.num] ? `<span class="tag nr">not retrieved</span>` : '');
+        parts.push(`<div class="ref" id="${id}"><span class="num">${b.num}</span><span class="txt">${esc(b.text)}</span>${tag}</div>`);
+      }
+    }
+    $('pt-article').innerHTML = parts.join('');
+  }
+
+  function updateSegments() {
+    const vis = new Set(visible().map(c => c.key));
+    const active = filtersActive();
+    document.querySelectorAll('#pt-article .seg').forEach(el => {
+      const keys = el.dataset.claims.split(',');
+      el.classList.toggle('on', keys.includes(String(state.selected)));
+      el.classList.toggle('dim', active && !keys.some(k => vis.has(k)));
+    });
+  }
+
+  // ---- rendering: the right panel ---------------------------------------------
+
+  function rowHtml(c, withSub) {
+    const on = c.key === String(state.selected), rv = !!state.reviewed[c.key];
+    const sub = withSub ? [
+      c.location,
+      c.refs.length ? 'cites ' + refsLabel(c.refs) : (c.kind === 'uncited' ? 'no citation' : (c.ownSupplement ? "this paper's own supplement" : '')),
+      isGap(c) ? PT.gapReason(c) : '',
+    ].filter(Boolean).join(' · ') : '';
+    return `<button class="row ${vcls(c.verdict)} ${withSub ? '' : 'single'} ${on ? 'on' : ''} ${rv ? 'rv' : ''}" data-act="select" data-key="${esc(c.key)}"><span class="dot"></span><span class="id">${esc(c.id)}</span><span class="txt"><span>${esc(c.claim)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span><span class="ck">${rv ? '✓' : ''}</span></button>`;
+  }
+
+  function discItem(d) {
+    const rows = d.rows && d.rows.length ? `<ul>${d.rows.slice(0, 25).map(r => `<li>${esc(r)}</li>`).join('')}${d.rows.length > 25 ? `<li>… ${d.rows.length - 25} more in results.json</li>` : ''}</ul>` : '';
+    return `<li><span class="lv ${d.level === 'warn' ? 'warn' : ''}">${d.level === 'warn' ? '⚠' : '·'}</span><span>${esc(d.text)}${rows}</span></li>`;
+  }
+
+  function summaryHtml() {
+    const n = counts();
+    const cards = PT.VERDICTS.filter(v => n[v.key] > 0 || v.key === 'contradicted' || v.key === 'supported')
+      .map(v => `<button class="card-v ${vcls(v.key)}" data-act="card" data-v="${v.key}"><span class="big">${n[v.key]}</span><span class="lbl">${esc(v.label)}</span></button>`).join('');
+
+    // the claim map
+    const groups = PT.mapGroups(data);
+    const untouched = groups.reduce((k, g) => k + g.cells.filter(c => c.kind === 'para').length, 0);
+    const touched = new Set(groups.flatMap(g => g.cells.filter(c => c.kind === 'claim').map(c => c.block))).size;
+    const unplaced = all().length - data.anchored;
+    const legend = PT.VERDICTS.filter(v => n[v.key] > 0 || v.key !== 'unchecked')
+      .map(v => `<span class="${vcls(v.key)}"><span class="sw"></span><b>${n[v.key]}</b>${esc(v.short)}</span>`).join('')
+      + `<span><span class="sw none"></span><b>${untouched}</b>Nothing flagged</span><span><span class="sw rev">✓</span><b>${reviewedCount()}</b>Reviewed by you</span>`;
+    const cells = groups.map(g => `<div><div class="mlabel">${esc(g.label)}</div><div class="cells">${g.cells.map(cell => {
+      if (cell.kind === 'para') {
+        const t = `¶ ${cell.page ? 'p.' + cell.page + ' · ' : ''}${cell.text.slice(0, 80).replace(/\s+/g, ' ')}…\nNothing flagged`;
+        return `<button class="cell para" data-act="cell-para" data-block="${esc(cell.block)}" title="${esc(t)}" aria-label="${esc(t)}"></button>`;
+      }
+      const on = cell.claim === String(state.selected), rv = !!state.reviewed[cell.claim];
+      const t = `${cell.uncited ? 'Assertion' : 'Claim'} ${cell.id} · ${PT.verdictInfo(cell.verdict).label}\n“${cell.quote.slice(0, 90).replace(/\s+/g, ' ')}…”${cell.page ? `\n¶ p.${cell.page}` : `\n${cell.location}`}`;
+      return `<button class="cell ${vcls(cell.verdict)} ${on ? 'on' : ''}" data-act="select" data-key="${esc(cell.claim)}" title="${esc(t)}" aria-label="${esc(t)}">${rv ? '<span class="ck">✓</span>' : ''}</button>`;
+    }).join('')}</div></div>`).join('');
+    const mapIntro = `One box per audited claim, in the order they appear, grouped into ${groups.length} sections; a grey box is a paragraph with nothing flagged against it. ${all().length} claims across ${touched} paragraphs, ${untouched} paragraphs untouched.`
+      + (unplaced ? ` ${plural(unplaced, 'claim', 'claims')} could not be located in the text and ${unplaced === 1 ? 'is' : 'are'} not on the map.` : '')
+      + ' Colours are the verdict categories from the filter bar; a ✓ marks a claim you have ticked off as reviewed.';
+
+    // review progress
+    const rv = reviewedCount(), total = all().length;
+    const progress = `<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><b>Review progress</b><span style="color:var(--muted);font-variant-numeric:tabular-nums">${rv} / ${total}</span></div><div class="progress"><span style="width:${total ? Math.round(100 * rv / total) : 0}%"></span></div><div class="btnrow"><button class="btn-primary" data-act="start-review">${rv ? 'Continue review' : 'Start review'}</button><button class="btn-outline" data-act="go-verified">Only claims with a verdict</button></div><p class="note">Checkmarks are saved in this browser; export them from the Export menu.</p></div>`;
+
+    // disclosures, decided in Python: coverage and numbering get their own
+    // cards; everything else — including any key this page has never heard
+    // of — lands in the run notes, so nothing is dropped by an allow-list
+    const disc = data.disclosures;
+    const coverage = disc.filter(d => d.key === 'coverage' || d.key === 'coverage_caveat');
+    const coverageMore = disc.filter(d => d.key === 'coverage_attribution' || d.key === 'supplement_coverage');
+    const numbering = disc.filter(d => d.key === 'numbering');
+    const rest = disc.filter(d => !['coverage', 'coverage_caveat', 'coverage_attribution', 'supplement_coverage', 'numbering'].includes(d.key));
+    const numberedClaims = all().filter(c => c.disclosures.some(d => d.key === 'claim_numbering')).length;
+    const numberingCard = numbering.map(d => `<div class="card warn"><b>Reference numbering unconfirmed</b> <span style="color:var(--muted)">· affects ${plural(numberedClaims, 'claim', 'claims')}</span><p>${esc(d.text)}</p></div>`).join('');
+    const coverageCard = `<div class="card"><b>Citation coverage</b>${coverage.length ? `<ul class="disc">${coverage.map(discItem).join('')}${coverageMore.map(discItem).join('')}</ul>` : '<p>Coverage was not audited in this run: results.json carries no coverage object.</p>'}</div>`;
+    const gaps = all().filter(isGap);
+    const reasons = [...new Set(gaps.map(PT.gapReason))];
+    const retrieval = `${data.meta.refs.available} of ${data.meta.refs.total} cited references were available as PDFs. ${plural(gaps.length, 'claim', 'claims')} could not be checked${reasons.length ? ': ' + reasons.map(r => `${gaps.filter(g => PT.gapReason(g) === r).length} ${r}`).join(', ') : ''}.`;
+    const retrievalCard = `<div class="card"><b>Retrieval and run notes</b><p>${esc(retrieval)}</p>${rest.length ? `<ul class="disc">${rest.map(discItem).join('')}</ul>` : ''}</div>`;
+
+    return `<div class="cards">${cards}</div><div class="stack">
+      <div class="card map"><div class="kicker">Claim map</div><p style="margin:0 0 10px">${esc(mapIntro)}</p><div class="legend">${legend}</div><div class="mgroups">${cells}</div><p class="note" style="margin-top:10px">Point at a box, or Tab to the map, to read the claim. Click to open it.</p></div>
+      ${progress}${numberingCard}${coverageCard}${retrievalCard}
+      <p class="note">Evidence images are pages of the cited sources; each crop states whether its anchor phrase was located. The judgement is yours — verify before you rely on it.</p>
+    </div>`;
+  }
+
+  function claimsHtml() {
+    const vis = visible();
+    if (!vis.length) return '<p class="empty">No claims match the current filters.</p>';
+    return `<div class="list">${vis.map(c => rowHtml(c, true)).join('')}</div>`;
+  }
+
+  function sourcesHtml() {
+    const slugs = Object.keys(data.slugRef);
+    const cards = slugs.map(slug => {
+      const cl = all().filter(c => c.judgements.some(j => j.slug === slug));
+      const ref = data.slugRef[slug], kind = data.slugKind[slug] || 'article';
+      const cited = kind === 'article' ? `[${esc(ref)}]` : esc(PT.originOf({ kind, ref }));
+      const rows = cl.length ? cl.map(c => rowHtml(c, false)).join('') : '<p class="empty" style="padding:8px 12px;font-size:12px">Available, but no audited claim cites it.</p>';
+      return `<div class="src-card"><div class="src-head"><div class="line"><span class="slug">${esc(slug)}</span><span class="cited">${cited}</span><span class="cnt">${plural(cl.length, 'claim', 'claims')}</span></div>${ref ? `<span class="rt">${esc(data.refText(ref))}</span>` : ''}</div>${rows}</div>`;
+    }).join('');
+    const nums = Object.keys(data.missing).sort((a, b) => +a - +b);
+    const missing = nums.map(r => `<div class="miss"><span class="num">${esc(r)}</span><span class="txt">${esc(data.refText(r) || '—')}</span><span class="why" title="${esc(data.missingReason[r] || '')}">${esc(data.missing[r])}</span></div>`).join('');
+    return `<p class="intro">Each retrieved source with every claim judged against it.</p>
+      ${slugs.length ? `<div class="stack">${cards}</div>` : '<p class="empty">No cited source was available to judge against.</p>'}
+      <h3 class="h3">Not retrieved <span>· ${plural(nums.length, 'reference', 'references')}</span></h3>
+      ${nums.length ? `<div class="list">${missing}</div>` : '<p class="empty">Every cited reference was available.</p>'}
+      ${data.manifestPresent ? '' : '<p class="note">No retrieval manifest was rendered with this report, so the reasons above are read from each claim\'s note.</p>'}`;
+  }
+
+  function gapsHtml() {
+    const gaps = all().filter(isGap);
+    if (!gaps.length) return '<p class="intro">Either the cited PDF could not be obtained, or the check failed on an available source. Reported as such — never filled in from memory.</p><p class="empty">Every claim was checked against an available source.</p>';
+    const reasons = [...new Set(gaps.map(PT.gapReason))];
+    const label = r => r === 'paywalled' ? 'Source paywalled' : r === 'unknown ref' ? 'Reference could not be resolved' : r;
+    return '<p class="intro">Either the cited PDF could not be obtained, or the check failed on an available source. Reported as such — never filled in from memory.</p>'
+      + reasons.map(r => { const rows = gaps.filter(g => PT.gapReason(g) === r); return `<h3 class="h3" style="margin-top:14px">${esc(label(r))} <span>· ${rows.length}</span></h3><div class="list">${rows.map(c => rowHtml(c, true)).join('')}</div>`; }).join('');
+  }
+
+  function scoutHtml() {
+    if (!data.scoutPresent) return '<p class="intro">The literature scout did not run for this case: there is no scout.json beside results.json.</p>';
+    const rows = data.scout.map(s => `<div class="sc-row"><div class="k"><span class="kind ${s.kind === 'same year' ? 'same' : s.kind}">${esc(s.kind)}</span><span>${esc(s.year == null ? '?' : s.year)}</span>${s.via ? `<span>${esc(s.via)}</span>` : ''}</div><span class="t">${esc(s.title)}</span><span class="venue">${esc(s.journal || '')}${s.doi ? ` · <a class="doi" href="https://doi.org/${esc(s.doi)}" target="_blank" rel="noopener">${esc(s.doi)}</a>` : ''}</span></div>`).join('');
+    return `<p class="intro">What the reference list doesn't know. Search-based (Europe PMC), so absence from these lists proves nothing. Same-year items are listed apart: they may postdate submission.</p>
+      ${data.scoutError ? `<p class="intro" style="color:var(--v-partial)">⚠ Scout scan incomplete: ${esc(data.scoutError)}</p>` : ''}
+      ${rows ? `<div class="list">${rows}</div>` : '<p class="empty">The scout found no newer, overlooked or same-year candidates.</p>'}
+      <p class="note" style="margin-top:10px">Query: ${esc(data.scoutQuery || '—')}</p>`;
+  }
+
+  function tabsHtml() {
+    const n = counts();
+    const tabs = [
+      ['summary', 'Summary', 0], ['claims', 'Claims', visible().length], ['sources', 'Sources', Object.keys(data.slugRef).length],
+      ['gaps', 'Gaps', n.not_retrieved + n.unchecked], ['scout', 'Scout', data.scout.length],
+    ];
+    return `<div class="tabs" data-noprint>${tabs.map(([k, label, count]) => `<button class="tab ${state.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}">${label}${count > 0 ? `<span class="cnt">${count}</span>` : ''}</button>`).join('')}</div>`;
+  }
+
+  function anchorInfo(j) {
+    // the caption for a crop set, from the disclosure decided in Python. When
+    // the run recorded no page there is nothing to disclose, and the caption
+    // says so rather than asserting a match
+    const d = j.disclosures.find(x => x.key === 'anchor');
+    if (!d) return { ok: false, label: 'anchor state not recorded', short: 'anchor state not recorded' };
+    const ok = d.level !== 'warn';
+    const multi = j.images.length > 1;
+    return { ok, label: ok ? (multi ? `${d.token} (in one of the crops)` : d.token) : d.short, short: ok ? d.token : d.short };
+  }
+
+  function sourceCardHtml(j, sel) {
+    const crops = PT.cropsOf(j);
+    const n = crops.length, multi = n > 1;
+    const a = anchorInfo(j);
+    let body = '';
+    if (n) {
+      const set = crops.map(cr => `<div class="crop">${cr.divider ? `<div class="cont"><i></i>${esc(cr.divider)}<i></i></div>` : ''}<button class="cropbtn" data-act="lightbox" data-src="${esc(cr.image)}" data-cap="${esc(`${j.slug} · page ${cr.page} · ${j.block || ''}${multi ? ` · crop ${cr.index + 1} of ${n}` : ''} · ${a.short}`)}" title="Click to enlarge"><img src="${esc(cr.image)}" alt="${esc(`${j.slug} page ${cr.page}${cr.index ? ` (continuation ${cr.index + 1})` : ''}`)}" data-path="${esc(cr.image)}"></button>${cr.cap ? `<div class="cap">${esc(cr.cap)}</div>` : ''}</div>`).join('');
+      body = `<div class="crops"><div class="cropset">${set}</div><div class="cropmeta"><span>${j.page ? `page ${j.page}${j.block ? ` · ${esc(j.block)}` : ''}${multi ? ` · ${n} crops` : ''}` : ''}</span><button class="jump" data-act="jump">↖ show in text</button><span class="anc ${a.ok ? 'ok' : 'warn'}">${esc(a.label)}</span></div>${j.anchors.length ? `<div class="phrases">${j.anchors.map(p => `<span class="phrase">${esc(p)}</span>`).join('')}</div>` : ''}</div>`;
+    } else {
+      const d = j.disclosures.find(x => x.key === 'anchor');
+      body = d ? `<p class="srcnote ${d.level === 'warn' ? 'warn' : ''}">${d.level === 'warn' ? '⚠ ' : ''}${esc(d.text)}</p>` : '';
+    }
+    const extra = j.disclosures.filter(x => x.key !== 'anchor').map(d => `<p class="srcnote ${d.level === 'warn' ? 'warn' : ''}">${d.level === 'warn' ? '⚠ ' : ''}${esc(d.text)}</p>`).join('');
+    return `<div class="src"><div class="src-hd" data-act="jump" title="Show this claim in the manuscript"><span class="slug">${esc(j.slug)}</span><span class="cited">${esc(j.origin)}</span><span class="badge ${vcls(j.verdict)}">${esc(PT.verdictInfo(j.verdict).label)}</span></div>${body}${extra}<p class="rationale">${esc(j.note)}</p></div>`;
+  }
+
+  function detailHtml(sel) {
+    const vis = visible();
+    const idx = vis.findIndex(c => c.key === sel.key);
+    const back = state.tab === 'summary' ? 'Summary' : state.tab.charAt(0).toUpperCase() + state.tab.slice(1);
+    const rv = !!state.reviewed[sel.key];
+    const where = `${sel.kind === 'uncited' ? 'Assertion' : 'Claim'} ${esc(sel.id)} · ${esc(sel.location)}${sel.refs.length ? ` · cites ${esc(refsLabel(sel.refs))}` : ''}${sel.ownSupplement ? " · points to this paper's own supplement" : ''}`;
+    const note = sel.note ? sel.note.charAt(0).toUpperCase() + sel.note.slice(1).replace(/\.?$/, '.') : 'The check did not run.';
+    const gap = isGap(sel) ? `<div class="gapbox"><b>Not verified.</b> ${esc(note)} Nothing was filled in from memory — the claim stands unchecked.</div>` : '';
+    const uncited = sel.kind === 'uncited' ? `<div class="gapbox"><b>No citation.</b> A statement that would normally carry a reference but doesn't. Not verified — flagged for your judgement.</div>` : '';
+    const sources = sel.judgements.map(j => sourceCardHtml(j, sel)).join('');
+    // caveats: every claim-level disclosure except the anchor, which captions
+    // the crop, plus each source's own warnings named by slug
+    const caveats = OPTIONS.showCaveats ? sel.disclosures.filter(d => d.key !== 'anchor').map(d => d.text)
+      .concat(sel.judgements.flatMap(j => j.disclosures.filter(d => d.level === 'warn').map(d => `${j.slug}: ${d.text}`))) : [];
+    const cav = caveats.length ? `<details class="cav"><summary><span class="w">⚠</span>${plural(caveats.length, 'caveat', 'caveats')}<span class="show">show</span></summary><ul>${caveats.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : '';
+    return `<div class="det">
+      <div class="det-top"><button class="back" data-act="back">← ${esc(back)}</button><span class="pos">${idx >= 0 ? `${idx + 1} of ${vis.length} shown` : 'filtered out'}</span><button class="nav" data-act="prev" title="Previous (k)">↑</button><button class="nav" data-act="next" title="Next (j)">↓</button></div>
+      <div class="det-meta"><button class="badge ${vcls(sel.verdict)}" data-act="jump" title="Show in manuscript">${esc(PT.verdictInfo(sel.verdict).label)}</button><span class="where">${where}</span></div>
+      <p class="det-claim">${esc(sel.claim)}</p>
+      ${sel.quote ? `<blockquote class="q" data-act="jump" title="Show in manuscript">“${esc(sel.quote)}”${sel.anchor ? '' : '<span class="nl">quote not located in the processed manuscript text</span>'}</blockquote>` : ''}
+      <label class="rvlbl"><input type="checkbox" data-act="reviewed" ${rv ? 'checked' : ''}><span>${rv ? 'Reviewed' : 'Mark as reviewed'}</span><kbd>r</kbd></label>
+      ${gap}${uncited}${sources}${cav}
+      <p class="keys" data-noprint>Keys: <kbd>j</kbd>/<kbd>k</kbd> next/prev · <kbd>r</kbd> reviewed · <kbd>esc</kbd> back</p>
+    </div>`;
+  }
+
+  let asideView = null; // which view the panel last drew: a claim key, or a tab name
+
+  function renderAside() {
+    const aside = $('pt-aside');
+    const sel = state.selected != null ? byKey(state.selected) : null;
+    // keep the scroll position while the same view redraws (a filter, a
+    // reviewed mark); start at the top when the view changes, or a claim
+    // opened from far down the list shows its rationale and not its header
+    const view = sel ? 'claim:' + sel.key : 'tab:' + state.tab;
+    const top = view === asideView ? aside.scrollTop : 0;
+    asideView = view;
+    if (sel) aside.innerHTML = detailHtml(sel);
+    else {
+      const pane = { summary: summaryHtml, claims: claimsHtml, sources: sourcesHtml, gaps: gapsHtml, scout: scoutHtml }[state.tab]();
+      aside.innerHTML = tabsHtml() + `<div class="pane">${pane}</div>`;
+    }
+    aside.scrollTop = top;
+    // an evidence crop that is not beside the report says so, in its place
+    aside.querySelectorAll('.cropbtn img').forEach(img => img.addEventListener('error', () => {
+      const btn = img.parentElement;
+      btn.innerHTML = `<span class="lost">evidence image not found beside this report: ${esc(img.dataset.path)}</span>`;
+      btn.style.cursor = 'default';
+      btn.removeAttribute('data-act');
+    }));
+  }
+
+  function renderLightbox() {
+    const lb = $('pt-lightbox');
+    if (!state.lightbox) { lb.hidden = true; lb.innerHTML = ''; return; }
+    lb.hidden = false;
+    lb.innerHTML = `<div class="lb" data-act="lightbox-close"><img src="${esc(state.lightbox.url)}" alt="${esc(state.lightbox.caption)}"><div class="cap">${esc(state.lightbox.caption)}</div></div>`;
+  }
+
+  function renderAll() {
+    renderHeader();
+    updateSegments();
+    renderAside();
+    renderLightbox();
+  }
+
+  // ---- interaction --------------------------------------------------------------
+
+  function headerHeight() { const h = $('pt-header'); return h ? h.getBoundingClientRect().height : 0; }
+
+  function scrollToClaim(key) {
+    const c = byKey(key);
+    const spanKey = c && c.anchor && c.anchor.shared ? c.anchor.shared : key;
+    const el = document.querySelector(`#pt-article [data-claim="${CSS.escape(String(spanKey))}"]`);
+    if (!el) return;
+    const hdr = headerHeight();
+    const se = document.scrollingElement || document.documentElement;
+    const target = el.getBoundingClientRect().top + se.scrollTop - hdr - Math.max(80, (window.innerHeight - hdr) * 0.3);
+    se.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  }
+
+  function scrollToBlock(id) {
+    const el = document.getElementById('blk-' + id);
+    if (!el) return;
+    const se = document.scrollingElement || document.documentElement;
+    se.scrollTo({ top: el.getBoundingClientRect().top + se.scrollTop - headerHeight() - 100, behavior: 'smooth' });
+  }
+
+  function select(key) {
+    state.selected = String(key);
+    state.exportOpen = false;
+    renderAll();
+    requestAnimationFrame(() => scrollToClaim(state.selected));
+  }
+
+  function step(d) {
+    const vis = visible();
+    if (!vis.length) return;
+    const i = vis.findIndex(c => c.key === String(state.selected));
+    const n = i < 0 ? (d > 0 ? 0 : vis.length - 1) : Math.min(vis.length - 1, Math.max(0, i + d));
+    select(vis[n].key);
+  }
+
+  function toggleReviewed(key) {
+    const reviewed = { ...state.reviewed };
+    if (reviewed[key]) delete reviewed[key]; else reviewed[key] = new Date().toISOString();
+    state.reviewed = reviewed;
+    try { localStorage.setItem('papertrace:reviewed:' + data.caseId, JSON.stringify(reviewed)); } catch (e) { /* not persisted; the page still shows it */ }
+    renderAll();
+  }
+
+  function toggleTheme() {
+    state.theme = state.theme === 'dark' ? 'light' : 'dark';
+    document.body.dataset.theme = state.theme;
+    try { localStorage.setItem('papertrace:theme', state.theme); } catch (e) { /* not persisted */ }
+    renderHeader();
+  }
+
+  function download(name, text, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function onChip(v, e) {
+    const s = new Set(state.verdicts);
+    if (e.shiftKey || e.metaKey || e.ctrlKey) { if (s.has(v)) s.delete(v); else s.add(v); }
+    else if (allOn() || !(s.size === 1 && s.has(v))) { s.clear(); s.add(v); }
+    else PT.ALL_KEYS.forEach(x => s.add(x));
+    state.verdicts = s;
+    renderAll();
+  }
+
+  function act(el, e) {
+    const a = el.dataset.act;
+    switch (a) {
+      case 'select': select(el.dataset.key); break;
+      case 'seg': {
+        const keys = el.dataset.claims.split(',');
+        const vis = new Set(visible().map(c => c.key));
+        const cur = String(state.selected);
+        const next = keys.includes(cur) && keys.length > 1 ? keys[(keys.indexOf(cur) + 1) % keys.length] : (keys.find(k => vis.has(k)) || keys[0]);
+        select(next);
+        break;
+      }
+      case 'chip': onChip(el.dataset.v, e); break;
+      case 'all': state.verdicts = new Set(PT.ALL_KEYS); renderAll(); break;
+      case 'tab': state.tab = el.dataset.tab; renderAll(); break;
+      case 'card': state.verdicts = new Set([el.dataset.v]); state.tab = 'claims'; renderAll(); break;
+      case 'cell-para': scrollToBlock(el.dataset.block); break;
+      case 'back': state.selected = null; renderAll(); break;
+      case 'prev': step(-1); break;
+      case 'next': step(1); break;
+      case 'jump': if (state.selected != null) scrollToClaim(state.selected); break;
+      case 'theme': toggleTheme(); break;
+      case 'export-toggle': state.exportOpen = !state.exportOpen; renderHeader(); break;
+      case 'export-md': state.exportOpen = false; renderHeader(); download('report.md', PT.markdownReport(data, state.reviewed), 'text/markdown'); break;
+      case 'export-pdf': state.exportOpen = false; renderHeader(); setTimeout(() => window.print(), 100); break;
+      case 'export-json': state.exportOpen = false; renderHeader(); download('review.json', JSON.stringify({ case_id: data.caseId, reviewed: state.reviewed }, null, 2), 'application/json'); break;
+      case 'lightbox': state.lightbox = { url: el.dataset.src, caption: el.dataset.cap }; renderLightbox(); break;
+      case 'lightbox-close': state.lightbox = null; renderLightbox(); break;
+      case 'start-review': {
+        const vis = visible();
+        const first = vis.find(c => !state.reviewed[c.key]) || vis[0];
+        if (first) select(first.key);
+        break;
+      }
+      case 'go-verified': state.verdicts = new Set(REVIEW_ORDER); state.tab = 'claims'; renderAll(); break;
+      default: return false;
+    }
+    return true;
+  }
+
+  function bind() {
+    document.addEventListener('click', e => {
+      const el = e.target.closest('[data-act]');
+      if (!el) { if (state.exportOpen && !e.target.closest('.export-wrap')) { state.exportOpen = false; renderHeader(); } return; }
+      if (el.dataset.act === 'reviewed') return; // handled on change
+      if (act(el, e)) e.preventDefault();
+    });
+    document.addEventListener('change', e => {
+      const el = e.target;
+      if (el.dataset.act === 'reviewed' && state.selected != null) toggleReviewed(state.selected);
+      else if (el.id === 'pt-section') { state.section = el.value; renderAll(); }
+    });
+    $('pt-search').addEventListener('input', e => { state.query = e.target.value; renderAll(); });
+    window.addEventListener('keydown', e => {
+      const tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'select' || tag === 'textarea') { if (e.key === 'Escape') e.target.blur(); return; }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === '/') { e.preventDefault(); $('pt-search').focus(); }
+      else if (e.key === 'j') step(1);
+      else if (e.key === 'k') step(-1);
+      else if (e.key === 'r' && state.selected != null) toggleReviewed(state.selected);
+      else if (e.key === 't') toggleTheme();
+      else if (e.key === 'Escape') {
+        if (state.lightbox) { state.lightbox = null; renderLightbox(); }
+        else { state.selected = null; state.exportOpen = false; renderAll(); }
+      }
+    });
+    // the panel's sticky offset is the header's measured height: the chip
+    // row wraps at narrow widths, so it is not a constant
+    const measure = () => document.body.style.setProperty('--hdr', Math.round(headerHeight()) + 'px');
+    if (window.ResizeObserver) new ResizeObserver(measure).observe($('pt-header'));
+    window.addEventListener('resize', measure);
+    measure();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load);
+  else load();
+})();
+</script>
+</body>
+</html>

@@ -918,8 +918,14 @@ class RunResults:
                 out.setdefault(key, []).append(c)
         return out
 
-    def to_json(self, path: Path) -> None:
-        payload = {
+    def to_dict(self) -> dict:
+        """The `results.json` payload — the one wire format, whoever consumes it.
+
+        Split from `to_json` so the viewer can embed exactly what the file
+        holds: a second serialisation written for the page would be a second
+        contract to keep in step with `schemas/results.schema.json`.
+        """
+        return {
             "manuscript": self.manuscript,
             "checker": self.checker,
             "date": self.date,
@@ -933,7 +939,9 @@ class RunResults:
             "coverage": self.coverage,
             "truncated": self.truncated,
         }
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+    def to_json(self, path: Path) -> None:
+        path.write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=False))
 
     @classmethod
     def from_json(cls, path: Path) -> RunResults:
@@ -1010,8 +1018,9 @@ class ScoutResults:
     same_year: list[ScoutHit] = field(default_factory=list)
     error: str = ""
 
-    def to_json(self, path: Path) -> None:
-        payload = {
+    def to_dict(self) -> dict:
+        """The `scout.json` payload, for the file and for the viewer alike."""
+        return {
             "paper": {
                 "title": self.paper_title,
                 "doi": self.paper_doi,
@@ -1031,7 +1040,9 @@ class ScoutResults:
             "same_year": [asdict(h) for h in self.same_year],
             "error": self.error,
         }
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+    def to_json(self, path: Path) -> None:
+        path.write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=False))
 
     @classmethod
     def from_json(cls, path: Path) -> ScoutResults:

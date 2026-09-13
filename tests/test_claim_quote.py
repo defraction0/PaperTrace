@@ -121,7 +121,7 @@ def test_a_0_4_x_results_file_without_a_quote_still_loads(tmp_path):
 # --- it reaches the reader ------------------------------------------------
 
 
-def test_the_quote_reaches_all_three_formats(tmp_path):
+def test_the_quote_reaches_every_format(tmp_path):
     from papertrace.report import write_reports
 
     quote = "Mortality fell by 12% in the subgroup over 65 (HR 0.88)."
@@ -254,7 +254,7 @@ def test_an_unretrieved_claim_is_not_nagged_about_a_missing_quote():
 # --- how the SOURCES were read, disclosed where verdicts are read ---------
 
 
-def test_a_flat_read_source_is_named_in_all_three_formats(tmp_path):
+def test_a_flat_read_source_is_named_in_every_format(tmp_path):
     """`RunResults.converter` is the *manuscript's* backend, and the terminal
     line was the only place that said anything about the sources. Now that a
     source can be read either way, a verdict resting on a linearized table has

@@ -6,6 +6,86 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ## [0.6.0] — unreleased
 
+### Added — an interactive report viewer: `--format viewer`
+
+`report_viewer.html` is a fourth look on the same `results.json`, and the
+first one built for *reviewing* rather than reading: the processed manuscript
+on the left with every audited sentence underlined in its verdict's colour,
+and on the right — for whichever sentence is selected — the cropped source page
+with its red boxes, the checker's rationale and the caveats. Summary cards, a
+claim map (one box per audited claim in reading order, grouped by section),
+per-source and gap registers, the scout's candidates, verdict/section/text
+filters, keyboard navigation (`j`/`k`/`r`/`/`), a reviewed checkbox per claim
+that persists in the browser, and export (markdown regenerated with the
+reviewed marks, print, a review checklist as JSON) live in the right column.
+
+It works offline. `results.json`, `annotated.md`, `scout.json`, the retrieval
+manifest and every disclosure are embedded in the page — escaped for a script
+context, so a cited source's text cannot end the element it sits in — the two
+scripts are inlined, and the fonts ride in `assets/` beside it. Nothing is
+fetched when it is opened: a report on an unpublished manuscript must not phone
+a font host.
+
+The manuscript is `ingest/manuscript/annotated.md`, whose block markers let
+each audited sentence be placed by text search. A claim's `ctx_ids` name the
+block the extractor read it from, and that block is searched first, so a
+sentence the paper repeats lands where it was cited and not on the first
+paragraph that happens to carry it. What cannot be placed is counted as such —
+*"125 of 137 audited sentences located in the text"* — and the claim's panel
+says *quote not located in the processed manuscript text*; there is no
+nearest-sentence fallback. A case folder with no `annotated.md` still opens:
+the page builds a skeleton from the audited sentences and says on its face
+that the full manuscript is not shown.
+
+Disclosures are decided in Python and travel with the data, never re-derived
+in the browser. The page renders every one — run-level in the Summary tab,
+claim-level in the claim's caveats, the anchor state as each crop set's single
+caption (the red box may sit in any crop of a passage that crosses a break, so
+no crop is captioned on its own) — and the parity suite now asserts each token
+in four formats rather than three. The manifest is embedded without
+`pdf_path`: the viewer is the one report meant to be sent to someone else, and
+the absolute paths of the auditor's PDFs are not part of the audit.
+
+`--png` does not screenshot it — a sticky header over a panel that scrolls on
+its own records nothing as a static image — and does not imply it. The
+browser-side logic is a DOM-free module, `templates/viewer_logic.js`, run
+under node by `tests/test_report_viewer_js.py` (which skips, visibly, when
+node is not on PATH); `templates/viewer_app.js` only draws.
+
+Reachable from every way in. Batch: `-f viewer` on `run` or `report`. The
+guided wizard asks *"Also write the interactive viewer beside report.md?"*,
+default yes, and the one-line command it prints for next time carries the
+answer. The `/review` skill writes it in its outputs step and hands over the
+path. `run` closes by naming the page to open. The README has a section on it
+with two screenshots, produced by `scripts/make_viewer_shots.py` from a real
+case rather than drawn — the demo's own, since the showcase has now been
+re-run and `examples/demo/output/report_viewer.html` is committed beside
+`report.md`. Its `assets/` is not: the fonts are already package data, and the
+page falls through to Georgia without them.
+
+### Changed — the mark: a trace from the claim into the boxed evidence
+
+PaperTrace has a mark. A dot sits on a line of the paper, routes like a
+circuit trace, and lands in a red box around the evidence — the same red as
+the evidence boxes in every report. It replaces the pixel-art page and
+magnifier in three places: the viewer's header and favicon (inlined, so the
+page still touches no network), the README lockup (a light and a dark variant,
+chosen by the reader's colour scheme), and the terminal banner that
+`papertrace`, `run`, `init` and the guided wizard print — the wizard opened
+with a bare title before. The banner lives in `brand.py` now, one module for
+the CLI and the wizard.
+
+The vectors ship as package data in `templates/brand/`, verbatim from the
+design hand-off with their content-credentials manifests intact; the viewer
+strips the manifest when inlining, since a signed block inside an HTML page
+verifies nothing and would add 8 KB to every report. `papertrace-logo-dark.svg`
+is derived here from the bare dark mark and the lockup's wordmark, because the
+ink wordmark of the light lockup is unreadable on a dark page.
+
+Not touched: `docs/social_preview.png` and `docs/hero.png` still show the old
+logo; the social preview is regenerated by hand from `assets/logo.png`
+(`scripts/make_social_preview.py`), which stays for that reason.
+
 ### Added — a provided PDF is identified by what is in it
 
 `--provided` matched on the **filename** and nothing said so. It needs the

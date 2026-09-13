@@ -94,7 +94,8 @@ def test_crop_and_reports(fixture_pdf, tmp_path):
     ])
     paths = write_reports(results, manifest, out, png=False)
     names = {p.name for p in paths}
-    assert names == {"report.md", "report_editor.html", "report_terminal.html"}
+    assert names == {"report.md", "report_editor.html", "report_terminal.html",
+                     "report_viewer.html"}
 
     md = (out / "report.md").read_text()
     assert "⊘ **Not retrieved:** 1" in md

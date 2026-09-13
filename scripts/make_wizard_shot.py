@@ -40,7 +40,14 @@ FONTS = ROOT / "src" / "papertrace" / "templates" / "assets"
 BODY = """
 <div class="cmd"><span class="pr">❯</span> <span class="tool">papertrace</span></div>
 
-<div class="ln"><b class="white">PaperTrace</b> <span class="dim">· guided audit</span></div>
+<div class="ln"><b class="white">  ┌──────────────────────────────────┐</b></div>
+<div class="ln"><b class="white">  │  ━━━ <span class="red">●─┐</span>                         │</b></div>
+<div class="ln"><b class="white">  │  <span class="dim">━━</span>    <span class="red">└─┐</span>   PaperTrace          │</b></div>
+<div class="ln"><b class="white">  │  <span class="dim">━</span>  <span class="red">┌────┴┐</span>  claims traced back  │</b></div>
+<div class="ln"><b class="white">  │     <span class="red">│</span> ━━  <span class="red">│</span>  to their sources    │</b></div>
+<div class="ln"><b class="white">  │     <span class="red">└─────┘</span>                      │</b></div>
+<div class="ln"><b class="white">  └──────────────────────────────────┘</b></div>
+<div class="ln"><span class="dim">guided audit — one question at a time</span></div>
 <div class="sp"></div>
 <div class="ln"><b class="white">Checking your setup</b></div>
 <div class="ln">  <span class="green">✓</span> claude CLI <span class="dim">(the checker runs on `claude -p`)</span></div>
@@ -63,6 +70,8 @@ BODY = """
 <div class="ln">  email: <span class="cyan">you@example.org</span></div>
 <div class="ln">  Remember it for next time? <span class="dim">[y/n] (y):</span> <span class="dimmer">⏎</span></div>
 <div class="sp"></div>
+<div class="ln">  Also write the interactive viewer (report_viewer.html) beside report.md? <span class="dim">[y/n] (y):</span> <span class="dimmer">⏎</span></div>
+<div class="sp"></div>
 <div class="ln"><b class="white">Ready.</b></div>
 <div class="ln">  This makes live requests to Crossref, Unpaywall and Europe PMC, and up to</div>
 <div class="ln">  <b class="white">25</b> model calls through `claude -p`.</div>
@@ -73,7 +82,7 @@ BODY = """
 <div class="sp"></div>
 <div class="ln"><span class="dimmer">Same thing as one command, for next time:</span></div>
 <div class="ln">  <span class="cyan">papertrace run ~/Downloads/s00330-026-12773-4.pdf \\</span></div>
-<div class="ln">  <span class="cyan">  -c s00330-026-12773-4 --doi 10.1007/s00330-026-12773-4</span></div>
+<div class="ln">  <span class="cyan">  -c s00330-026-12773-4 --doi 10.1007/s00330-026-12773-4 -f viewer</span></div>
 """
 
 HTML = """<!doctype html><meta charset="utf-8"><style>
@@ -82,6 +91,7 @@ HTML = """<!doctype html><meta charset="utf-8"><style>
   :root {{
     --bg:#0d1117; --bar:#161b22; --edge:#30363d; --fg:#c9d1d9; --dim:#6e7681; --dimmer:#484f58;
     --green:#3fb950; --amber:#d29922; --cyan:#39c5cf; --mag:#bc8cff; --white:#f0f6fc;
+    --red:#f85149;
   }}
   * {{ box-sizing:border-box; margin:0; }}
   html,body {{ background:#010409; }}
@@ -104,6 +114,7 @@ HTML = """<!doctype html><meta charset="utf-8"><style>
   .green {{ color:var(--green); }} .amber {{ color:var(--amber); }}
   .cyan {{ color:var(--cyan); }} .dim {{ color:var(--dim); }}
   .dimmer {{ color:var(--dimmer); }} .white {{ color:var(--white); }}
+  .red {{ color:var(--red); }}
 </style>
 <div class="term">
   <div class="bar">

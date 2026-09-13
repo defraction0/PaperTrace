@@ -338,7 +338,7 @@ def test_markup_entities_in_a_title_are_decoded(tmp_path):
     assert "CTV<sub>boost</sub>" in titles
 
 
-def test_the_same_year_register_reaches_all_three_report_formats(tmp_path):
+def test_the_same_year_register_reaches_every_report_format(tmp_path):
     """A register the reader of one format cannot see is a register that does
     not exist for them — the same rule the disclosure parity test enforces."""
     from papertrace.models import RunResults, ScoutHit, ScoutResults

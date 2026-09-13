@@ -179,23 +179,30 @@ def _rendered(tmp_path: Path, **kw) -> dict[str, str]:
     return {p.name: p.read_text() for p in tmp_path.glob("report*.*")}
 
 
-def test_every_continuation_image_reaches_all_three_formats(tmp_path):
+def test_every_continuation_image_reaches_every_format(tmp_path):
     """Emitting them is half the job — the user asked for them in the report.
     A crop written to disk and referenced by no format is invisible."""
     conts = ["evidence/claim_01_a-2020_p1_cont2.png",
              "evidence/claim_01_a-2020_p2_cont3.png"]
     rendered = _rendered(tmp_path, continuation_images=conts)
-    assert len(rendered) == 3, sorted(rendered)
+    assert len(rendered) == 4, sorted(rendered)
     for name, body in rendered.items():
         for img in conts:
             assert img in body, f"{name} does not reference {img}"
 
 
+# The three looks below caption their crops in the template, so the sentence
+# can be read off the file. The viewer captions them at render time from the
+# same data — its dividers and captions are pinned in
+# tests/test_report_viewer_js.py::test_crops_caption_the_set_once_and_say_where_each_continues
+STATIC = ("report.md", "report_editor.html", "report_terminal.html")
+
+
 def test_the_reader_is_told_the_passage_crosses_a_break(tmp_path):
     """Three unexplained images of one source would read as three passages."""
     rendered = _rendered(tmp_path, continuation_images=["evidence/a_cont2.png"])
-    for name, body in rendered.items():
-        assert "crosses a column or page break" in body, name
+    for name in STATIC:
+        assert "crosses a column or page break" in rendered[name], name
 
 
 def test_the_opening_image_never_claims_a_box_it_may_not_have(tmp_path):
@@ -225,9 +232,9 @@ def test_no_caption_claims_the_box_is_on_the_page_the_verdict_names(tmp_path):
 def test_an_ordinary_single_image_judgement_gains_no_caption(tmp_path):
     """The 193-of-205 case must not grow a sentence about a break it has not."""
     rendered = _rendered(tmp_path, continuation_images=[])
-    for name, body in rendered.items():
-        assert "crosses a column or page break" not in body, name
-        assert "_cont" not in body, name
+    for name in STATIC:
+        assert "crosses a column or page break" not in rendered[name], name
+        assert "_cont" not in rendered[name], name
 
 
 def test_continuation_images_round_trip_and_older_results_still_load(tmp_path):

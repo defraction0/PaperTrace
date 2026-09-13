@@ -1,8 +1,9 @@
-"""Every disclosure reaches every reader — in all three report formats.
+"""Every disclosure reaches every reader — in every report format.
 
-The three formats phrase each disclosure at their own length, so the contract
-is the `token`: a short literal from `papertrace.disclosures` that must appear
-verbatim in the markdown, the editor HTML and the terminal HTML. Asserting the
+The formats phrase each disclosure at their own length, so the contract is the
+`token`: a short literal from `papertrace.disclosures` that must appear
+verbatim in the markdown, the editor HTML, the terminal HTML and the viewer's
+embedded data (which the page renders, never re-derives). Asserting the
 token turns "no format silently drops a disclosure" into a loop instead of a
 hand-maintained checklist — which is exactly what was missing when the editor
 report shipped with zero mentions of `unjudged_refs`.
@@ -23,7 +24,9 @@ from papertrace.disclosures import (  # noqa: E402
 from papertrace.models import ClaimResult, RunResults  # noqa: E402
 from papertrace.report import write_reports  # noqa: E402
 
-FORMATS = ("report.md", "report_editor.html", "report_terminal.html")
+# four, since the interactive viewer: a disclosure the browser page cannot
+# render is a disclosure one reader in four never sees
+FORMATS = ("report.md", "report_editor.html", "report_terminal.html", "report_viewer.html")
 
 
 def _render(results: RunResults, out: Path) -> dict[str, str]:
@@ -72,7 +75,7 @@ def _claim(**kw) -> ClaimResult:
         },
     },
 ])
-def test_every_run_disclosure_appears_in_all_three_formats(tmp_path, coverage):
+def test_every_run_disclosure_appears_in_every_format(tmp_path, coverage):
     results = RunResults(
         manuscript="m.pdf",
         converter="pymupdf",
@@ -90,7 +93,7 @@ def test_every_run_disclosure_appears_in_all_three_formats(tmp_path, coverage):
 
 
 @pytest.mark.parametrize("anchor_located", [True, False, None])
-def test_every_claim_disclosure_appears_in_all_three_formats(tmp_path, anchor_located):
+def test_every_claim_disclosure_appears_in_every_format(tmp_path, anchor_located):
     claim = _claim(
         unjudged_refs=["7", "9"],
         evidence_image="evidence/claim_01.png",
@@ -174,7 +177,7 @@ def _manifest_with(*title_checks: str):
     ("mismatch",),
     ("verified", "unverifiable"),
 ])
-def test_an_unverified_source_identity_is_disclosed_in_all_three_formats(tmp_path, checks):
+def test_an_unverified_source_identity_is_disclosed_in_every_format(tmp_path, checks):
     """The retrieval manifest is rendered only in `report.md.j2`, so a source
     whose identity nobody confirmed was invisible to editor and terminal
     readers. The token has to travel like every other disclosure.
@@ -233,7 +236,7 @@ def test_the_terminal_template_names_every_disclosure_key_that_exists():
 # --- a reference list read across a section break says so ------------------
 
 
-def test_a_resumed_reference_list_is_disclosed_in_all_three_formats(tmp_path):
+def test_a_resumed_reference_list_is_disclosed_in_every_format(tmp_path):
     """Crossing a section boundary to finish the bibliography is a guess, and
     the numbering of the later entries depends on it. The previous behaviour —
     stopping at the first heading — failed the other way and failed silently:
@@ -334,7 +337,7 @@ def _gap_claim() -> ClaimResult:
     return claim
 
 
-def test_a_gap_claims_disclosures_reach_all_three_formats(tmp_path):
+def test_a_gap_claims_disclosures_reach_every_format(tmp_path):
     claim = _gap_claim()
     results = RunResults(manuscript="m.pdf", claims=[claim])
     rendered = _render(results, tmp_path)

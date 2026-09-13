@@ -662,3 +662,41 @@ def test_the_wizard_passes_run_every_parameter_run_declares():
         f"run_wizard's call to cli.run omits {sorted(missing)} — Typer will "
         "supply an OptionInfo sentinel for each, not the documented default"
     )
+
+
+# --- the viewer is offered, and the replay command carries the answer --------
+
+
+def test_the_equivalent_command_names_the_viewer_when_it_was_asked_for():
+    """The wizard's printed line must reproduce the run, viewer included — a
+    replay that silently drops the page the user reviewed in is not a replay."""
+    import shlex
+
+    cmd = wizard.equivalent_command(
+        manuscript=Path("/tmp/paper.pdf"), case=Path("c"), doi=None, png=False,
+        with_scout=False, provided=None, formats=["viewer"],
+    )
+    argv = shlex.split(cmd)
+    assert argv[argv.index("-f") + 1] == "viewer"
+
+    plain = wizard.equivalent_command(
+        manuscript=Path("/tmp/paper.pdf"), case=Path("c"), doi=None, png=False,
+        with_scout=False, provided=None,
+    )
+    assert "-f" not in shlex.split(plain), "no formats asked for, none printed"
+
+
+def test_the_wizard_offers_the_viewer_and_forwards_the_answer():
+    """One question, default yes: the flag is the one thing a newcomer would
+    not know to ask for, and the wizard exists for newcomers. The answer has to
+    reach both `run` and the replay command, or the two stop meaning the same."""
+    import inspect
+
+    src = inspect.getsource(wizard.run_wizard)
+    assert "report_viewer.html" in src, "the viewer is never offered"
+    run_call = src[src.index("run_cmd("):]
+    run_call = run_call[: run_call.index(")\n")]
+    assert "formats=formats" in run_call
+    cmd_call = src[src.index("equivalent_command("):]
+    cmd_call = cmd_call[: cmd_call.index(")\n")]
+    assert "formats=formats" in cmd_call
