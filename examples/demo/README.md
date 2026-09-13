@@ -1,10 +1,22 @@
 # Demo: a fictional paper with planted citation errors
 
 > **The finished result is committed** — read
-> [`output/report.md`](output/report.md) (with its evidence crops) or view
-> [`output/report_terminal.png`](output/report_terminal.png) without running
-> anything. The steps below reproduce it, and add the interactive viewer
-> (`report_viewer.html`), which the committed output predates.
+> [`output/report.md`](output/report.md) (with its evidence crops), view
+> [`output/report_terminal.png`](output/report_terminal.png), or work through
+> [`output/report_viewer.html`](output/report_viewer.html) without running
+> anything. The steps below reproduce all three.
+>
+> Two things about the committed viewer. **GitHub serves an `.html` file as
+> source text**, so the link above shows you the markup — clone or download the
+> repo and open the file from disk to actually use it. And its fonts are
+> deliberately absent: `assets/` is **not** committed here, because those two
+> typefaces already ship as package data in
+> `src/papertrace/templates/assets/` and committing them again would add
+> ~420 KB to every clone. A real run writes `assets/` beside the page; without
+> it the CSS falls through to Georgia and nothing else changes — the browser
+> logs two `ERR_FILE_NOT_FOUND` lines for the absent fonts, and those two are
+> the only console output the committed page produces (a complete run produces
+> none). Do not "fix" this by copying the folder in.
 
 The paper is invented and clearly watermarked as such — a one-page fictional
 mini-review whose references are **real, published papers**. The errors are

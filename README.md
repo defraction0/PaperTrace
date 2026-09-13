@@ -509,7 +509,7 @@ write it, and the `/review` skill writes it at the end), then open
 a plain file — no server, no network, nothing to install.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/viewer_summary.png" width="85%" alt="The interactive viewer: on the left the audited paper with each cited sentence underlined in its verdict's colour, on the right the summary tab with six verdict counts, a claim map of one coloured box per audited claim grouped by section, and the review progress bar; verdict chips and a section filter in the header.">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/viewer_summary.png" width="85%" alt="The interactive viewer: on the left the audited paper with each cited sentence underlined in its verdict's colour, on the right the summary tab with a count card per verdict the run produced — supported, contradicted, not retrieved, no citation — a claim map of one coloured box per audited claim grouped by section, and the review progress bar; verdict chips and a section filter in the header.">
 </p>
 
 **Left, the paper.** The manuscript as ingested, with every audited sentence
@@ -674,14 +674,15 @@ Details per plant:
 [`examples/demo/`](examples/demo/).
 
 > **Note:** the committed `examples/demo/output/` is the output of a real run
-> (2026-08-30, docling 2.118.1) and matches what the current code produces,
-> except that it predates the viewer: it holds `report.md` and the terminal
-> look, and the command above adds `report_viewer.html` beside them. It
+> (2026-09-13, docling 2.118.1) and matches what the current code produces:
+> `report.md`, the terminal look and `report_viewer.html`, with the evidence
+> crops beside them. The viewer's fonts are not committed with it — see
+> [`examples/demo/`](examples/demo/) for why, and for how to open the page. It
 > stays an inspectable artefact, not a byte-exact expected output: judgement
 > wording differs between runs, and so can the page an anchor is found on — the
 > crop for claim 4 moved from page 1 to page 2 across two runs that reached the
 > same verdict. Whether a claim cites more than one reference varies too: in
-> the committed 0.5.0 run the sentence citing [2] and [3] is a single
+> the committed run the sentence citing [2] and [3] is a single
 > multi-source claim, so the per-source breakdown and the `most adverse of 2
 > cited sources` qualifier both appear; under 0.4.1 the same sentence became
 > two single-source claims and neither did.
@@ -812,8 +813,6 @@ only because the social preview is generated from it.
 - [ ] Viewer: a single-file export with the evidence crops embedded, so an
       audit can be sent as one HTML file instead of the `out/` folder
 - [ ] Viewer: notes per claim, exported alongside the reviewed checklist
-- [ ] Viewer in the committed demo showcase — `examples/demo/output/` predates
-      it and needs a live re-run to gain `report_viewer.html`
 - [ ] Retraction & correction flags on cited references
 - [ ] More citation styles in the coverage audit — author-year, parenthetical
       numerics and bare superscripts (as in Nature-family journals). The

@@ -58,8 +58,10 @@ default yes, and the one-line command it prints for next time carries the
 answer. The `/review` skill writes it in its outputs step and hands over the
 path. `run` closes by naming the page to open. The README has a section on it
 with two screenshots, produced by `scripts/make_viewer_shots.py` from a real
-case rather than drawn; the committed demo showcase predates the viewer and
-says so until it is re-run with `-f viewer`.
+case rather than drawn — the demo's own, since the showcase has now been
+re-run and `examples/demo/output/report_viewer.html` is committed beside
+`report.md`. Its `assets/` is not: the fonts are already package data, and the
+page falls through to Georgia without them.
 
 ### Changed — the mark: a trace from the claim into the boxed evidence
 
