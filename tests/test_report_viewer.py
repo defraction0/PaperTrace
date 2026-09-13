@@ -269,3 +269,25 @@ def test_a_mistyped_viewer_flag_is_still_refused(tmp_path):
     with pytest.raises(typer.Exit) as exc:
         cli._report_pipeline(case=case, formats=["viewr"])
     assert exc.value.exit_code == 2
+
+
+# --- the documentation names it, and its pictures exist ----------------------
+
+
+def test_every_surface_that_offers_the_viewer_is_documented():
+    """The README is a correctness surface: each way in has to be written down,
+    and each screenshot it embeds has to be a file in the repo — a raw URL to a
+    missing PNG renders as nothing, silently."""
+    root = Path(__file__).resolve().parent.parent
+    readme = (root / "README.md").read_text()
+    assert "-f viewer" in readme
+    assert "report_viewer.html" in readme
+    for shot in re.findall(r"docs/(viewer_[\w-]+\.png)", readme):
+        assert (root / "docs" / shot).exists(), f"README embeds docs/{shot}, which is missing"
+    assert re.findall(r"docs/viewer_[\w-]+\.png", readme), "the viewer section has no picture"
+
+    skill = (root / ".claude" / "skills" / "review" / "SKILL.md").read_text()
+    assert "-f viewer" in skill and "report_viewer.html" in skill
+
+    demo = (root / "examples" / "demo" / "README.md").read_text()
+    assert "-f viewer" in demo

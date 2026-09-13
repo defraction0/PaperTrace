@@ -312,10 +312,17 @@
     </div>`;
   }
 
+  let asideView = null; // which view the panel last drew: a claim key, or a tab name
+
   function renderAside() {
     const aside = $('pt-aside');
     const sel = state.selected != null ? byKey(state.selected) : null;
-    const top = aside.scrollTop;
+    // keep the scroll position while the same view redraws (a filter, a
+    // reviewed mark); start at the top when the view changes, or a claim
+    // opened from far down the list shows its rationale and not its header
+    const view = sel ? 'claim:' + sel.key : 'tab:' + state.tab;
+    const top = view === asideView ? aside.scrollTop : 0;
+    asideView = view;
     if (sel) aside.innerHTML = detailHtml(sel);
     else {
       const pane = { summary: summaryHtml, claims: claimsHtml, sources: sourcesHtml, gaps: gapsHtml, scout: scoutHtml }[state.tab]();

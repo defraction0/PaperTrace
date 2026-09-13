@@ -253,18 +253,20 @@ installs the checkout you are standing in.)*
 Nothing to memorise. It checks your setup first — so a missing `claude` CLI is
 a sentence before you type anything, not a traceback twenty minutes in — then
 asks one question at a time: the paper (drag the file in; quotes and escaped
-spaces are fine), where to keep the audit, whether the paper is published, and
-a contact email it offers to remember. Before spending anything it tells you
-how many model calls the run will make and asks you to confirm, and when you
-say yes it prints the equivalent one-line command so you can repeat or script
-it next time.
+spaces are fine), where to keep the audit, whether the paper is published, a
+contact email it offers to remember, and whether to write the [interactive
+viewer](#review-it-in-the-browser--the-interactive-viewer) beside the report
+(default yes). Before spending anything it tells you how many model calls the
+run will make and asks you to confirm, and when you say yes it prints the
+equivalent one-line command — `-f viewer` included — so you can repeat or
+script it next time. When the run finishes it names the page to open.
 
 `papertrace start` does the same thing explicitly. Without an interactive
 terminal — a pipe, a CI job — bare `papertrace` prints help instead of waiting
 on stdin.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, whether any cited PDFs are already to hand, whether the paper has supplementary material of its own, a DOI found on the first page offered for confirmation, a contact email it offers to remember — and finally the cost stated as a number of model calls before asking permission to start.">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, whether any cited PDFs are already to hand, whether the paper has supplementary material of its own, a DOI found on the first page offered for confirmation, a contact email it offers to remember, whether to write the interactive viewer — and finally the cost stated as a number of model calls before asking permission to start.">
 </p>
 
 ### Interactive — the `/review` skill (deepest mode)
@@ -283,7 +285,10 @@ The interactive audit interviews you: the paper's PDF, any reference PDFs you
 already have — and, if you are using it for peer review, screenshots of your
 journal's reviewer form, which it reads and answers question by question.
 Then it retrieves, checks, crops, and drafts, showing you evidence as it goes
-and batching its questions.
+and batching its questions. It ends by writing the [interactive
+viewer](#review-it-in-the-browser--the-interactive-viewer) beside the report
+and handing you its path, so the claims can be walked through with the
+evidence next to each one.
 
 ### Batch — one command, scriptable
 
@@ -292,6 +297,7 @@ git clone https://github.com/defraction0/PaperTrace && cd PaperTrace
 pip install -e ".[full]"        # standard install (see matrix below)
 export PAPERTRACE_EMAIL="you@example.org"     # Unpaywall asks for a contact
 papertrace run paper.pdf --provided ./my_pdfs      # case folder: ./paper/ beside the PDF
+papertrace run paper.pdf -f viewer                 # + the interactive viewer, see below
 ```
 
 Install options:
@@ -409,21 +415,13 @@ The same report also renders as a dark **editor-window** page, as a
 is the record and is always written.
 
 The viewer (`report_viewer.html`) is the one built for *reviewing* rather than
-reading: the processed manuscript on the left with every audited sentence
-underlined in its verdict's colour, and on the right — for whichever sentence
-you click — the cropped source page with its red boxes, the checker's rationale
-and the caveats. Verdict, section and text filters, a claim map, per-source and
-gap registers, the scout's candidates, keyboard navigation (`j`/`k`/`r`/`/`),
-a reviewed checkbox per claim that stays in your browser, and export (markdown
-with your reviewed marks, print, a review checklist as JSON) live in the right
-column. The manuscript comes from `ingest/manuscript/annotated.md`; a case
-folder without it still opens, with the audited sentences alone and a line
-saying so. The page embeds its data and fonts and never touches the network.
-It is not a screenshot target.
-
-The editor and terminal looks are for sharing and for screenshots. Want
-shareable PNG images of them? Add `--png`, which renders the HTML it needs
-whether or not you asked for it (one-time setup: `playwright install chromium`).
+reading — the manuscript with every audited sentence underlined, and the
+evidence beside whichever one you click. It has [its own section
+below](#review-it-in-the-browser--the-interactive-viewer). The editor and
+terminal looks are for sharing and for screenshots. Want shareable PNG images
+of those two? Add `--png`, which renders the HTML it needs whether or not you
+asked for it (one-time setup: `playwright install chromium`); the viewer is
+not a screenshot target.
 
 **`--doi` is the DOI of the paper you are auditing** — not of anything it
 cites. It is optional, it defaults to the DOI printed on the paper's own first
@@ -502,6 +500,88 @@ accusations.
   <a href="https://github.com/defraction0/PaperTrace/blob/main/docs/real_audit_terminal.png"><img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/real_audit_terminal.png" width="80%" alt="Excerpt of a real audit of a published paper: three checked claims, each shown with the actual page of its cited source and the matched text boxed in red — a Methods claim its own cited source describes differently, a supported claim, and a two-reference claim split into its checked and unretrieved halves"></a>
 </p>
 
+## Review it in the browser — the interactive viewer
+
+`report.md` is the record of an audit; `report_viewer.html` is where you work
+through one. Ask for it with `-f viewer` (the guided flow asks whether to
+write it, and the `/review` skill writes it at the end), then open
+`<case>/out/report_viewer.html` in any browser. It is one page that runs from
+a plain file — no server, no network, nothing to install.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/viewer_summary.png" width="85%" alt="The interactive viewer: on the left the audited paper with each cited sentence underlined in its verdict's colour, on the right the summary tab with six verdict counts, a claim map of one coloured box per audited claim grouped by section, and the review progress bar; verdict chips and a section filter in the header.">
+</p>
+
+**Left, the paper.** The manuscript as ingested, with every audited sentence
+underlined in its verdict's colour — solid for a verdict, dotted where the
+source could not be retrieved or the check failed, dashed for an assertion
+carrying no citation. Headings carry their page number, tables fold away,
+figures show their caption. Click a sentence and its evidence opens on the
+right. Several claims can share one sentence, one per cited reference;
+clicking again cycles through them.
+
+**Right, the evidence.** For the selected claim: the verdict, the claim as
+extracted and the paper's own sentence, then one card per cited document with
+the source's page crop — the matched text boxed in red, and a passage that
+crosses a column or page break shown as consecutive crops with *continues on
+p.4 →* between them, captioned once for the set because the box may sit in any
+of them — the anchor phrases, the checker's rationale, and the caveats the
+other reports carry: a co-cited source that was never obtained, a reference
+numbering nobody confirmed, an anchor that could not be boxed. Click a crop to
+enlarge it.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/viewer_detail.png" width="85%" alt="A selected claim: the sentence highlighted in the manuscript, and beside it the verdict badge, the extracted claim, the quoted sentence, a reviewed checkbox, and a source card showing the cited paper's page crop with the matched text boxed in red, the anchor phrases as chips and the checker's rationale.">
+</p>
+
+Before a claim is selected the panel holds five tabs. **Summary**: the verdict
+counts as cards, a claim map with one box per audited claim in reading order
+grouped by section (a grey box is a paragraph with nothing flagged, a ✓ a claim
+you have ticked off), review progress, and every run-level disclosure the
+other reports print — the ingest backend, truncated input, citation coverage,
+a reference numbering that could not be confirmed, a source whose identity was
+never confirmed. **Claims**: the list under the current filters. **Sources**:
+each retrieved document with the claims judged against it, then the references
+that could not be retrieved, with the reason. **Gaps**: what could not be
+checked, grouped by reason. **Scout**: the published-since, existed-but-uncited
+and same-year candidates, when the scout ran.
+
+**Filters and keys.** The verdict chips in the header show one verdict at a
+time (shift-click to combine), the section select narrows to one section, and
+the search box reads claim text, quotes, locations, `[labels]`, source slugs
+and rationales; everything filtered out fades in the manuscript. `j`/`k` step
+through the visible claims, `r` marks one reviewed, `/` focuses the search,
+`t` switches between light and dark, `Esc` goes back.
+
+**Your review, kept.** Every claim has a *Mark as reviewed* checkbox. The
+checkmarks are saved in your browser, per case, and shown as ✓ in the claim
+map; the Export menu hands them back — the report as markdown with your
+reviewed marks, the page printed to PDF, or the checklist as JSON.
+
+**What it shows is what the run wrote.** The page embeds `results.json` as it
+is — the same file the other three reports render — with the ingested
+manuscript, `scout.json`, the retrieval manifest (minus local file paths) and
+every disclosure, decided in Python and carried along rather than re-derived in
+the browser. A caveat printed in `report.md` is the same caveat here; the
+parity test that keeps the three static reports honest now covers the viewer
+too.
+
+**When something is missing, it says so.** A case folder without
+`ingest/manuscript/annotated.md` still opens, as a skeleton of the audited
+sentences with a line saying the full manuscript is not shown. A sentence the
+page cannot place in the text is counted — the line under the title reads
+*N of M audited sentences located in the text* — and marked in its panel; it
+is never snapped to the nearest sentence. Where a claim was extracted from a
+known block the page searches that block first, so a sentence the paper repeats
+lands where it was cited. An evidence crop that did not travel with the report
+is replaced by a line naming the missing file, and the Scout tab says so when
+the scout did not run.
+
+To hand an audit to a colleague, send the `out/` folder: the page loads its
+evidence crops from `out/evidence/` and its fonts from `out/assets/`. Their
+reviewed checkmarks live in their browser, not in the file. The screenshots
+above are taken by `python scripts/make_viewer_shots.py <case>/out/report_viewer.html`.
+
 ## Tables and figures are evidence too
 
 A number in a table cell is in the PDF's text layer, and so is text drawn
@@ -572,10 +652,12 @@ pip install -e ".[full]" && playwright install chromium   # 1 · install
 export PAPERTRACE_EMAIL="you@example.org"                 # 2 · Unpaywall contact
 python examples/demo/make_manuscript.py                   # 3 · build the demo paper
 papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
-    --model claude-opus-5                                 # 4 · audit it
+    --model claude-opus-5 -f viewer                       # 4 · audit it
 ```
 
-When it finishes, open `demo_case/out/report.md`. Expected result:
+When it finishes, open `demo_case/out/report_viewer.html` in a browser — the
+planted errors underlined in red in the demo paper, each with the cited page
+beside it — or read `demo_case/out/report.md`. Expected result:
 **1 supported · 2 contradicted · 1 not retrieved**, one uncited assertion
 flagged, and all 5 citation occurrences — spread across the 4 labels — reached
 by an extracted claim, 0 uncertain. That is **4** claims for 5 occurrences,
@@ -592,7 +674,9 @@ Details per plant:
 [`examples/demo/`](examples/demo/).
 
 > **Note:** the committed `examples/demo/output/` is the output of a real run
-> (2026-08-30, docling 2.118.1) and matches what the current code produces. It
+> (2026-08-30, docling 2.118.1) and matches what the current code produces,
+> except that it predates the viewer: it holds `report.md` and the terminal
+> look, and the command above adds `report_viewer.html` beside them. It
 > stays an inspectable artefact, not a byte-exact expected output: judgement
 > wording differs between runs, and so can the page an anchor is found on — the
 > crop for claim 4 moved from page 1 to page 2 across two runs that reached the
@@ -702,12 +786,34 @@ python evals/runners/score_only.py \
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to report paper-format
-failures — the feedback that improves the tool fastest. The pixel logo is
-generated: `python scripts/make_logo.py`. Changes are tracked in
+failures — the feedback that improves the tool fastest. Changes are tracked in
 [`CHANGELOG.md`](CHANGELOG.md); cite the tool via [`CITATION.cff`](CITATION.cff).
+
+**The mark.** A dot on a line of the paper, routed like a circuit trace into a
+red box around the evidence — the same red as the evidence boxes in every
+report. The vectors live in
+[`src/papertrace/templates/brand/`](src/papertrace/templates/brand/): the
+icon (app icon and favicon), the light and dark lockups the top of this page
+uses, and the bare mark for light and for dark surfaces. Ink `#1f2328`, paper
+`#f4f1ea`, muted `#8b949e`, trace red `#e5484d`; minimum size 16 px, and below
+that the icon without the grey lines. The viewer inlines the icon; the terminal
+banner in [`brand.py`](src/papertrace/brand.py) is the same mark in box glyphs.
+The older pixel-art logo (`assets/logo.png`, `scripts/make_logo.py`) remains
+only because the social preview is generated from it.
 
 ## Roadmap
 
+- [x] Interactive report viewer — the manuscript with every audited sentence
+      underlined, the evidence beside it, filters, a claim map and a reviewed
+      checklist; `-f viewer`, offered by the wizard and written by `/review`
+      (0.6.0)
+- [x] A mark of its own — the trace from the claim into the boxed evidence, in
+      the viewer, the README and the terminal (0.6.0)
+- [ ] Viewer: a single-file export with the evidence crops embedded, so an
+      audit can be sent as one HTML file instead of the `out/` folder
+- [ ] Viewer: notes per claim, exported alongside the reviewed checklist
+- [ ] Viewer in the committed demo showcase — `examples/demo/output/` predates
+      it and needs a live re-run to gain `report_viewer.html`
 - [ ] Retraction & correction flags on cited references
 - [ ] More citation styles in the coverage audit — author-year, parenthetical
       numerics and bare superscripts (as in Nature-family journals). The

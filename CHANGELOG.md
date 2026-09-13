@@ -52,6 +52,15 @@ browser-side logic is a DOM-free module, `templates/viewer_logic.js`, run
 under node by `tests/test_report_viewer_js.py` (which skips, visibly, when
 node is not on PATH); `templates/viewer_app.js` only draws.
 
+Reachable from every way in. Batch: `-f viewer` on `run` or `report`. The
+guided wizard asks *"Also write the interactive viewer beside report.md?"*,
+default yes, and the one-line command it prints for next time carries the
+answer. The `/review` skill writes it in its outputs step and hands over the
+path. `run` closes by naming the page to open. The README has a section on it
+with two screenshots, produced by `scripts/make_viewer_shots.py` from a real
+case rather than drawn; the committed demo showcase predates the viewer and
+says so until it is re-run with `-f viewer`.
+
 ### Changed — the mark: a trace from the claim into the boxed evidence
 
 PaperTrace has a mark. A dot sits on a line of the paper, routes like a

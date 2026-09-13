@@ -3,7 +3,8 @@
 > **The finished result is committed** — read
 > [`output/report.md`](output/report.md) (with its evidence crops) or view
 > [`output/report_terminal.png`](output/report_terminal.png) without running
-> anything. The steps below reproduce it.
+> anything. The steps below reproduce it, and add the interactive viewer
+> (`report_viewer.html`), which the committed output predates.
 
 The paper is invented and clearly watermarked as such — a one-page fictional
 mini-review whose references are **real, published papers**. The errors are
@@ -46,9 +47,11 @@ python examples/demo/make_manuscript.py
 # --model pinned so this matches the committed output/ — otherwise the
 # account default decides the judge, and it changes
 papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
-    --model claude-opus-5
+    --model claude-opus-5 -f viewer
 
-# then read the results:
+# then review the results in a browser — the planted errors underlined in the
+# demo paper, the cited page beside each one — or read the markdown record:
+open demo_case/out/report_viewer.html
 open demo_case/out/report.md
 
 # want the shareable looks too? ask for them:

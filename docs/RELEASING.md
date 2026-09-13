@@ -131,7 +131,10 @@ The point of a release is that someone reads the README and believes it.
 - [ ] No hard-coded test count (it goes stale; the CI badge is the signal).
 - [ ] `examples/demo/output/report.md` still reflects what a re-run produces —
       or the README says plainly that it does not. Regenerating it needs a live
-      model run.
+      model run; run it with `-f viewer` so the showcase gains
+      `report_viewer.html`, then refresh `docs/viewer_*.png` with
+      `python scripts/make_viewer_shots.py demo_case/out/report_viewer.html`
+      and drop the README's note that the committed output predates the viewer.
 - [ ] `evals/DESIGN.md` still describes the shipped harness, and any gold set
       marked `kind: benchmark` genuinely satisfies the labelling policy there.
 

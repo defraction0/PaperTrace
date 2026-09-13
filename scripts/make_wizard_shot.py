@@ -70,6 +70,8 @@ BODY = """
 <div class="ln">  email: <span class="cyan">you@example.org</span></div>
 <div class="ln">  Remember it for next time? <span class="dim">[y/n] (y):</span> <span class="dimmer">⏎</span></div>
 <div class="sp"></div>
+<div class="ln">  Also write the interactive viewer (report_viewer.html) beside report.md? <span class="dim">[y/n] (y):</span> <span class="dimmer">⏎</span></div>
+<div class="sp"></div>
 <div class="ln"><b class="white">Ready.</b></div>
 <div class="ln">  This makes live requests to Crossref, Unpaywall and Europe PMC, and up to</div>
 <div class="ln">  <b class="white">25</b> model calls through `claude -p`.</div>
@@ -80,7 +82,7 @@ BODY = """
 <div class="sp"></div>
 <div class="ln"><span class="dimmer">Same thing as one command, for next time:</span></div>
 <div class="ln">  <span class="cyan">papertrace run ~/Downloads/s00330-026-12773-4.pdf \\</span></div>
-<div class="ln">  <span class="cyan">  -c s00330-026-12773-4 --doi 10.1007/s00330-026-12773-4</span></div>
+<div class="ln">  <span class="cyan">  -c s00330-026-12773-4 --doi 10.1007/s00330-026-12773-4 -f viewer</span></div>
 """
 
 HTML = """<!doctype html><meta charset="utf-8"><style>

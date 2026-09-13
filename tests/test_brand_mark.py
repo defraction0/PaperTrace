@@ -97,7 +97,9 @@ def test_the_readme_lockup_points_at_files_that_exist():
     }, linked
     for rel in linked:
         assert (ROOT / rel).exists(), f"README links to {rel}, which is not in the repo"
-    assert "assets/logo.png" not in readme, "the pixel-art logo is retired from the README"
+    # the pixel-art logo may be named in prose (it still feeds the social
+    # preview) but is no longer displayed
+    assert "main/assets/logo.png" not in readme, "the pixel-art logo is still embedded"
 
 
 # --- the terminal ------------------------------------------------------------

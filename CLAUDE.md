@@ -58,8 +58,10 @@ python examples/demo/make_manuscript.py
 # `claude -p` takes the account default, which silently changed the judge
 # from opus to haiku between two regenerations of examples/demo/output/
 papertrace run examples/demo/demo_manuscript.pdf -c demo_case \
-    --model claude-opus-5 --format terminal --png
+    --model claude-opus-5 --format terminal --format viewer --png
 # expect: 1 supported · 2 contradicted · 1 not retrieved · 1 uncited assertion
+# and out/report_viewer.html beside report.md — open it in a browser; the
+# README's viewer screenshots come from scripts/make_viewer_shots.py on it
 # 4 claims, not 5: the sentence citing [2] and [3] comes back as ONE
 # multi-source claim, because 0.5.0 asks extraction for the verbatim sentence.
 # Reproduced on both claude-opus-5 and claude-haiku-4-5, so it is the prompt

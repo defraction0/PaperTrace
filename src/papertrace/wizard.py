@@ -257,6 +257,7 @@ def equivalent_command(
     provided: Path | None,
     email: str | None = None,
     supplement: list[Path] | None = None,
+    formats: list[str] | None = None,
 ) -> str:
     """The `papertrace run` line this session amounts to.
 
@@ -265,7 +266,8 @@ def equivalent_command(
     the line actually runs. Built as argv and joined with `shlex.join`, because
     interpolating a path with a space in it printed a command that split into
     the wrong arguments. `--email` is included for the same reason: without it
-    the replay either fails or silently picks up a different saved address.
+    the replay either fails or silently picks up a different saved address —
+    and so is `-f`, or the replay would drop the page the user reviewed in.
     """
     argv = ["papertrace", "run", str(manuscript), "-c", str(case)]
     if provided:
@@ -276,6 +278,8 @@ def equivalent_command(
         argv += ["--doi", doi]
     if email:
         argv += ["--email", email]
+    for look in formats or []:
+        argv += ["-f", look]
     if not with_scout:
         argv.append("--no-scout")
     if png:
@@ -476,9 +480,18 @@ def run_wizard() -> None:
     doi, with_scout = _ask_doi(paper)
     email = _ask_email()
 
+    # the viewer is the page to review the audit in; report.md is written either
+    # way. Offered here, default yes, because the flag is the one thing a
+    # newcomer would not know to ask for — and the wizard exists for newcomers
+    viewer = Confirm.ask(
+        "\n  Also write the interactive viewer (report_viewer.html) beside report.md?",
+        default=True,
+    )
+    formats = ["viewer"] if viewer else None
+
     png = False
     if png_available:
-        png = Confirm.ask("\n  Also export PNG pictures of the reports?", default=False)
+        png = Confirm.ask("  Also export PNG pictures of the reports?", default=False)
 
     # each supplement is one more document, so one more judging call. Folded in
     # here rather than in `workload()` because it is not known until the sources
@@ -513,6 +526,7 @@ def run_wizard() -> None:
     cmd = equivalent_command(
         manuscript=paper, case=case, doi=doi, png=png,
         with_scout=with_scout, provided=provided, email=email, supplement=supplement,
+        formats=formats,
     )
     console.print(f"\n[dim]Same thing as one command, for next time:[/dim]\n  [cyan]{cmd}[/cyan]\n")
 
@@ -525,7 +539,7 @@ def run_wizard() -> None:
     # in the HTML looks when it needs them, since a PNG is a shot of one.
     run_cmd(
         manuscript=paper, case=case, provided=provided, email=email, model=None,
-        png=png, backend="auto", with_scout=with_scout, doi=doi, formats=None,
+        png=png, backend="auto", with_scout=with_scout, doi=doi, formats=formats,
         supplement=supplement,
     )
 

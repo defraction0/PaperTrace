@@ -1215,9 +1215,16 @@ def run(
     from .models import SourceMap
 
     backend_used = SourceMap.from_json(smap_path).converter if smap_path.exists() else "unknown"
+    # name the page the user will actually review in, when one was written.
+    # `isinstance`, because a direct call that omits `formats` hands this an
+    # OptionInfo sentinel, and `in` over one raises
+    if isinstance(formats, list) and "viewer" in formats:
+        where = f"[cyan]{case/'out'/'report_viewer.html'}[/cyan] in a browser"
+    else:
+        where = f"[cyan]{case/'out'/'report.md'}[/cyan]"
     console.print(
-        "\n[bold green]done[/bold green] — open "
-        f"[cyan]{case/'out'/'report.md'}[/cyan] · read with [bold]{backend_used}[/bold]"
+        f"\n[bold green]done[/bold green] — open {where}"
+        f" · read with [bold]{backend_used}[/bold]"
         " · the gap register is part of the result."
     )
 
