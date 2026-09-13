@@ -90,7 +90,7 @@
   <div class="doc">
     <h1>Fact-Check Report</h1>
     <p class="meta">Checker: <code>{{ r.checker }}</code> · PaperTrace · {{ r.date }} &nbsp;·&nbsp;
-      Sources: <code>{{ r.refs_available }} / {{ r.refs_total }}</code> cited references available</p>
+      Sources: <code>{{ r.refs_available }} / {{ r.refs_total }}</code> cited references available{% if refs_skipped %} · {{ refs_skipped }} skipped on request{% endif %}</p>
 
     <p class="summary">
       <b>Claims:</b> <span class="cnt">{{ r.claims|length }}</span><span class="sep">|</span>
@@ -271,6 +271,20 @@
 {% endif %}
 {% endif %}
 
+{% for d in disclosures if d.key == "scope" %}
+    <h2><span class="hx">##</span> Scope of this audit</h2>
+    <p class="meta"><span style="color:var(--amber)"><b>⚠ {{ d.text }}</b></span></p>
+{% if d.rows %}
+    <ul class="cov">
+{% for row in d.rows[:25] %}
+      <li>{{ row }}</li>
+{% endfor %}
+{% if d.rows|length > 25 %}
+      <li>… {{ d.rows|length - 25 }} more in refs_manifest.json</li>
+{% endif %}
+    </ul>
+{% endif %}
+{% endfor %}
     <div class="foot"><b>PaperTrace</b> · evidence images are pages of the cited sources ·
       each crop states whether its anchor phrase was located in the region shown ·
       the judgement is yours — verify before you rely on it.</div>

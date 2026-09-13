@@ -138,6 +138,9 @@ def write_reports(
         "with_evidence": [c for c in checked if c.evidence_image],
         "gaps": gaps,
         "gap_total": sum(len(v) for v in gaps.values()),
+        # references left out on request, kept apart from "not obtainable" in
+        # every look: `total - available` counts them, and they were never tried
+        "refs_skipped": _refs_skipped(results),
         "manifest": manifest,
         "scout": scout,
         "version": __version__,
@@ -190,6 +193,12 @@ def write_reports(
                 written.append(png_path)
 
     return written
+
+
+def _refs_skipped(results: RunResults) -> int:
+    """How many references `refs` left out on request — see `results.scope`."""
+    sources = (getattr(results, "scope", None) or {}).get("sources") or {}
+    return len(sources.get("skipped_for_claims") or []) + len(sources.get("skipped_by_cap") or [])
 
 
 # --------------------------------------------------------------------------

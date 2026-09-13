@@ -828,6 +828,7 @@ def test_run_detects_the_doi_once_and_gives_it_to_both_stages(monkeypatch, tmp_p
     # function, the plain function `run` actually calls — see cli.py's comment
     # on `run()`.
     monkeypatch.setattr(cli_mod, "_ingest_pipeline", lambda **kw: None)
+    monkeypatch.setattr(cli_mod, "_extract_pipeline", lambda **kw: None)
     monkeypatch.setattr(cli_mod, "_refs_pipeline", lambda **kw: seen.__setitem__("refs", kw.get("doi")))
     monkeypatch.setattr(cli_mod, "scout", lambda **kw: seen.__setitem__("scout", kw.get("doi")))
     monkeypatch.setattr(cli_mod, "_check_pipeline", lambda **kw: None)

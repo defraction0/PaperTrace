@@ -168,6 +168,13 @@ went uncited?**
   headline is the most adverse across all of them, so a contradiction that lives
   only in an appendix is still reported. A supplement never stands in for the
   article: one whose article could not be obtained is named and set aside.
+- **Audit a slice on request, and say so.** `--max-claims N` checks the first
+  N claims and retrieves only the references they cite; `--max-sources N`
+  obtains at most N cited sources. Everything left out is recorded — a
+  `skipped` reference with its reason, the selection in `results.json` — and
+  every report ends by stating, in numbers, what was not covered. A limited
+  run never reads as a smaller paper (see [*Audit a slice on
+  request*](#audit-a-slice-on-request)).
 - Keep the human responsible for interpretation — it prepares evidence and
   drafts; the conclusions are yours.
 
@@ -254,19 +261,21 @@ Nothing to memorise. It checks your setup first — so a missing `claude` CLI is
 a sentence before you type anything, not a traceback twenty minutes in — then
 asks one question at a time: the paper (drag the file in; quotes and escaped
 spaces are fine), where to keep the audit, whether the paper is published, a
-contact email it offers to remember, and whether to write the [interactive
+contact email it offers to remember, whether to write the [interactive
 viewer](#review-it-in-the-browser--the-interactive-viewer) beside the report
-(default yes). Before spending anything it tells you how many model calls the
-run will make and asks you to confirm, and when you say yes it prints the
-equivalent one-line command — `-f viewer` included — so you can repeat or
-script it next time. When the run finishes it names the page to open.
+(default yes), and whether to [limit the audit](#audit-a-slice-on-request) —
+the first N claims, at most N cited sources, both blank for the whole paper.
+Before spending anything it tells you how many model calls the run will make,
+limits applied, and asks you to confirm; when you say yes it prints the
+equivalent one-line command — `-f viewer` and any limits included — so you can
+repeat or script it next time. When the run finishes it names the page to open.
 
 `papertrace start` does the same thing explicitly. Without an interactive
 terminal — a pipe, a CI job — bare `papertrace` prints help instead of waiting
 on stdin.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, whether any cited PDFs are already to hand, whether the paper has supplementary material of its own, a DOI found on the first page offered for confirmation, a contact email it offers to remember, whether to write the interactive viewer — and finally the cost stated as a number of model calls before asking permission to start.">
+  <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check listing the claude CLI and layout-aware ingest as present and PNG export as missing with its one-line fix, then the questions one at a time — the paper's path, the case folder, whether any cited PDFs are already to hand, whether the paper has supplementary material of its own, a DOI found on the first page offered for confirmation, a contact email it offers to remember, whether to write the interactive viewer, whether to limit the audit to the first N claims or at most N cited sources (both left blank) — and finally the cost stated as a number of model calls before asking permission to start.">
 </p>
 
 ### Interactive — the `/review` skill (deepest mode)
@@ -455,6 +464,45 @@ audit's answers.
   identify it, so use `--no-scout` to skip that step rather than reading an
   empty result as "nothing to find"; the guided flow does this for you. The
   numbering check has nothing to compare against either, and says so.
+
+#### Audit a slice on request
+
+Two limits cut a run short without letting it pass for a smaller paper:
+
+```bash
+papertrace run paper.pdf --max-claims 5     # the first 5 extracted claims, and only their references
+papertrace run paper.pdf --max-sources 6    # at most 6 cited sources obtained and judged against
+```
+
+`--max-claims N` checks the first N claims in reading order. To retrieve only
+what those claims cite, `run` now extracts *before* it resolves references:
+extraction is a stage of its own, `papertrace extract`, which writes every
+claim the extractor found — numbered, no verdicts — to `out/claims.json`.
+`refs` reads that list to learn which references the selected claims cite and
+records every other reference as `skipped`, with the reason, never as
+paywalled. `check` reads the same list back rather than extracting again, so
+the numbers a selection names hold still between retrieval and judging (and
+across a `check` re-run; delete `out/claims.json` to extract afresh).
+
+`--max-sources N` obtains at most N cited sources, in bibliography order, and
+judges against those alone. The cap counts sources *obtained*, so a paywalled
+reference does not use up a slot; everything past the cap is `skipped` the
+same way. The two compose: the references the selected claims cite, in label
+order, until the cap is reached. Internally a selection is an array of claim
+ids — `--max-claims 5` is `[1, 2, 3, 4, 5]` — so cherry-picking claims by
+number is a matter of handing `check` a different array; that route is open
+and not yet exposed as a flag.
+
+Whatever a limit leaves out is stated **bluntly, at the end of every report**
+— markdown, editor, terminal and the viewer — in numbers: which claims of how
+many were checked, which references were skipped and why, how many claims came
+back `not retrieved` because their only sources were skipped, and that every
+count above describes the slice and not the paper. The same sentence opens the
+caveats at the top, the source counts keep *skipped on request* apart from
+*not obtainable*, and a claim whose source was skipped says so in its note. A
+limit that turned out to leave nothing out is stated too, as having changed
+nothing. The guided wizard asks for both limits and prices the run with them
+applied.
 
 **One case folder per paper.** `case` is only the default name — give each
 paper its own (`papertrace run zhang2025.pdf -c zhang2025`). Re-running the
@@ -692,14 +740,17 @@ Details per plant:
 ```
 paper.pdf ─────ingest──▶ clean.md + source_map.json       (page + bbox for every block)
       │
+      └─extract─▶ out/claims.json                         (every claim, numbered in reading
+      │                                                     order — no verdicts yet)
       └─refs──▶ refs_manifest.json                        (per-ref: retrieved / provided /
                 + sources_resolved/*.pdf                    paywalled / mismatch / no_doi /
-      │                                                     error + reason)
+      │                                                     error / skipped + reason)
       └─scout─▶ out/scout.json                            (europe pmc: published-since +
                                                             existed-but-uncited candidates)
       │
       └─check─▶ results.json                              (per-claim verdict + page anchor;
-                                                            unavailable source ⇒ not_retrieved)
+                                                            unavailable source ⇒ not_retrieved;
+                                                            a limit ⇒ results.scope, stated last)
       │
       └─highlight─▶ out/evidence/claim_NN.png             (red box on the matched text)
       │
@@ -810,6 +861,11 @@ only because the social preview is generated from it.
       (0.6.0)
 - [x] A mark of its own — the trace from the claim into the boxed evidence, in
       the viewer, the README and the terminal (0.6.0)
+- [x] Audit a slice on request — `--max-claims` and `--max-sources` in the CLI
+      and the wizard, every reference left out recorded as `skipped`, and the
+      scope stated at the end of every report (unreleased)
+- [ ] Cherry-pick claims by number — a "re-check these" in the viewer, on the
+      array `check` already takes and the numbered `out/claims.json` it reads
 - [ ] Viewer: a single-file export with the evidence crops embedded, so an
       audit can be sent as one HTML file instead of the `out/` folder
 - [ ] Viewer: notes per claim, exported alongside the reviewed checklist

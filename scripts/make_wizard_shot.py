@@ -72,6 +72,11 @@ BODY = """
 <div class="sp"></div>
 <div class="ln">  Also write the interactive viewer (report_viewer.html) beside report.md? <span class="dim">[y/n] (y):</span> <span class="dimmer">⏎</span></div>
 <div class="sp"></div>
+<div class="ln"><b class="white">Limit this audit?</b> <span class="dim">Both optional. A first pass on a few claims costs less,</span></div>
+<div class="ln"><span class="dim">and every report ends by stating what was left out.</span></div>
+<div class="ln">  Check only the first N claims — blank for all: <span class="dimmer">⏎</span></div>
+<div class="ln">  Obtain at most N cited sources — blank for all: <span class="dimmer">⏎</span></div>
+<div class="sp"></div>
 <div class="ln"><b class="white">Ready.</b></div>
 <div class="ln">  This makes live requests to Crossref, Unpaywall and Europe PMC, and up to</div>
 <div class="ln">  <b class="white">25</b> model calls through `claude -p`.</div>

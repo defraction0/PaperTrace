@@ -65,13 +65,17 @@ _TABLE_LOSS_SHOWN = 2
 SUPPLEMENT_IDENTITY_TOKEN = "how each supplement was attached"
 SUPPLEMENT_COVERAGE_TOKEN = "citations inside a supplement are not counted"
 SUPPLEMENT_HEADLINE_TOKEN = "this verdict rests on supplementary material"
+# The run was cut short on purpose (`--max-claims`, `--max-sources`). Every
+# count in such a report is true of the slice and false of the paper, so this
+# is said with the caveats at the top AND as the last thing in every format.
+SCOPE_TOKEN = "the audit was limited on request"
 
 
 @dataclass(frozen=True)
 class Disclosure:
     """One thing the report owes its reader, in three lengths."""
 
-    key: str  # truncation | converter | coverage | coverage_caveat
+    key: str  # scope | truncation | converter | coverage | coverage_caveat
     #          | coverage_attribution | sources | unjudged_refs | anchor
     #          | no_quote | claim_numbering | numbering | references_resumed
     #          | source_identity | source_fidelity
@@ -628,6 +632,179 @@ def _supplement_headline(claim) -> Disclosure:
     )
 
 
+# --------------------------------------------------------------------------
+# scope — what the run left out on request
+# --------------------------------------------------------------------------
+
+_SPAN_SHOWN = 10  # ids listed before "and N more"
+_LABELS_SHOWN = 12
+
+
+def ids_span(ids) -> str:
+    """`1–5` for a run of ids, `3 and 7` or `1, 3 and 7` otherwise — capped,
+    and the cap said out loud rather than elided."""
+    ids = sorted({int(i) for i in ids})
+    if not ids:
+        return "none"
+    if len(ids) == 1:
+        return str(ids[0])
+    if ids == list(range(ids[0], ids[-1] + 1)):
+        return f"{ids[0]}–{ids[-1]}"
+    shown = [str(i) for i in ids[:_SPAN_SHOWN]]
+    if len(ids) > _SPAN_SHOWN:
+        return ", ".join(shown) + f" and {len(ids) - _SPAN_SHOWN} more"
+    return ", ".join(shown[:-1]) + f" and {shown[-1]}"
+
+
+def _labels(labels) -> str:
+    labels = list(labels)
+    shown = [f"[{x}]" for x in labels[:_LABELS_SHOWN]]
+    more = len(labels) - _LABELS_SHOWN
+    return ", ".join(shown) + (f" and {more} more" if more > 0 else "")
+
+
+def _claims_flag(requested: list[int]) -> str:
+    """How the selection was asked for: the flag when it was the first N, else the ids."""
+    n = len(requested)
+    if list(requested) == list(range(1, n + 1)):
+        return f"`--max-claims {n}`"
+    return f"claims {ids_span(requested)} were asked for"
+
+
+def _n(count: int, noun: str) -> str:
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+def _were(count: int) -> str:
+    return "was" if count == 1 else "were"
+
+
+def _scope(results, manifest=None) -> Disclosure:
+    """What the audit left out on request, in numbers, and what that does to
+    every other count.
+
+    The one disclosure that qualifies all the others: a report on five of
+    twenty-three claims prints five verdicts, a gap register of five and a
+    sources line for the references those five cite, and every one of those
+    figures is true of the slice and false of the paper. So the static formats
+    state it twice — with the caveats at the top, and again as their last
+    section — and the viewer carries it in its header and closes its summary
+    with it.
+
+    Two limits, read from two places. The claims side is `check`'s own
+    selection. The sources side comes from the manifest by way of
+    `results.scope`, because `refs` made those choices — and may have made
+    them for a different selection than `check` was then asked for, which is
+    said when it happens rather than left to read as a run of paywalls.
+    """
+    scope = results.scope
+    claims = scope.get("claims") or {}
+    sources = scope.get("sources") or {}
+    sentences: list[str] = []
+    brief: list[str] = []
+
+    requested = [int(i) for i in claims.get("requested") or []]
+    judged = [int(i) for i in claims.get("judged") or []]
+    total = int(claims.get("extracted") or 0)
+    left = max(total - len(judged), 0)
+    if claims:
+        how = _claims_flag(requested)
+        if left == 0:
+            sentences.append(
+                f"A limit on the claims was requested ({how}) and left nothing out: the "
+                f"paper has {_n(total, 'extracted claim')}, and every one was checked."
+            )
+        else:
+            sentences.append(
+                f"Only claims {ids_span(judged)} of the {total} extracted were checked ({how}); "
+                f"the other {left} {_were(left)} extracted and left unjudged."
+            )
+        brief.append(f"claims {ids_span(judged)} of {total} checked ({how.strip('`')})")
+
+    skipped_for = [str(x) for x in sources.get("skipped_for_claims") or []]
+    by_cap = [str(x) for x in sources.get("skipped_by_cap") or []]
+    for_claims = sources.get("for_claims")
+    if for_claims is not None:
+        for_claims = [int(i) for i in for_claims]
+        n = len(skipped_for)
+        if claims and sorted(for_claims) == sorted(requested):
+            if n:
+                sentences.append(
+                    f"The {_n(n, 'reference')} cited only by unjudged claims {_were(n)} not "
+                    f"retrieved: {_labels(skipped_for)}."
+                )
+            else:
+                sentences.append(
+                    "No reference was skipped for it: the checked claims cite every "
+                    "reference in the list."
+                )
+        else:
+            # `refs` and `check` were given different selections — the one
+            # state where a `not retrieved` verdict is really "not resolved
+            # for", and the reader must not take it for a paywall
+            sentences.append(
+                f"References were resolved for claims {ids_span(for_claims)} only "
+                f"({_claims_flag(for_claims)}), so the {_n(n, 'reference')} no claim in that "
+                f"selection cites {_were(n)} skipped — not retrieved, not judged"
+                + (f": {_labels(skipped_for)}." if n else ".")
+                + " A claim judged outside that selection is reported as not retrieved "
+                "wherever it cites one."
+            )
+    if "max" in sources:
+        cap = int(sources["max"])
+        got = int(getattr(results, "refs_available", 0) or 0)
+        n = len(by_cap)
+        if n:
+            sentences.append(
+                f"At most {_n(cap, 'cited source')} {_were(cap)} obtained (`--max-sources "
+                f"{cap}`): {got} {_were(got)}, and the {n} remaining "
+                f"reference{'' if n == 1 else 's'} {_were(n)} skipped — not retrieved, not "
+                f"judged: {_labels(by_cap)}."
+            )
+        else:
+            sentences.append(
+                f"A cap of {_n(cap, 'cited source')} was requested (`--max-sources {cap}`) "
+                f"and was not reached: {got} {_were(got)} obtained and none was skipped for it."
+            )
+        brief.append(f"at most {_n(cap, 'source')} (--max-sources {cap})")
+    skipped_all = set(skipped_for) | set(by_cap)
+    if skipped_all:
+        # the claims a skipped reference cost their verdict. `not_retrieved`
+        # with every cited label among the skipped ones: the retrieval gap is
+        # the limit's doing and nobody else's
+        cost = sum(
+            1 for c in results.claims
+            if c.verdict == "not_retrieved" and c.refs and set(c.refs) <= skipped_all
+        )
+        if cost:
+            sentences.append(
+                f"{_n(cost, 'checked claim')} cite{'s' if cost == 1 else ''} only skipped "
+                f"references and {'is' if cost == 1 else 'are'} reported as not retrieved "
+                "for that reason."
+            )
+        brief.append(f"{_n(len(skipped_all), 'reference')} skipped")
+    sentences.append(
+        "Every count in this report — verdicts, gaps, sources available — describes the "
+        "audit as limited, not the paper."
+        + (" The coverage figure counts every extracted claim, judged or not."
+           if claims and left else "")
+    )
+    rows: tuple[str, ...] = ()
+    if manifest is not None:
+        rows = tuple(
+            f"[{e.num}] {e.raw[:80]}{'…' if len(e.raw) > 80 else ''} — {e.reason}"
+            for e in manifest.entries if e.status == "skipped"
+        )
+    return Disclosure(
+        key="scope",
+        level="warn",
+        token=SCOPE_TOKEN,
+        text=f"Scope — {SCOPE_TOKEN}. " + " ".join(sentences),
+        short=f"{SCOPE_TOKEN}: " + " · ".join(brief) if brief else SCOPE_TOKEN,
+        rows=rows,
+    )
+
+
 def run_disclosures(results, manifest=None) -> list[Disclosure]:
     """Every run-level disclosure this RunResults owes its reader.
 
@@ -635,6 +812,10 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
     is recorded. There is no module-global fallback to read instead.
     """
     out: list[Disclosure] = []
+    # first, because it qualifies every count the others describe. Absent
+    # means the whole paper was audited — the reading of every older file too
+    if getattr(results, "scope", None):
+        out.append(_scope(results, manifest))
     if results.truncated:
         out.append(_truncation(results.truncated))
     out.append(_converter(results.converter))

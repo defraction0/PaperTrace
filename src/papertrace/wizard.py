@@ -217,6 +217,9 @@ def workload(pdf: Path) -> dict:
         "places": len(groups),
         "multi": multi,
         "labels": len(labels),
+        # how many sources each citation place cites, in reading order — what
+        # `apply_limits` cuts to the first N places when the claims are capped
+        "group_sizes": [len(g) for g in groups],
         "model_calls": 1 + cited_source_calls,
         # the retry is real spend: one extraction plus, per judging call, up to
         # ASK_ATTEMPTS attempts. Derived from check.py rather than a local
@@ -224,6 +227,39 @@ def workload(pdf: Path) -> dict:
         "model_calls_max": 1 + ASK_ATTEMPTS * cited_source_calls,
         "style_unrecognised": len(groups) == 0,
     }
+
+
+def apply_limits(w: dict, *, max_claims: int | None, max_sources: int | None) -> dict:
+    """The cost estimate with the limits applied — still an upper bound.
+
+    The first N claims can only ever cost the first N citation places, and at
+    most N sources obtained means at most N judging calls, one per document.
+    Neither figure may exceed the unlimited one, and the retry ceiling is
+    derived the way `workload` derives it, so the two cannot drift.
+    """
+    sizes = list(w.get("group_sizes") or [])
+    if max_claims is not None:
+        sizes = sizes[:max_claims]
+    judging = sum(sizes)
+    if max_sources is not None:
+        judging = min(judging, max_sources)
+    return {**w, "model_calls": 1 + judging, "model_calls_max": 1 + ASK_ATTEMPTS * judging}
+
+
+def parse_limit(raw: str) -> int | None:
+    """A limit as typed: a positive whole number, or None for blank.
+
+    Zero is not a limit anyone means and "five" is not a number; both raise, so
+    the question is asked again rather than quietly read as no limit.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if not raw.isdigit() or int(raw) < 1:
+        raise ValueError(
+            f"{raw!r} is not a whole number of at least 1 — leave it blank for no limit"
+        )
+    return int(raw)
 
 
 def supplement_workload(provided_dir: Path | None, supplement: list[Path]) -> int:
@@ -258,6 +294,8 @@ def equivalent_command(
     email: str | None = None,
     supplement: list[Path] | None = None,
     formats: list[str] | None = None,
+    max_claims: int | None = None,
+    max_sources: int | None = None,
 ) -> str:
     """The `papertrace run` line this session amounts to.
 
@@ -267,7 +305,8 @@ def equivalent_command(
     interpolating a path with a space in it printed a command that split into
     the wrong arguments. `--email` is included for the same reason: without it
     the replay either fails or silently picks up a different saved address —
-    and so is `-f`, or the replay would drop the page the user reviewed in.
+    and so is `-f`, or the replay would drop the page the user reviewed in, and
+    so are the limits, or the replay would run (and bill) the whole paper.
     """
     argv = ["papertrace", "run", str(manuscript), "-c", str(case)]
     if provided:
@@ -280,6 +319,10 @@ def equivalent_command(
         argv += ["--email", email]
     for look in formats or []:
         argv += ["-f", look]
+    if max_claims:
+        argv += ["--max-claims", str(max_claims)]
+    if max_sources:
+        argv += ["--max-sources", str(max_sources)]
     if not with_scout:
         argv.append("--no-scout")
     if png:
@@ -378,6 +421,31 @@ def _ask_supplements() -> list[Path]:
             continue
         out.append(path)
         console.print(f"  [green]✓[/green] {path.name}")
+
+
+def _ask_limit(question: str) -> int | None:
+    while True:
+        try:
+            return parse_limit(Prompt.ask(question, default=""))
+        except ValueError as e:
+            console.print(f"  [red]{e}[/red]")
+
+
+def _ask_limits() -> tuple[int | None, int | None]:
+    """A slice of the audit, on request: the first N claims, at most N sources.
+
+    Both blank by default. Offered because a first pass on five claims costs a
+    fraction of the paper and answers "is this worth the whole run" — and
+    because whatever is left out is stated on the report's last lines, so a
+    limited run cannot be mistaken for a smaller paper.
+    """
+    console.print(
+        "\n[bold]Limit this audit?[/bold] [dim]Both optional. A first pass on a few claims "
+        "costs less, and every report ends by stating what was left out.[/dim]"
+    )
+    max_claims = _ask_limit("  Check only the first N claims — blank for all")
+    max_sources = _ask_limit("  Obtain at most N cited sources — blank for all")
+    return max_claims, max_sources
 
 
 def _ask_email() -> str:
@@ -493,12 +561,16 @@ def run_wizard() -> None:
     if png_available:
         png = Confirm.ask("  Also export PNG pictures of the reports?", default=False)
 
+    # asked last, next to the price they change
+    max_claims, max_sources = _ask_limits()
+
     # each supplement is one more document, so one more judging call. Folded in
     # here rather than in `workload()` because it is not known until the sources
     # folder has been named, which happens after the paper is measured.
     extra = supplement_workload(provided, supplement)
-    calls = w["model_calls"] + extra
-    calls_max = w["model_calls_max"] + ASK_ATTEMPTS * extra
+    bounded = apply_limits(w, max_claims=max_claims, max_sources=max_sources)
+    calls = bounded["model_calls"] + extra
+    calls_max = bounded["model_calls_max"] + ASK_ATTEMPTS * extra
 
     console.print("\n[bold]Ready.[/bold]")
     console.print(
@@ -508,6 +580,15 @@ def run_wizard() -> None:
         + (f" — up to [bold]{calls_max}[/bold] if calls have to be retried."
            if calls_max != calls else ".")
     )
+    if max_claims or max_sources:
+        limits = [
+            f"the first {_n(max_claims, 'claim')}" if max_claims else "",
+            f"at most {_n(max_sources, 'cited source')}" if max_sources else "",
+        ]
+        console.print(
+            f"  [dim]Limited on request to {' and '.join(p for p in limits if p)} — the "
+            "report ends by stating what was left out.[/dim]"
+        )
     if extra:
         console.print(
             f"  [dim]{_n(extra, 'supplementary document')} included — each is judged "
@@ -526,7 +607,7 @@ def run_wizard() -> None:
     cmd = equivalent_command(
         manuscript=paper, case=case, doi=doi, png=png,
         with_scout=with_scout, provided=provided, email=email, supplement=supplement,
-        formats=formats,
+        formats=formats, max_claims=max_claims, max_sources=max_sources,
     )
     console.print(f"\n[dim]Same thing as one command, for next time:[/dim]\n  [cyan]{cmd}[/cyan]\n")
 
@@ -540,15 +621,17 @@ def run_wizard() -> None:
     run_cmd(
         manuscript=paper, case=case, provided=provided, email=email, model=None,
         png=png, backend="auto", with_scout=with_scout, doi=doi, formats=formats,
-        supplement=supplement,
+        supplement=supplement, max_claims=max_claims, max_sources=max_sources,
     )
 
 
 __all__ = [
     "Check",
+    "apply_limits",
     "clean_path",
     "detect_doi",
     "equivalent_command",
+    "parse_limit",
     "preflight",
     "run_wizard",
     "supplement_workload",

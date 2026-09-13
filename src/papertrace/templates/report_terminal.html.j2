@@ -72,7 +72,12 @@
 
     <div class="log"><span class="step">▸ ingest</span><span class="k">{{ r.manuscript }} → </span><span class="cyan">clean.md</span><span class="k"> · </span><span class="cyan">source_map.json</span><span class="k"> </span><span class="green">✓</span></div>
     <div class="log"><span class="step">▸ resolve</span><span class="k">{{ r.refs_total }} cited refs · crossref → unpaywall → europepmc → arxiv</span></div>
-    <div class="log"><span class="step"></span><span class="green">✓</span> available <b>{{ r.refs_available }}/{{ r.refs_total }}</b>{% if r.refs_total > r.refs_available %}<span class="k"> · </span><span class="amber">{{ r.refs_total - r.refs_available }} not obtainable</span><span class="dim"> (paywall / no doi / unpublished)</span>{% endif %}</div>
+{# skipped references are neither available nor unobtainable: nobody tried #}
+{% set misses = r.refs_total - r.refs_available - refs_skipped %}
+    <div class="log"><span class="step"></span><span class="green">✓</span> available <b>{{ r.refs_available }}/{{ r.refs_total }}</b>{% if misses > 0 %}<span class="k"> · </span><span class="amber">{{ misses }} not obtainable</span><span class="dim"> (paywall / no doi / unpublished)</span>{% endif %}{% if refs_skipped %}<span class="k"> · </span><span class="amber">{{ refs_skipped }} skipped on request</span>{% endif %}</div>
+{% for d in disclosures if d.key == "scope" %}
+    <div class="log"><span class="step">▸ scope</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
 {% for d in disclosures if d.key == "converter" %}
     <div class="log"><span class="step">▸ ingest</span><span class="cyan">{{ d.token }}</span>{% if d.level == "warn" %}<span class="k"> · </span><span class="amber">⚠ {{ d.short }}</span>{% endif %}</div>
 {% endfor %}
@@ -235,6 +240,19 @@
     <div class="nr-sub" style="margin-top:7px">same-year candidates listed apart — one from the paper's own year may postdate submission, so it is neither newer literature nor a citation the authors owed{% if scout.same_year|length > 6 %} · … {{ scout.same_year|length - 6 }} more in scout.json{% endif %}</div>
 {% endif %}
 {% endif %}
+
+{% for d in disclosures if d.key == "scope" %}
+
+    <div style="height:14px"></div>
+    <div class="nr-head"><span class="amber">▲</span> scope of this audit <span class="c">— {{ d.token }}</span></div>
+    <div class="nr-sub"><span style="color:var(--amber)">{{ d.text }}</span></div>
+{% for row in d.rows[:25] %}
+    <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it dim">{{ row }}</span></div>
+{% endfor %}
+{% if d.rows|length > 25 %}
+    <div class="nr-sub" style="margin-top:7px">… {{ d.rows|length - 25 }} more in refs_manifest.json</div>
+{% endif %}
+{% endfor %}
 
     <div class="foot"># evidence crops are real pages of the cited sources · each crop states whether its anchor phrase was located<br>
     # your judgement stays in charge · candidates, not accusations · papertrace v{{ version }}</div>

@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "claims",
+  "description": "out/claims.json — what the extractor found, numbered in reading order, before anything was judged. Written by `papertrace extract` (which `run` calls before resolving references, so a claims limit can retrieve only what the selected claims cite) and read back by `check`, so the numbers a selection refers to hold still between retrieval and judging. It carries NO verdicts: a verdict field here would be a finding nobody made.",
+  "type": "object",
+  "required": [
+    "schema",
+    "claims"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": [
+        "claims/1"
+      ]
+    },
+    "manuscript": {
+      "type": "string"
+    },
+    "manuscript_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "sha256 of the manuscript this list was extracted from, copied from the manuscript slot's source map. `check` reuses the list only when it matches the slot's current hash; null (an unhashed source map) is never a match."
+    },
+    "extractor": {
+      "type": "string",
+      "description": "The model that produced the list, in the form `claude -p · <model>`."
+    },
+    "date": {
+      "type": "string"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "cited": {
+          "type": "integer"
+        },
+        "uncited": {
+          "type": "integer"
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "description": "Citation-backed claims in reading order, ids from 1. Exactly the fields extraction produces — see results.schema.json for what each means.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "claim",
+          "refs"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "claim": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "ctx_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "own_supplement": {
+            "type": "boolean"
+          }
+        },
+        "not": {
+          "required": [
+            "verdict"
+          ]
+        }
+      }
+    },
+    "uncited": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "claim"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "claim": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "truncated": {
+      "type": "object",
+      "description": "The extraction's own cuts, keyed like results.json's `truncated` ('manuscript', 'citation contexts'). Carried into the run that judges these claims.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "chars": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

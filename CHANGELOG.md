@@ -4,6 +4,64 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added — audit a slice on request: `--max-claims` and `--max-sources`
+
+Two limits, on `run` and in the guided wizard, that cut a run short without
+letting it pass for a smaller paper. `--max-claims N` checks the first N
+extracted claims, in reading order, and retrieves only the references they
+cite. `--max-sources N` obtains at most N cited sources, in bibliography
+order, and judges against those alone; the cap counts sources *obtained*, so a
+paywalled reference does not use up a slot. The two compose. The wizard asks
+for both after the viewer question, prices the run with them applied (the
+first N claims can only cost the first N citation places; at most N sources
+means at most N judging calls), and carries them in the one-line command it
+prints.
+
+Nothing left out is lost. A reference nobody tried is `skipped` in the
+manifest — a new status, deliberately distinct from every failure — with the
+reason in prose and `skipped_by` (`claims` or `sources`) for the report to
+count on; the manifest records the `limits` it ran under. `results.json`
+gains `scope`: the claims requested, judged and extracted, the cap, the
+selection references were resolved for, and the labels skipped for each
+reason. A claim whose only sources were skipped is `not retrieved` and its
+note says *skipped on request*, not paywalled. A provided PDF for a skipped
+reference is named as set aside for that reason.
+
+And it is said out loud. A `scope` disclosure — *the audit was limited on
+request* — states in numbers which claims of how many were checked, which
+references were skipped and why, how many claims that cost, and that every
+count in the report describes the slice and not the paper. It opens the
+caveats at the top of the markdown, editor and terminal looks and is
+restated as their last section; the viewer flags it in the header, under the
+manuscript title, and as the last card of the Summary. The source counts keep
+*skipped on request* apart from *not obtainable* in every look, and a limit
+that turned out to leave nothing out is stated as having changed nothing.
+The coverage figure counts every extracted claim, judged or not, and the
+scope note says so — coverage measures whether extraction reached each
+citation, and a claim left unjudged on request did reach its citation.
+
+Internally a selection is an array of claim ids — `--max-claims 5` is
+`[1, 2, 3, 4, 5]` all the way down, in `refs`, `check.select_claims` and the
+scope — so cherry-picking claims by number is a different array on the same
+parameter, not a new mechanism. That route is open and not yet a flag.
+
+### Changed — extraction is a stage of its own, and `check` reuses it
+
+`papertrace extract` writes every claim the extractor found — numbered in
+reading order, with its quote, location, context ids and cited labels, and no
+verdict field at all — to `out/claims.json` (schema `claims/1` in
+`schemas/`). `run` calls it *before* `refs`, so a claims limit can retrieve
+only what the selected claims cite, and so a missing `claude` CLI now fails
+before any network work rather than after all of it. `check` reads the list
+back when it is this paper's — the file carries the manuscript's hash and is
+trusted on a match only — and extracts afresh otherwise, saying which. The
+numbers a selection names therefore hold still between retrieval and judging,
+across a `check` re-run after a failed call, and for whatever cherry-picks
+them later; delete `out/claims.json` to extract afresh. `check --max-claims`
+and `refs --max-claims` / `--max-sources` take the limits stage by stage.
+
 ## [0.6.0] — 2026-09-13 (beta)
 
 Carries 0.4.1 and 0.5.0 with it. Neither was ever published, so neither has a

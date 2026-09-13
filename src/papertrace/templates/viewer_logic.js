@@ -324,6 +324,8 @@
 
     const cov = results.coverage || {};
     const occ = cov.occurrences || {};
+    const scopeSources = (results.scope && results.scope.sources) || {};
+    const refsSkipped = (scopeSources.skipped_for_claims || []).length + (scopeSources.skipped_by_cap || []).length;
     const title = (scout && scout.paper && stripTags(scout.paper.title).trim()) || parsed.title || results.manuscript || 'Manuscript';
     const scoutRows = scout
       ? [].concat(
@@ -349,6 +351,12 @@
       scout: scoutRows, scoutQuery: scout ? (scout.query || '') : '', scoutError: scout ? (scout.error || '') : '',
       scoutPresent: !!scout, manifestPresent: !!manifest, manifest,
       disclosures: disc.run || [],
+      // the run was cut short on request. The disclosure is Python's, carried
+      // in the payload; the page states it in the header, the manuscript
+      // subline and the summary's last card. `refsSkipped` counts the
+      // references nobody tried, which are neither available nor unobtainable
+      scope: (disc.run || []).find(x => x.key === 'scope') || null,
+      refsSkipped: refsSkipped,
     };
   }
 
@@ -436,7 +444,8 @@
     const L = [];
     const flag = dis => (dis.level === 'warn' ? '⚠️ ' : '') + dis.text;
     L.push('# Fact-Check Report', '', `**${d.title}**`, '',
-      `Checker: ${d.meta.checker} · ${d.meta.date} · Sources: ${d.meta.refs.available} / ${d.meta.refs.total}`, '');
+      `Checker: ${d.meta.checker} · ${d.meta.date} · Sources: ${d.meta.refs.available} / ${d.meta.refs.total}`
+      + (d.refsSkipped ? ` · ${d.refsSkipped} skipped on request` : ''), '');
     for (const v of VERDICTS) {
       const n = d.claims.filter(c => c.verdict === v.key).length;
       if (n) L.push(`- ${v.label}: ${n}`);
@@ -461,6 +470,11 @@
     L.push('', '## Not verified — source not retrieved, or check failed', '');
     d.claims.filter(c => c.verdict === 'not_retrieved' || c.verdict === 'unchecked')
       .forEach(c => L.push(`- Claim ${c.id}: ${c.claim} (${c.note || c.verdict})`));
+    if (d.scope) {
+      // last, like report.md: the closing word on a report of a slice
+      L.push('', '## Scope of this audit', '', `⚠️ **${d.scope.text}**`);
+      for (const row of d.scope.rows || []) L.push(`- ${row}`);
+    }
     return L.join('\n');
   }
 

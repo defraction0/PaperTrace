@@ -48,7 +48,16 @@
     document.body.dataset.mark = OPTIONS.markStyle;
     document.title = data.title + ' — PaperTrace';
     $('pt-title').textContent = data.title;
-    $('pt-meta').textContent = `${data.meta.date} · ${data.meta.checker} · ${data.meta.refs.available} / ${data.meta.refs.total} cited sources retrieved`;
+    $('pt-meta').textContent = `${data.meta.date} · ${data.meta.checker} · ${data.meta.refs.available} / ${data.meta.refs.total} cited sources retrieved${data.refsSkipped ? ` · ${data.refsSkipped} skipped on request` : ''}`;
+    if (data.scope) {
+      // the header is read first, so the limit is flagged there; the full
+      // sentence is in the manuscript subline and the summary's last card
+      const tag = document.createElement('span');
+      tag.className = 'scope-tag';
+      tag.textContent = ' · ⚠ audit limited on request';
+      tag.title = data.scope.short;
+      $('pt-meta').appendChild(tag);
+    }
     const sel = $('pt-section');
     const secCounts = {};
     data.claims.forEach(c => { secCounts[c.section] = (secCounts[c.section] || 0) + 1; });
@@ -108,7 +117,8 @@
     parts.push(`<h1 class="ms-title">${esc(data.title)}</h1>`);
     const sub = (data.synthetic
       ? 'Audited sentences only — the case folder has no ingest/manuscript/annotated.md, so the full manuscript is not shown · '
-      : '') + `Ingest ${esc(data.meta.converter || 'not recorded')} · ${data.anchored} of ${all().length} audited sentences located in the text · underlines mark audited sentences; click one to see its evidence.`;
+      : '') + `Ingest ${esc(data.meta.converter || 'not recorded')} · ${data.anchored} of ${all().length} audited sentences located in the text · underlines mark audited sentences; click one to see its evidence.`
+      + (data.scope ? ` <span class="scope-tag">⚠ ${esc(data.scope.short)}.</span>` : '');
     parts.push(`<p class="ms-sub">${sub}</p>`);
     for (const b of data.blocks) {
       const id = `blk-${esc(b.id)}`;
@@ -192,18 +202,23 @@
     const coverage = disc.filter(d => d.key === 'coverage' || d.key === 'coverage_caveat');
     const coverageMore = disc.filter(d => d.key === 'coverage_attribution' || d.key === 'supplement_coverage');
     const numbering = disc.filter(d => d.key === 'numbering');
-    const rest = disc.filter(d => !['coverage', 'coverage_caveat', 'coverage_attribution', 'supplement_coverage', 'numbering'].includes(d.key));
+    const rest = disc.filter(d => !['coverage', 'coverage_caveat', 'coverage_attribution', 'supplement_coverage', 'numbering', 'scope'].includes(d.key));
     const numberedClaims = all().filter(c => c.disclosures.some(d => d.key === 'claim_numbering')).length;
     const numberingCard = numbering.map(d => `<div class="card warn"><b>Reference numbering unconfirmed</b> <span style="color:var(--muted)">· affects ${plural(numberedClaims, 'claim', 'claims')}</span><p>${esc(d.text)}</p></div>`).join('');
     const coverageCard = `<div class="card"><b>Citation coverage</b>${coverage.length ? `<ul class="disc">${coverage.map(discItem).join('')}${coverageMore.map(discItem).join('')}</ul>` : '<p>Coverage was not audited in this run: results.json carries no coverage object.</p>'}</div>`;
     const gaps = all().filter(isGap);
     const reasons = [...new Set(gaps.map(PT.gapReason))];
-    const retrieval = `${data.meta.refs.available} of ${data.meta.refs.total} cited references were available as PDFs. ${plural(gaps.length, 'claim', 'claims')} could not be checked${reasons.length ? ': ' + reasons.map(r => `${gaps.filter(g => PT.gapReason(g) === r).length} ${r}`).join(', ') : ''}.`;
+    const retrieval = `${data.meta.refs.available} of ${data.meta.refs.total} cited references were available as PDFs${data.refsSkipped ? `, and ${data.refsSkipped} ${data.refsSkipped === 1 ? 'was' : 'were'} skipped on request` : ''}. ${plural(gaps.length, 'claim', 'claims')} could not be checked${reasons.length ? ': ' + reasons.map(r => `${gaps.filter(g => PT.gapReason(g) === r).length} ${r}`).join(', ') : ''}.`;
     const retrievalCard = `<div class="card"><b>Retrieval and run notes</b><p>${esc(retrieval)}</p>${rest.length ? `<ul class="disc">${rest.map(discItem).join('')}</ul>` : ''}</div>`;
+    // last, on purpose: the closing word on a report of a slice, so nobody
+    // leaves the summary with the counts of a smaller paper
+    const scopeCard = data.scope
+      ? `<div class="card warn"><b>Scope of this audit</b><p>${esc(data.scope.text)}</p>${data.scope.rows && data.scope.rows.length ? `<ul class="disc">${data.scope.rows.slice(0, 25).map(r => `<li><span class="lv">·</span><span>${esc(r)}</span></li>`).join('')}</ul>` : ''}</div>`
+      : '';
 
     return `<div class="cards">${cards}</div><div class="stack">
       <div class="card map"><div class="kicker">Claim map</div><p style="margin:0 0 10px">${esc(mapIntro)}</p><div class="legend">${legend}</div><div class="mgroups">${cells}</div><p class="note" style="margin-top:10px">Point at a box, or Tab to the map, to read the claim. Click to open it.</p></div>
-      ${progress}${numberingCard}${coverageCard}${retrievalCard}
+      ${progress}${numberingCard}${coverageCard}${retrievalCard}${scopeCard}
       <p class="note">Evidence images are pages of the cited sources; each crop states whether its anchor phrase was located. The judgement is yours — verify before you rely on it.</p>
     </div>`;
   }
