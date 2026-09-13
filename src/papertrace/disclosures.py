@@ -1,14 +1,16 @@
-"""What a run must disclose — decided once in Python, rendered three times in Jinja.
+"""What a run must disclose — decided once in Python, rendered by every format.
 
-Deliberately not a shared Jinja macro. The three report formats need genuinely
+Deliberately not a shared Jinja macro. The report formats need genuinely
 different markup, so one macro would carry format switches; `report.py` escapes
 `.html.j2` templates and not `.md.j2` ones, so a macro shared between them is
 escaped differently depending on which template imported it — a correctness
 hazard on the one surface whose job is not lying; and a macro is testable only
-by rendering.
+by rendering. The viewer does not render these in Jinja at all: it embeds them
+as data and draws them in the browser, which is why they must never be
+re-derived there.
 
 Every `Disclosure` carries a `token`: a short literal that must appear verbatim
-in **all three** formats. Each format phrases at its own length around it, and
+in **all four** formats. Each format phrases at its own length around it, and
 the parity test asserts the substring — which makes "every disclosure reaches
 every reader" a loop rather than a hand-maintained checklist.
 """
@@ -21,7 +23,7 @@ from dataclasses import dataclass
 # names here would be a second vocabulary to keep in step
 from .models import JUDGMENT_VERDICTS
 
-# Tokens are the contract. Changing one is a change to all three templates, and
+# Tokens are the contract. Changing one is a change to every template, and
 # tests/test_disclosure_parity.py is what says so out loud.
 TRUNCATION_TOKEN = "text past the cut was never read"
 COVERAGE_TOKEN = "reached by an extracted claim"
@@ -56,7 +58,7 @@ SOURCE_FIDELITY_TOKEN = "cited sources read as flat text"
 TABLE_LOSS_TOKEN = "table cells were dropped by the converter"
 # how many of the converter's own messages the sentence quotes before counting
 _TABLE_LOSS_SHOWN = 2
-# Neutral on purpose. The token is asserted verbatim in all three formats, so it
+# Neutral on purpose. The token is asserted verbatim in every format, so it
 # must stay true whether every supplement was checked, none was, or some were —
 # "carry no identity check" was true when nothing could be verified and became a
 # falsehood about the checked ones the moment some could.
@@ -74,7 +76,7 @@ class Disclosure:
     #          | no_quote | claim_numbering | numbering | references_resumed
     #          | source_identity | source_fidelity
     level: str  # info | warn
-    token: str  # SHORT literal that must appear verbatim in ALL THREE formats
+    token: str  # SHORT literal that must appear verbatim in ALL FOUR formats
     text: str  # full sentence for markdown / editor
     short: str  # terse line for terminal
     rows: tuple[str, ...] = ()  # detail lines the formats cap at their own length

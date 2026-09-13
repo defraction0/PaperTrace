@@ -477,7 +477,7 @@ def _unverified_manifest():
     )
 
 
-def test_an_unconfirmed_numbering_is_disclosed_in_all_three_formats(tmp_path):
+def test_an_unconfirmed_numbering_is_disclosed_in_every_format(tmp_path):
     """The whole point of reconciling: the failure has to be visible where the
     report is read, not only in `refs_manifest.json`."""
     from papertrace.disclosures import run_disclosures
@@ -505,7 +505,7 @@ def test_a_confirmed_numbering_adds_no_warning():
     assert not any(d.key == "numbering" for d in run_disclosures(_results(), manifest))
 
 
-def test_a_claim_citing_a_doubtful_label_is_tainted_in_all_three_formats(tmp_path):
+def test_a_claim_citing_a_doubtful_label_is_tainted_in_every_format(tmp_path):
     """A run-level banner is not enough. The label is the join key, so the
     verdict itself may be about a different paper — and that has to be said
     beside the verdict, where someone acting on it will read it."""

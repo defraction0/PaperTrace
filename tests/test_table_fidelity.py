@@ -127,11 +127,11 @@ def _rendered(tmp_path, losses):
     return {p.name: p.read_text() for p in tmp_path.glob("report*.*")}
 
 
-def test_a_dropped_cell_reaches_all_three_formats(tmp_path):
+def test_a_dropped_cell_reaches_every_format(tmp_path):
     from papertrace.disclosures import TABLE_LOSS_TOKEN
 
     rendered = _rendered(tmp_path, {"xue-2024": [DROPPED]})
-    assert len(rendered) == 3, sorted(rendered)
+    assert len(rendered) == 4, sorted(rendered)
     for name, body in rendered.items():
         assert TABLE_LOSS_TOKEN in body, f"{name} does not disclose the loss"
 

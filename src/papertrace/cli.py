@@ -1108,12 +1108,17 @@ def _report_pipeline(
     manifest = RefManifest.from_json(manifest_path) if manifest_path.exists() else None
     scout_path = case / "out" / "scout.json"
     scout_res = ScoutResults.from_json(scout_path) if scout_path.exists() else None
+    # the ingested manuscript, for the viewer to underline the audited sentences
+    # in. Absent means None: the page then shows the sentences alone and says
+    # so, rather than being handed an empty manuscript to keep quiet about
+    annotated_path = case / "ingest" / "manuscript" / "annotated.md"
+    annotated = annotated_path.read_text() if annotated_path.exists() else None
     # how the paper was read, restated where it can be seen. `ingest` says this
     # once, minutes earlier and above a wall of model-loading logs; a standalone
     # `papertrace report` never said it at all.
     console.print(_provenance_line(results.converter))
     paths = write_reports(results, manifest, case / "out", png=png, scout=scout_res,
-                          formats=formats or ["md"])
+                          formats=formats or ["md"], annotated=annotated)
     for p in paths:
         console.print(f"  [green]✓[/green] {p.relative_to(case)}")
 
@@ -1130,10 +1135,10 @@ def report(
     ),
     formats: list[str] = typer.Option(
         None, "--format", "-f",
-        help="Extra looks to render beside report.md: editor | terminal (repeatable)",
+        help="Extra looks to render beside report.md: editor | terminal | viewer (repeatable)",
     ),
 ) -> None:
-    """Render report.md — and the editor/terminal looks on request — from results.json."""
+    """Render report.md — and the editor/terminal/viewer looks on request — from results.json."""
     _report_pipeline(case=case, png=png, formats=formats)
 
 
@@ -1167,7 +1172,7 @@ def run(
     ),
     formats: list[str] = typer.Option(
         None, "--format", "-f",
-        help="Extra looks to render beside report.md: editor | terminal (repeatable)",
+        help="Extra looks to render beside report.md: editor | terminal | viewer (repeatable)",
     ),
     supplement: list[Path] = typer.Option(
         None, "--supplement", exists=True,

@@ -56,7 +56,7 @@ Ranked by how much they help, with where the code lives:
 | **Reference-resolution fixture** | `tests/test_refs.py`, on `httpx.MockTransport` | an actual resolver response shape that currently mis-parses |
 | **Gold evaluation case** | `evals/gold/` against [`schemas/eval_gold.schema.json`](schemas/eval_gold.schema.json) | a claim, its source, the decisive passage, page and anchor phrases — see [`evals/DESIGN.md`](evals/DESIGN.md) |
 | **New citation style** | `_LABEL_GROUP` in `src/papertrace/check.py` + a case in `tests/test_coverage.py` | the style *plus* the test proving it is audited rather than silently passed — **and** an occurrence case: two sentences citing the same label, proving the second is reported |
-| **A new report disclosure** | `src/papertrace/disclosures.py`, then all three templates | the rule in one place with its own `token`, and `tests/test_disclosure_parity.py` asserting that token reaches every format. Adding a disclosure straight to a template is the drift this codebase already suffered once |
+| **A new report disclosure** | `src/papertrace/disclosures.py`, then the three Jinja-rendered templates (the viewer draws the embedded list generically) | the rule in one place with its own `token`, and `tests/test_disclosure_parity.py` asserting that token reaches every format. Adding a disclosure straight to a template is the drift this codebase already suffered once |
 | **Another model backend** | the `_ask` seam in `src/papertrace/check.py` | a backend behind the same seam, with the model recorded in the report |
 
 Gold cases are the highest-leverage thing right now: the evaluation set is the

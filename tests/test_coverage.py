@@ -865,7 +865,7 @@ def test_uncovered_occurrences_are_listed_with_page_and_sentence_everywhere(tmp_
         assert "p.4" in body or "page 4" in body.lower(), name
 
 
-def test_the_attribution_self_caveat_is_in_all_three_formats(tmp_path):
+def test_the_attribution_self_caveat_is_in_every_format(tmp_path):
     """Occurrence coverage stops being pure arithmetic, so the report carries
     its own caveat — as a Disclosure with a token, which is what makes the
     parity rule mechanical rather than a checklist."""

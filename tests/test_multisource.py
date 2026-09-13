@@ -462,7 +462,7 @@ def _four_source_claim():
     return claim
 
 
-def test_the_source_summary_reaches_all_three_formats(tmp_path):
+def test_the_source_summary_reaches_every_format(tmp_path):
     """The parity contract: a disclosure added to one format only is the drift
     this module exists to prevent, and the summary box is a new disclosure."""
     from papertrace.disclosures import MULTISOURCE_TOKEN
@@ -554,7 +554,7 @@ def test_a_claim_with_no_judgements_carries_no_qualifier():
     assert claim.headline_qualifier() == ""
 
 
-def test_the_headline_qualifier_reaches_all_three_formats(tmp_path):
+def test_the_headline_qualifier_reaches_every_format(tmp_path):
     """The parity contract again: a status line qualified in the markdown but
     not the HTML would leave the overstatement exactly where it is most often
     read."""

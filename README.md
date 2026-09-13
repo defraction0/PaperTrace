@@ -147,10 +147,11 @@ went uncited?**
   `◌` becomes the headline only when no available source addressed the claim
   at all. The per-source breakdown beside the headline is where an inapt
   citation stays visible.
-- Disclose its ingest fidelity: every report — markdown, editor and terminal —
-  names the converter that read the audited paper, and a flat-text fallback
-  says so loudly. The cited sources get the **same** backend, and any source
-  that was nonetheless read as flat text is named by slug in all three reports
+- Disclose its ingest fidelity: every report — markdown, editor, terminal and
+  the interactive viewer — names the converter that read the audited paper,
+  and a flat-text fallback says so loudly. The cited sources get the **same**
+  backend, and any source that was nonetheless read as flat text is named by
+  slug in all four reports
   — a verdict resting on a linearized table is weaker than one resting on the
   table (see *Tables and figures are evidence too*).
 - **Identify a reference PDF from the file itself**, not from what it is
@@ -175,7 +176,7 @@ went uncited?**
   to. Where its own title or DOI names that work, it does; where only its
   filename matched, nothing read it, and the audited paper's own are whatever
   you passed to `--supplement`. That last case is the thinnest provenance
-  anything here carries, and all three reports name which files it applies to
+  anything here carries, and all four reports name which files it applies to
   rather than warning about every supplement equally.
 - **Guarantee** it can place every PDF you supply. Identification needs a
   readable title or a DOI on the first page, so a scanned copy with no text
@@ -400,13 +401,28 @@ It holds `report.md` with inline evidence images, plus machine-readable
 `results.json` and `scout.json`. The retrieval manifest is written one level
 up, at `<case>/refs_manifest.json`.
 
-The same report also renders as a dark **editor-window** page and as a
-**terminal-run** page, on request: `--format editor`, `--format terminal`, or
-both (`-f` for short, repeatable). They are for sharing and for screenshots, so
-they are not written unless asked for — `report.md` is the record and is always
-written. Want shareable PNG images of those looks? Add `--png`, which renders
-the HTML it needs whether or not you asked for it (one-time setup:
-`playwright install chromium`).
+The same report also renders as a dark **editor-window** page, as a
+**terminal-run** page, and as an interactive **viewer**, on request:
+`--format editor`, `--format terminal`, `--format viewer`, or any combination
+(`-f` for short, repeatable). None is written unless asked for — `report.md`
+is the record and is always written.
+
+The viewer (`report_viewer.html`) is the one built for *reviewing* rather than
+reading: the processed manuscript on the left with every audited sentence
+underlined in its verdict's colour, and on the right — for whichever sentence
+you click — the cropped source page with its red boxes, the checker's rationale
+and the caveats. Verdict, section and text filters, a claim map, per-source and
+gap registers, the scout's candidates, keyboard navigation (`j`/`k`/`r`/`/`),
+a reviewed checkbox per claim that stays in your browser, and export (markdown
+with your reviewed marks, print, a review checklist as JSON) live in the right
+column. The manuscript comes from `ingest/manuscript/annotated.md`; a case
+folder without it still opens, with the audited sentences alone and a line
+saying so. The page embeds its data and fonts and never touches the network.
+It is not a screenshot target.
+
+The editor and terminal looks are for sharing and for screenshots. Want
+shareable PNG images of them? Add `--png`, which renders the HTML it needs
+whether or not you asked for it (one-time setup: `playwright install chromium`).
 
 **`--doi` is the DOI of the paper you are auditing** — not of anything it
 cites. It is optional, it defaults to the DOI printed on the paper's own first
@@ -532,7 +548,7 @@ backend wrote: reusing a flat map under `--backend docling` would hand the
 judge the linearized table while the run reported layout-aware ingest. A source
 can still end up flat — you asked for `--backend pymupdf`, or its map survives
 from an earlier run whose PDF is no longer on disk — and every such source is
-**named** in all three reports rather than left to be assumed.
+**named** in all four reports rather than left to be assumed.
 
 ## Try the demo yourself
 
@@ -603,7 +619,7 @@ paper.pdf ─────ingest──▶ clean.md + source_map.json       (page 
       │
       └─report──▶ report.md          (always)
                     · report_editor.html/png · report_terminal.html/png
-                                                          (--format / --png)
+                    · report_viewer.html                  (--format / --png)
 ```
 
 The JSON contracts are versioned in [`schemas/`](schemas/). The two skills in

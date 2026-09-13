@@ -6,6 +6,52 @@ All notable changes to PaperTrace are documented here. The format follows
 
 ## [0.6.0] — unreleased
 
+### Added — an interactive report viewer: `--format viewer`
+
+`report_viewer.html` is a fourth look on the same `results.json`, and the
+first one built for *reviewing* rather than reading: the processed manuscript
+on the left with every audited sentence underlined in its verdict's colour,
+and on the right — for whichever sentence is selected — the cropped source page
+with its red boxes, the checker's rationale and the caveats. Summary cards, a
+claim map (one box per audited claim in reading order, grouped by section),
+per-source and gap registers, the scout's candidates, verdict/section/text
+filters, keyboard navigation (`j`/`k`/`r`/`/`), a reviewed checkbox per claim
+that persists in the browser, and export (markdown regenerated with the
+reviewed marks, print, a review checklist as JSON) live in the right column.
+
+It works offline. `results.json`, `annotated.md`, `scout.json`, the retrieval
+manifest and every disclosure are embedded in the page — escaped for a script
+context, so a cited source's text cannot end the element it sits in — the two
+scripts are inlined, and the fonts ride in `assets/` beside it. Nothing is
+fetched when it is opened: a report on an unpublished manuscript must not phone
+a font host.
+
+The manuscript is `ingest/manuscript/annotated.md`, whose block markers let
+each audited sentence be placed by text search. A claim's `ctx_ids` name the
+block the extractor read it from, and that block is searched first, so a
+sentence the paper repeats lands where it was cited and not on the first
+paragraph that happens to carry it. What cannot be placed is counted as such —
+*"125 of 137 audited sentences located in the text"* — and the claim's panel
+says *quote not located in the processed manuscript text*; there is no
+nearest-sentence fallback. A case folder with no `annotated.md` still opens:
+the page builds a skeleton from the audited sentences and says on its face
+that the full manuscript is not shown.
+
+Disclosures are decided in Python and travel with the data, never re-derived
+in the browser. The page renders every one — run-level in the Summary tab,
+claim-level in the claim's caveats, the anchor state as each crop set's single
+caption (the red box may sit in any crop of a passage that crosses a break, so
+no crop is captioned on its own) — and the parity suite now asserts each token
+in four formats rather than three. The manifest is embedded without
+`pdf_path`: the viewer is the one report meant to be sent to someone else, and
+the absolute paths of the auditor's PDFs are not part of the audit.
+
+`--png` does not screenshot it — a sticky header over a panel that scrolls on
+its own records nothing as a static image — and does not imply it. The
+browser-side logic is a DOM-free module, `templates/viewer_logic.js`, run
+under node by `tests/test_report_viewer_js.py` (which skips, visibly, when
+node is not on PATH); `templates/viewer_app.js` only draws.
+
 ### Added — a provided PDF is identified by what is in it
 
 `--provided` matched on the **filename** and nothing said so. It needs the

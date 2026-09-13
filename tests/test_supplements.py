@@ -810,7 +810,7 @@ def test_no_format_renders_an_empty_citation_label(tmp_path):
 # --- reports: the disclosures supplements owe the reader -------------------
 
 
-def test_a_supplement_is_disclosed_as_unverified_in_all_three_formats(tmp_path):
+def test_a_supplement_is_disclosed_as_unverified_in_every_format(tmp_path):
     """Every article is checked against the reference that names it. A
     supplement's title does not match its parent's, so that check cannot apply
     and is not faked — which makes this the weakest provenance in the tool, and
@@ -857,7 +857,7 @@ def test_neither_disclosure_fires_when_no_supplement_was_read():
     assert "supplement_coverage" not in keys
 
 
-def test_a_headline_decided_by_a_supplement_says_so_in_all_three_formats(tmp_path):
+def test_a_headline_decided_by_a_supplement_says_so_in_every_format(tmp_path):
     """The claim reads `contradicted` on the strength of an appendix while the
     article of record is silent. A reader acting on the headline alone needs
     that on the claim, not only in a run-level footnote."""
