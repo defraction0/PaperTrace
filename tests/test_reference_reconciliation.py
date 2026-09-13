@@ -1204,4 +1204,14 @@ def test_a_token_matched_provided_file_that_is_another_paper_is_not_used(tmp_pat
     assert seven.status == "no_doi"
     # and the file it declined is named, because the tool knows it considered one
     assert "smith-2019.pdf" in seven.reason
-    assert "different paper" in seven.reason
+    # Which reason, and why this assertion changed. Until the one-file-one-
+    # reference rule, [7] was refused by the TITLE CHECK — "its first page is a
+    # different paper" — and this line asserted that wording. The file is now
+    # refused earlier and on stronger ground: it is owned by [2], by an exact
+    # `<slug>.pdf` stem, so it was never a candidate for [7] at all. Both facts
+    # are true; the ownership one does not depend on a token veto having
+    # precision, and on a real 101-reference bibliography that veto had none —
+    # it passed eight wrong pairings at 5/13 to 13/19. Every behavioural assert
+    # above is unchanged.
+    assert "[2]" in seven.reason, seven.reason
+    assert "one reference only" in seven.reason, seven.reason

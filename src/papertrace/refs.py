@@ -9,6 +9,7 @@ fact-check step reports those claims as unverifiable instead of guessing.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -821,6 +822,9 @@ def _download_pdf(client: httpx.Client, url: str, dest: Path) -> bool:
 # the three answers the check can give. "unverifiable" used to share `None`
 # with "verified", so a scanned PDF someone supplied by hand was reported as
 # `matched ...` — a successful identity check that never happened.
+# How many owned-elsewhere files a gap names before it just counts them.
+_WITHHELD_SHOWN = 3
+
 TITLE_VERIFIED = "verified"
 TITLE_UNVERIFIABLE = "unverifiable"
 TITLE_MISMATCH = "mismatch"
@@ -948,6 +952,121 @@ def _provided_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Pat
     slug = (entry.slug or "").lower()
     matches = [p for p in _named_for(entry, provided_dir) if not _SUPPLEMENT_RE.search(p.stem)]
     return sorted(matches, key=lambda p: (p.stem.lower() != slug, len(p.stem), p.name))
+
+
+def _fold(text: str) -> str:
+    """Lowercase, with diacritics decomposed away — `İnce` → `ince`.
+
+    `_slug` deletes non-ASCII instead (`[^A-Za-z\\-]`), which is why `İnce O`
+    slugs `nce-2023` and `Müller` slugs `mller`. Folding is what a name
+    comparison needs: a surname that vanished cannot agree with its own paper.
+    """
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
+
+
+def _first_surname(raw: str) -> str:
+    """The first author's surname from a printed reference, folded, or "".
+
+    Two printed styles turn up and both have to work: `Smith J, Jones B` and
+    `M.A. Slabaugh, N.A. Friel`. `_slug` takes the first letter-bearing token and
+    so reads `F.P. Rivara` as `fp` — the divergence `_same_work` documents. A
+    leading run of initials is skipped here instead.
+    """
+    for token in re.split(r"[,\s]+", (raw or "").strip()):
+        folded = re.sub(r"[^a-z\-]", "", _fold(token)).strip("-")
+        if not folded:
+            continue
+        # `M.A.` / `F.P.` / `J` — an initials group, not a surname. Recognised by
+        # the printed dots or a lone capital, never by length alone: `Bo`, `Ma`
+        # and `He` are real surnames in this corpus.
+        if token.replace(".", "").isupper() and "." in token:
+            continue
+        if len(folded) == 1:
+            continue
+        return folded
+    return ""
+
+
+CORROBORATION = ("agree", "disagree", "unknown")
+
+
+def corroborate(entry: RefEntry, pdf: Path) -> tuple[str, str]:
+    """Do the reference's first author and year agree with the file? Three answers.
+
+    Reported beside an attribution and **decides nothing** — measured, it cannot.
+    Requiring the surname on the first page vetoes 7 of 8 real misattributions
+    but also refuses a correct source, because journal PDFs glue affiliation
+    superscripts to surnames (`Yin1` has no word boundary before the digit), and
+    it still cannot separate two Zhang 2024 papers in one bibliography. A false
+    gap is no better than a false verdict, so this informs the reader instead.
+
+    `unknown` is a third answer, not a soft `disagree`: 10 of 39 real files carry
+    no `/Author` at all, and silence about identity is not evidence against it.
+    """
+    surname = _first_surname(entry.raw)
+    author = _pdf_author(pdf)
+    if not surname or not author:
+        return "unknown", "the file declares no author to compare"
+    agrees = re.search(rf"\b{re.escape(surname)}\b", _fold(author)) is not None
+    year_note = ""
+    if entry.year:
+        page = _fold(_first_page_text(pdf))
+        year_note = (f" and the year {entry.year} appears on its first page"
+                     if entry.year in page else
+                     f", though the year {entry.year} does not appear on its first page")
+    if agrees:
+        return "agree", f"first author {surname.title()} matches the file{year_note}"
+    return "disagree", (
+        f"the reference's first author is {surname.title()} but the file declares "
+        f"“{author}”{year_note}"
+    )
+
+
+def _corroboration_note(entry: RefEntry, pdf: Path) -> str:
+    """The corroboration as report text, or "" when there is nothing to say.
+
+    `unknown` prints nothing: a reason that says "no author to compare" for the
+    ten files in forty that carry no metadata is noise, and the identity claim
+    beside it already states what WAS established.
+    """
+    state, detail = corroborate(entry, pdf)
+    if state == "unknown":
+        return ""
+    return f" · {'⚠ ' if state == 'disagree' else ''}{detail}"
+
+
+def _pdf_author(pdf: Path) -> str:
+    """What the PDF's metadata says its author is, or "". Never raises."""
+    try:
+        import pymupdf as fitz
+    except ImportError:  # pragma: no cover
+        import fitz
+    try:
+        with fitz.open(pdf) as doc:
+            return " ".join(((doc.metadata or {}).get("author") or "").split())
+    except Exception:  # noqa: BLE001 — an unreadable author is one more unknown
+        return ""
+
+
+def _exact_stem_claims(entry: RefEntry, provided_dir: Path | None) -> list[Path]:
+    """The file whose stem IS this reference's slug — a list so it composes.
+
+    The only unambiguous thing a filename can assert. `_named_for`'s token
+    containment is a proposal by comparison: it keeps slug tokens over three
+    characters, so `nce-2023`, `ma-2023` and `ren-2023` all reduce to the year
+    and one `li-2023.pdf` satisfied every one of them.
+
+    Kept separate from `_provided_candidates` rather than folded into it,
+    because the two answer different questions — this one is "did the user say
+    so", and ownership may only ever rest on that or on the file's own DOI.
+    """
+    if not provided_dir or not provided_dir.is_dir():
+        return []
+    slug = (entry.slug or "").lower()
+    if not slug:
+        return []
+    return [p for p in sorted(provided_dir.glob("*.pdf")) if p.stem.lower() == slug]
 
 
 def _supplement_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Path]:
@@ -1325,6 +1444,7 @@ def resolve_entry(
     client: httpx.Client,
     provided_dir: Path | None = None,
     content_match: Identified | None = None,
+    owners: dict[Path, str] | None = None,
 ) -> RefEntry:
     """Resolve one reference in place. Never raises — failures land in status/reason.
 
@@ -1332,6 +1452,14 @@ def resolve_entry(
     from its own DOI or title. Consulted only after the filename rule has had
     its say: the filename is the user's own assertion about the file, and
     content fills the gap it leaves rather than overruling it.
+
+    `owners` maps a provided file to the reference number that owns it — an
+    exact `<slug>.pdf` stem, or its own DOI. A file owned by another reference
+    is not a candidate here, however well its name matches. That constraint is
+    the whole point: without it one `li-2023.pdf` answered for four different
+    papers, each with `identity confirmed`, because the token key had collapsed
+    to the year and the token veto had no precision left on a bibliography whose
+    references are all about one subject.
     """
     # before anything else: an ambiguous boundary makes `raw` two references
     # spliced together, so the slug, the title and any Crossref lookup derived
@@ -1343,7 +1471,21 @@ def resolve_entry(
     dest = dest_dir / f"{entry.slug}.pdf"
 
     refused: Path | None = None
-    if candidates := _provided_candidates(entry, provided_dir):
+    # one file, one reference — enforced before the ranking, so a foreign-owned
+    # file cannot be picked and then vetoed on a check that has already been
+    # measured to pass for the wrong paper
+    withheld: list[tuple[Path, str]] = []
+    all_candidates = _provided_candidates(entry, provided_dir)
+    if owners:
+        kept = []
+        for cand in all_candidates:
+            holder = owners.get(cand)
+            if holder is not None and holder != entry.num:
+                withheld.append((cand, holder))
+            else:
+                kept.append(cand)
+        all_candidates = kept
+    if candidates := all_candidates:
         # Ranked, and now read in order rather than by taking the first: a
         # reference whose slug carries a uniqueness suffix can match a file named
         # after the base slug, and that file is another reference's paper.
@@ -1383,7 +1525,10 @@ def resolve_entry(
                 # same thing to a reader: nobody established that this file is
                 # the paper the reference names
                 note = f" — identity unverified: {detail}"
-            entry.reason = f"matched {provided.name} in your sources folder{others}{note}"
+            entry.reason = (
+                f"matched {provided.name} in your sources folder{others}{note}"
+                f"{_corroboration_note(entry, provided)}"
+            )
             return entry
 
     if content_match is not None:
@@ -1399,6 +1544,7 @@ def resolve_entry(
             f"identified {pdf.name} in your sources folder by its "
             f"{'own DOI' if content_match.signal == 'DOI' else 'title'} — its filename "
             "names no reference, so nothing but the file itself chose it"
+            f"{_corroboration_note(entry, pdf)}"
         )
         return entry
 
@@ -1413,6 +1559,24 @@ def resolve_entry(
             "first page is a different paper, and the file is not named for this "
             "reference, so nobody chose it for this one"
         )
+    if withheld and not entry.pdf_path:
+        # The tool knows exactly which reference each of those files belongs to,
+        # so a bare gap here would be withholding it. Naming the owner also lets
+        # a reader check the opposite error: if [76] is wrong, this says where to
+        # look.
+        #
+        # Capped at three. A slug whose only surviving token is the year matches
+        # every file of that year — `nce-2023` named fourteen of them on a real
+        # bibliography — and a reason listing all fourteen tells the reader less
+        # than the count does.
+        shown = ", ".join(f"{p.name} → [{holder}]" for p, holder in withheld[:_WITHHELD_SHOWN])
+        if len(withheld) == 1:
+            detail = f"{shown}"
+        else:
+            more = len(withheld) - _WITHHELD_SHOWN
+            detail = f"{len(withheld)} files matched its name and every one belongs elsewhere ({shown}"
+            detail += f", and {more} more)" if more > 0 else ")"
+        entry.reason = f"{entry.reason}. Set aside: {detail} — a file answers for one reference only"
     return entry
 
 
@@ -1521,13 +1685,23 @@ def resolve_all(
     taken |= {e.slug for e in entries if e.slug}
     # Content inference runs once, over the whole folder, BEFORE the per-entry
     # loop: the filename rule asks "which files could be this entry?" and this
-    # asks the opposite. Everything the filename rule could claim — as an
-    # article or as a supplement — is withheld from it, so the user's own naming
-    # always decides first and content only fills the gap it leaves.
+    # asks the opposite.
+    #
+    # Only what the filename rule claims UNAMBIGUOUSLY is withheld — a stem that
+    # IS the slug, and a supplement match. Token containment used to be withheld
+    # too, and that is what let one file answer for four references: measured on
+    # a 101-reference paper, `li-2023.pdf` was hidden from content inference
+    # because `nce-2023`, `ma-2023` and `ren-2023` all token-match it on the year
+    # alone, so nothing could establish whose paper it actually was. A token
+    # match is a proposal; it no longer conceals the file from the one pass that
+    # can decide.
+    #
+    # Supplement filename matches stay withheld: `attach_supplements` merges the
+    # named and inferred sets by path, and one file in both would attach twice.
     claimed = {
         p
         for e in entries
-        for p in _provided_candidates(e, provided_dir) + _supplement_candidates(e, provided_dir)
+        for p in _exact_stem_claims(e, provided_dir) + _supplement_candidates(e, provided_dir)
     }
     identified, _unidentified = identify_by_content(entries, provided_dir, claimed)
     articles: dict[str, Identified] = {}
@@ -1545,10 +1719,20 @@ def resolve_all(
             articles.setdefault(found.entry.num, found)
         else:
             supplements.setdefault(found.entry.num, []).append(found)
+    # Who owns each file — the constraint that was missing. Attributing provided
+    # PDFs is a MATCHING: one file to at most one reference. Every rule here was
+    # a per-entry decision, so nothing could say "this file is already [76], so
+    # it is not [75]" and the result was a one-to-many relation. Content first,
+    # then exact stems overwrite it: a stem that is the slug is the user's own
+    # assertion about the file and outranks what the file says about itself.
+    owners: dict[Path, str] = {f.path: f.entry.num for f in identified.values()}
+    for e in entries:
+        for p in _exact_stem_claims(e, provided_dir):
+            owners[p] = e.num
     with _client() as client:
         for entry in entries:
             resolve_entry(entry, dest_dir, email, client, provided_dir,
-                          content_match=articles.get(entry.num))
+                          content_match=articles.get(entry.num), owners=owners)
             # after resolution, never before: whether a supplement may attach at
             # all depends on the status `resolve_entry` just decided
             attach_supplements(entry, provided_dir, taken,

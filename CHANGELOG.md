@@ -126,6 +126,246 @@ is the guard working, not a regression.
 
 Judgement quality here is **unmeasured**, like everything since ADR 0001.
 
+### Fixed — a dropped table cell is a disclosure, not console noise
+
+A real audit printed roughly two hundred lines of this during ingest:
+
+```
+MatchingPostProcessor WARNING  Orphan pdf_cell 186 recovered to col=6 by
+                               nearest-column fallback (row=11, x=620.5)
+```
+
+They come from docling's TableFormer post-processor via
+`logging.getLogger("MatchingPostProcessor")` — a bare top-level name whose
+**parent is `root`**, which the library levels itself and to which it attaches
+its own `StreamHandler(sys.stdout)`. `_quiet_third_party_loggers` levels
+`"docling"`, so it could never reach it.
+
+Those are repairs and they are noise. Buried among them was one that is not:
+
+```
+5 of 65 pdf cells matched neither a row nor a column band of the 24x4 grid
+and were dropped from the table
+```
+
+That is text missing from a cited source's table, reaching the user only as a
+stray line from a third-party library. **Silencing the logger without surfacing
+that would have hidden a fidelity loss**, so the same filter does both: it
+swallows the logger's output and captures what is not a repair.
+
+The classification **defaults to surfacing**. Only the self-describing recovery
+messages count as noise; anything else that logger emits is kept and reported.
+The wording belongs to `docling-ibm-models` and changes between versions — the
+message above does not exist in the version resolved by `docling>=2.0` at the
+time of writing — so matching the loss literally would under-report silently on
+a version nobody has seen. Matching the *repair* fails the safe way.
+
+A `logging.Filter` rather than a level, because the library calls `setLevel` on
+that logger itself while the models load, overwriting anything set beforehand;
+filters are consulted after the level check. It is installed for one conversion
+and removed even when the conversion raises.
+
+Wire format: `SourceMap.table_warnings` and `RunResults.source_table_warnings`,
+both schema-declared. `table_warnings` has **three** answers —
+messages (something was lost), `[]` (watched, nothing lost), and `null` (nobody
+watched: a map written before this, or a backend with no table model). `null`
+must never be read as "nothing was lost". The new `table_loss` disclosure
+carries the converter's own count verbatim, because "5 of 65" is the finding and
+"cells were dropped" is not.
+
+### Fixed — a passage crossing a column or page break is shown in full
+
+An evidence crop was one rectangle on one page, so a passage continuing into the
+next column or overleaf was shown only as far as its opening. The reader saw
+where the evidence began and never where it was.
+
+The cause was ingest throwing away data it had been given. `prov` is a list and
+`_item_prov` returned `prov[0]`, so only the rectangle a block's opening sat in
+survived — while docling states `page_no`, `bbox` **and** `charspan` for every
+rectangle. Measured on one 14-page cited source: **14,367 characters sat outside
+the rectangle their block claimed**, and five blocks were on two pages at once
+while `Block.page` named one of them.
+
+```
+block_0012  3 rectangles, text length 2554
+  page 2  chars    0- 295   ← the only one kept
+  page 2  chars  296-2152   the right column
+  page 3  chars 2153-2554   overleaf
+```
+
+`Block.regions` now records all of them and `crop_for_anchor` returns one image
+per rectangle, in reading order, each with its own matched text boxed.
+`crop_evidence` is untouched — it already boxed exactly the hits intersecting
+the region it was handed.
+
+Measured on a real 101-reference audit before the fix: **17 of 31 anchored
+judgements had located anchor text outside the crop region**, 4 of them on the
+next page. On a fresh end-to-end run of one of those claims, the verdict's
+evidence turned out to be on page 3 of the source — a page the report had no way
+to show, so the crop came back unboxed and captioned "no anchor phrase could be
+boxed" while the phrase sat two rectangles away.
+
+`anchor_located` is now true when **any** image carries a box, and
+`_downgrade_unshowable` no longer discards a verdict whose boxes are in a
+continuation. The continuation filename carries the region ordinal, not the
+page: two rectangles can share a page, and the unconditional save would have
+left one image holding the other's picture.
+
+Wire format: `Block.regions` (source map) and `continuation_images` on both the
+claim and the judgement (results). Both schema-declared and absent-safe —
+**empty means not recorded, never "no continuation"**, so an older source map
+keeps the single-rectangle behaviour it always had. Continuations appear only
+for sources ingested after this change.
+
+Two caption defects went with it, both found by rendering the report and reading
+it. The first image carried the judgement's anchor caption, so a crop where the
+passage merely opens — no box in it at all — was captioned "red box = matched
+text"; the caption describes the set and now sits below the images. And
+"the anchor phrase was located on this page" was false whenever the box is in a
+continuation on another page.
+
+### Fixed — a quote crossing a column break was boxed nowhere at all
+
+A two-column page splits a sentence at the column break, so a decisive passage
+often continues in the next column. `crop_evidence` bounded its text search
+with `search_for(phrase, clip=region)` — and PyMuPDF discards the **whole**
+match when any part of it falls outside the clip, not just the outside part.
+One phrase on one real page:
+
+```
+unclipped         [[268, 206, 278, 219], [40, 220, 154, 232], [305, 60, 407, 72]]
+clip = the block  []
+```
+
+So no box was drawn, and the crop was captioned as unboxed — the tool
+admitting a failure it had not suffered, on a quote that was verbatim on the
+page. The search is now unclipped and the hits are filtered by intersection
+with the region, so the crop region bounds what is **rendered** and no longer
+decides what counts as a match. The invariant that makes a box trustworthy is
+unchanged: a box is only ever drawn where `search_for` found the text, and only
+inside the region on screen.
+
+Still open, and unaffected by this: the region is one block's bbox on one page,
+so the continuation itself is not shown.
+
+### Fixed — an unboxed crop no longer says the phrase is absent from the page
+
+`anchor_located = False` records that nothing could be boxed **inside the
+cropped region** — and the region is one block's bbox. A passage continuing
+into the next column is on the page and outside the region at once, so
+"no anchor phrase was found on this page" asserted an absence nobody
+established. It is live in the demo: claim 4's three anchor phrases have five
+hits on page 3 of the cited source, under that caption.
+
+```
+- no anchor phrase was found on this page — the crop is shown for context and nothing is boxed.
++ no anchor phrase could be boxed — none was found inside the region this crop shows, so the crop is shown for context only.
+```
+
+⚠️ `ANCHOR_NOT_LOCATED_TOKEN` changes value. It is a published literal that
+`tests/test_pipeline.py` and `tests/test_multisource.py` assert appears in all
+three formats; anything outside this repo matching the old string will stop
+matching. The `located` wording is untouched — a boxed phrase really was found
+on the page.
+
+`examples/demo/output/report.md` still carries the old sentence: it is the
+output of a live audit and is regenerated by a demo run, not edited.
+
+### Fixed — one provided PDF answered for four different references
+
+Found by auditing a real 101-reference paper with 39 provided PDFs: **six files
+were each attributed to 2–4 references, and every one was reported as
+`identity confirmed`.**
+
+```
+li-2023.pdf → [75] nce-2023   7/16 tokens   İnce O… prediction of treatment response after TACE
+              [76] li-2023   19/19 tokens   Li J… nomogram for hepatocellular carcinoma   ← the real one
+              [78] ma-2023    7/12 tokens   Ma J… response to lenvatinib combined with TACE
+              [81] ren-2023   7/14 tokens   Ren H… local tumor progression after microwave ablation
+```
+
+Every claim citing the wrong ones would have been judged against a different
+paper, and shown as a correctly red-boxed crop of it.
+
+Attributing provided files is a **matching** — one file to at most one
+reference — and it was solved as one independent decision per reference, so
+nothing could ever say *"this file is already [76], so it is not [75]."* Two
+lossy steps then made collisions the norm rather than the exception: `_slug`
+strips non-ASCII, so `İnce` becomes `nce`, and `_named_for` keeps only slug
+tokens over three characters, so `nce-2023`, `ma-2023` and `ren-2023` all reduce
+to the key `{"2023"}` — matched by every 2023 filename. The title check that was
+meant to catch this passed all of them, because a bag-of-words containment ratio
+has no precision left on a bibliography whose references are uniformly about one
+subject.
+
+**A file now answers for one reference only.** Ownership rests on an exact
+`<slug>.pdf` stem — your own assertion — or on the file's own DOI or unique
+title, and a file owned elsewhere is not a candidate however well its name
+matches. Token containment proposes; it no longer decides. The gap names the
+owner rather than reporting a bare failure:
+
+```
+[75] … Set aside: 14 files matched its name and every one belongs elsewhere
+     (li-2023.pdf → [76], goto-2023.pdf → [12], sato-2023.pdf → [80], and 11 more)
+     — a file answers for one reference only
+```
+
+Measured on that corpus: 39/39 files attributed, one-to-one, all six
+misattributions gone, no file lost. `identify_by_content` needed no change — it
+was already correct and was simply never consulted, because every
+token-matchable file was withheld from it.
+
+Not done here, deliberately: `_slug` still strips non-ASCII (`Müller`→`mller`,
+`Gençtürk`→`gentrk`), so a user's `ince-2023.pdf` cannot match slug `nce-2023`.
+That is a real bug, it is independent of this one, and fixing it renames
+`ingest/<slug>/` and every report source id — so it gets its own change.
+
+### Added — the first author and year are reported beside an attribution
+
+A bibliography always prints at least a first author and a year, so the manifest
+now says whether they agree with the file it accepted:
+
+```
+[1] matched yanagawa-2023.pdf … identity confirmed: 14/14 reference tokens on its
+    first page · first author Yanagawa matches the file and the year 2023 appears
+    on its first page
+```
+
+**It gates nothing, and that is measured rather than cautious.** Requiring the
+surname on the first page would have vetoed 7 of the 8 misattributions above —
+but it also refuses `yin-2024.pdf`, the *correct* source for its reference,
+because journal PDFs glue affiliation superscripts to surnames and `Yin1` has no
+word boundary before the digit. And it still cannot separate the two different
+Zhang 2024 papers in that same bibliography. A false gap is no better than a
+false verdict, so this informs the reader instead of deciding.
+
+Three answers, not two: `unknown` prints nothing, because 10 of those 39 files
+carry no `/Author` metadata and silence about identity is not evidence against
+it. Across all 39 attributions: 29 agree, 10 unknown, **0 false disagreements**.
+
+Surnames fold rather than vanish here (`İnce`→`ince`, `Müller`→`muller`) — the
+first use of `unicodedata` in the codebase — and a leading run of initials is
+skipped, so `F.P. Rivara` reads `rivara` and not `fp`.
+
+### Fixed — the uncited register was one paragraph, not a list
+
+`report.md` is rendered with `trim_blocks=True`, which strips the newline after
+**any** block tag. The uncited-assertion line ended in `{% endif %}`, so every
+item was emitted with no line ending:
+
+```
+- **[U1]** … *(Abstract, Background)*- **[U2]** Although MRI is highly sensitive…
+```
+
+Nine assertions on a real paper rendered as **one** list item. Both HTML looks
+were correct throughout — `<li>` does not depend on newlines — so only
+`report.md` was affected. Fixed with Jinja2's `+%}`, which the template already
+uses on the two lines where this had been noticed.
+
+The committed demo has exactly one uncited assertion, so a single-item fixture
+had been testing the separator between items vacuously for as long as the
+section has existed.
+
 ## [0.5.0] — unreleased
 
 0.4.1 was never released, so its entries below ship together with these.

@@ -2,7 +2,9 @@
 
 Boxes come from text search on the PDF — never hand-placed — so a box always
 sits where the evidence actually is. The crop region defaults to the anchored
-block's bbox (from the source's own source_map), padded for context.
+block's bbox (from the source's own source_map), padded for context; it bounds
+what is rendered and which hits are kept, and is never handed to `search_for`,
+whose own clip discards a column-spanning match whole.
 
 A quote can miss the page for typesetting reasons alone: a hyphenated line break
 reads as "Non- Hispanic" to `search_for`, and the text the model read says
@@ -71,21 +73,26 @@ def _as_the_page_breaks_it(page, phrase: str) -> str:
     return phrase
 
 
-def _search(page, phrase: str, clip=None) -> list:
-    """Locate `phrase` on `page`; retry the page's own hyphenation of it.
+def _search(page, phrase: str) -> list:
+    """Locate `phrase` anywhere on `page`; retry the page's own hyphenation of it.
 
     Every candidate is still an exact `search_for`, and every difference from
     the model's phrase comes from the page: whitespace beside a dash the phrase
     already carries, or a break the page itself makes. Returns [] when the page
     carries none of them — a genuine miss stays a miss, and the caller records
     anchor_located = False rather than boxing something that resembles the quote.
+
+    Deliberately takes no `clip`: `search_for`'s own clip drops a match that
+    straddles the region's edge WHOLE, so a quote continuing into the next
+    column matched nothing at all. Callers bound the boxes themselves — see
+    `crop_evidence`.
     """
     for candidate in _dash_variants(phrase):
-        hits = page.search_for(candidate, clip=clip)
+        hits = page.search_for(candidate)
         if hits:
             return hits
     broken = _as_the_page_breaks_it(page, phrase)  # last, it costs a text extraction
-    return page.search_for(broken, clip=clip) if broken != phrase else []
+    return page.search_for(broken) if broken != phrase else []
 
 
 def source_page_count(pdf_path: Path) -> int:
@@ -129,7 +136,12 @@ def crop_evidence(
 
     boxes = 0
     for phrase in phrases:
-        for hit in _search(page, phrase, clip=rect):
+        for hit in _search(page, phrase):
+            # the region bounds what is DRAWN, not what counts as a match. A hit
+            # elsewhere on the page is not this block's evidence and would land
+            # outside the image; a hit that merely continues past the edge is.
+            if not rect.intersects(hit):
+                continue
             x0 = (hit.x0 - BOX_PAD - rect.x0) * zoom
             y0 = (hit.y0 - BOX_PAD - rect.y0) * zoom
             x1 = (hit.x1 + BOX_PAD - rect.x0) * zoom
@@ -144,8 +156,8 @@ def crop_evidence(
 
 
 def crop_for_anchor(anchor, claim_id: int, sources_dir: Path, ingest_root: Path,
-                    out_dir: Path) -> str | None:
-    """Produce the evidence crop for one anchored judgement.
+                    out_dir: Path) -> list[str]:
+    """Produce the evidence crops for one anchored judgement, in reading order.
 
     `anchor` is anything carrying source_slug / source_page / source_block /
     anchor_phrases / anchor_located — a ClaimResult (its headline) or a single
@@ -153,33 +165,52 @@ def crop_for_anchor(anchor, claim_id: int, sources_dir: Path, ingest_root: Path,
     sees the passage behind each verdict rather than one paper standing in for
     all of them; the slug is in the filename, so the crops cannot collide.
 
+    **One image per rectangle the passage occupies.** A paragraph that continues
+    into the next column or onto the next page is several rectangles, and
+    cropping only the first showed the reader where the evidence began and never
+    where it was: measured on a real audit, 17 of 31 anchored judgements had
+    located text outside that first rectangle. The rectangles come from
+    `Block.regions` — the converter's own per-rectangle provenance — so which
+    ones exist is recorded rather than inferred from where the hits fell.
+
     `sources_dir` holds the PDFs (named `<slug>.pdf`); `ingest_root/<slug>/`
-    holds each source's source_map.json. Returns the crop's path relative to
-    `out_dir`'s parent, or None when there is no usable anchor.
+    holds each source's source_map.json. Returns the crops' paths, first one
+    first, or [] when there is no usable anchor.
 
     Sets `anchor.anchor_located` so the report can tell a boxed crop from an
-    unboxed one.
+    unboxed one — True when ANY of the images carries a box, because a passage
+    whose evidence is in its continuation is located, not missing.
     """
     from .models import SourceMap  # local import to avoid cycles
 
     if not (anchor.source_slug and anchor.source_page):
-        return None
+        return []
     pdf = sources_dir / f"{anchor.source_slug}.pdf"
     if not pdf.exists():
-        return None
+        return []
     # a model can name a page the source does not have. Bail before any
     # doc[page - 1]: the IndexError used to abort the whole highlight step, and
     # anchor_located stays None because nothing was ever searched.
-    if anchor.source_page > source_page_count(pdf):
-        return None
+    n_pages = source_page_count(pdf)
+    if anchor.source_page > n_pages:
+        return []
 
-    region = None
+    regions: list[tuple[int, tuple[float, float, float, float]]] = []
     smap_path = ingest_root / anchor.source_slug / "source_map.json"
     if anchor.source_block and smap_path.exists():
         block = SourceMap.from_json(smap_path).find(anchor.source_block)
-        if block and block.page == anchor.source_page:
-            region = block.bbox
-    if region is None:
+        if block:
+            # The page test is against ANY region, not `block.page`: that field
+            # is the block's OPENING, so a judgement naming the page the
+            # continuation is on used to fail the gate and fall through to the
+            # hit-union below, losing the block's own rectangles.
+            if block.regions and any(r.page == anchor.source_page for r in block.regions):
+                regions = [(r.page, r.bbox) for r in block.regions if 1 <= r.page <= n_pages]
+            elif block.page == anchor.source_page:
+                # a map written before regions were recorded: empty means not
+                # recorded, so this is the one rectangle anyone ever had
+                regions = [(block.page, block.bbox)]
+    if not regions:
         # fall back to the union of phrase hits on the page, padded
         doc = fitz.open(pdf)
         page = doc[anchor.source_page - 1]
@@ -190,21 +221,33 @@ def crop_for_anchor(anchor, claim_id: int, sources_dir: Path, ingest_root: Path,
             # nothing — that is "attempted and not located", not "unknown"
             if anchor.anchor_phrases:
                 anchor.anchor_located = False
-            return None
+            return []
         u = hits[0]
         for h in hits[1:]:
             u |= h
-        region = (u.x0 - 40, u.y0 - 14, u.x1 + 40, u.y1 + 14)
+        regions = [(anchor.source_page, (u.x0 - 40, u.y0 - 14, u.x1 + 40, u.y1 + 14))]
 
-    out_path = out_dir / f"claim_{claim_id:02d}_{anchor.source_slug}_p{anchor.source_page}.png"
-    boxes = crop_evidence(pdf, anchor.source_page, region, anchor.anchor_phrases, out_path)
+    out: list[str] = []
+    boxes = 0
+    for i, (page_no, region) in enumerate(regions, start=1):
+        # the ordinal, not the page: two regions can share a page — a left and a
+        # right column — and `crop_evidence` saves unconditionally, so a name
+        # keyed on the page alone would leave one image holding the other's
+        # picture. The first keeps its historical name, asserted literally in
+        # tests/test_pipeline.py and tests/test_multisource.py.
+        suffix = "" if i == 1 else f"_cont{i}"
+        out_path = (
+            out_dir / f"claim_{claim_id:02d}_{anchor.source_slug}_p{page_no}{suffix}.png"
+        )
+        boxes += crop_evidence(pdf, page_no, region, anchor.anchor_phrases, out_path)
+        out.append(str(out_path))
     # a crop with no box is still useful context, but the report must not
     # caption it as matched text. No phrases to search for is a THIRD state:
     # `False` would assert we looked and missed, when nothing was ever looked for.
     anchor.anchor_located = (boxes > 0) if anchor.anchor_phrases else None
-    return str(out_path)
+    return out
 
 
-def crop_for_claim(claim, sources_dir: Path, ingest_root: Path, out_dir: Path) -> str | None:
+def crop_for_claim(claim, sources_dir: Path, ingest_root: Path, out_dir: Path) -> list[str]:
     """The claim's own headline anchor — the pre-multi-source entry point."""
     return crop_for_anchor(claim, claim.id, sources_dir, ingest_root, out_dir)

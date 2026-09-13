@@ -80,9 +80,9 @@ def test_crop_and_reports(fixture_pdf, tmp_path):
         anchor_phrases=["CT scans only"],
     )
     out = tmp_path / "out"
-    img = crop_for_claim(claim, fixture_pdf.parent, ingest_root, out / "evidence")
-    assert img and Path(img).exists()
-    claim.evidence_image = str(Path(img).relative_to(out))
+    imgs = crop_for_claim(claim, fixture_pdf.parent, ingest_root, out / "evidence")
+    assert imgs and Path(imgs[0]).exists()
+    claim.evidence_image = str(Path(imgs[0]).relative_to(out))
 
     gap = ClaimResult(id=2, claim="X is common", location="Introduction",
                       refs=["2"], verdict="not_retrieved")
@@ -223,10 +223,10 @@ def test_matched_anchor_sets_anchor_located_and_captions_the_box(fixture_pdf, tm
         anchor_phrases=["CT scans only"],
     )
     out = tmp_path / "out"
-    img = crop_for_claim(claim, fixture_pdf.parent, ingest_root, out / "evidence")
+    imgs = crop_for_claim(claim, fixture_pdf.parent, ingest_root, out / "evidence")
     assert claim.anchor_located is True
 
-    claim.evidence_image = str(Path(img).relative_to(out))
+    claim.evidence_image = str(Path(imgs[0]).relative_to(out))
     write_reports(RunResults(manuscript="m.pdf", claims=[claim]), None, out, png=False)
     md = (out / "report.md").read_text()
     assert "*red box = matched text*" in md
@@ -248,12 +248,12 @@ def test_zero_box_crop_is_disclosed_not_captioned_as_matched(fixture_pdf, tmp_pa
         anchor_phrases=["positron emission tomography"],
     )
     out = tmp_path / "out"
-    img = crop_for_claim(claim, fixture_pdf.parent, ingest_root, out / "evidence")
+    imgs = crop_for_claim(claim, fixture_pdf.parent, ingest_root, out / "evidence")
 
-    assert img and Path(img).exists()      # the crop is still produced
+    assert imgs and Path(imgs[0]).exists()      # the crop is still produced
     assert claim.anchor_located is False   # and it is honest about being unboxed
 
-    claim.evidence_image = str(Path(img).relative_to(out))
+    claim.evidence_image = str(Path(imgs[0]).relative_to(out))
     write_reports(RunResults(manuscript="m.pdf", claims=[claim]), None, out, png=False)
     # the disclosure is one token now, and every format must carry it — the
     # editor and terminal reports each used to phrase this their own way, and
@@ -285,9 +285,9 @@ def test_page_beyond_the_source_is_not_a_crash_and_not_a_missed_match(fixture_pd
         anchor_phrases=["CT scans only"],
     )
     out = tmp_path / "out"
-    img = crop_for_claim(claim, fixture_pdf.parent, ingest_root, out / "evidence")
+    imgs = crop_for_claim(claim, fixture_pdf.parent, ingest_root, out / "evidence")
 
-    assert img is None
+    assert imgs == []
     assert claim.anchor_located is None, "never looked is not 'looked and missed'"
 
 

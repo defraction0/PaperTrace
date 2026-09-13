@@ -32,7 +32,7 @@ try:
 except ImportError:  # pragma: no cover — older PyMuPDF exposes only `fitz`
     import fitz
 
-from ..models import Block
+from ..models import Block, Region
 
 _HEADING_LABELS = {"section_header", "title"}
 _LIST_LABELS = {"list_item"}
@@ -59,9 +59,32 @@ def _to_top_left(bbox, page_height: float) -> tuple[float, float, float, float]:
     return (round(left, 2), round(y0, 2), round(right, 2), round(y1, 2))
 
 
-def _item_prov(item):
-    prov = getattr(item, "prov", None) or []
-    return prov[0] if prov else None
+def _item_regions(item, page_heights: dict[int, float]) -> list[Region]:
+    """Every rectangle docling gives this item, in the order it states them.
+
+    `prov` is a list and used to be read as `prov[0]`, so a paragraph continuing
+    into the next column or onto the next page kept only the rectangle its
+    opening sat in — measured on one paper, 14,367 characters outside the box
+    their block claimed. Each entry carries its own `page_no`, so the height
+    used to flip the origin is looked up per entry and not once per block.
+
+    `charspan` is taken as given rather than recomputed: it is docling's own
+    statement of which characters that rectangle holds, and it is the only thing
+    that orders two rectangles sharing a page.
+    """
+    out: list[Region] = []
+    for prov in getattr(item, "prov", None) or []:
+        page = int(prov.page_no)
+        span = getattr(prov, "charspan", None) or (0, 0)
+        out.append(
+            Region(
+                page=page,
+                bbox=_to_top_left(prov.bbox, page_heights.get(page, 842.0)),
+                char_start=int(span[0]),
+                char_end=int(span[1]),
+            )
+        )
+    return out
 
 
 def _caption_of(item, doc) -> str:
@@ -94,11 +117,11 @@ def blocks_from_docling(doc, page_heights: dict[int, float]) -> list[Block]:
         label = str(getattr(item, "label", "text")).split(".")[-1].lower()
         if label in _SKIP_LABELS:
             continue
-        prov = _item_prov(item)
-        if prov is None:
+        regions = _item_regions(item, page_heights)
+        if not regions:
             continue
-        page = int(prov.page_no)
-        bbox = _to_top_left(prov.bbox, page_heights.get(page, 842.0))
+        # the first region IS `page`/`bbox` — every existing consumer reads those
+        page, bbox = regions[0].page, regions[0].bbox
 
         kind = getattr(item, "__class__", type(item)).__name__.lower()
         if "table" in kind:
@@ -133,6 +156,7 @@ def blocks_from_docling(doc, page_heights: dict[int, float]) -> list[Block]:
                 bbox=bbox,
                 heading_path=list(heading_stack),
                 text=text,
+                regions=regions,
             )
         )
     return blocks
@@ -195,6 +219,63 @@ def restore_hyphen_joins(blocks: list[Block], joins: dict[int, dict[str, str]]) 
                 text = re.sub(rf"(?<!\w){re.escape(joined)}(?!\w)", on_page, text)
         out.append(block if text == block.text else replace(block, text=text))
     return out
+
+
+# The TableFormer post-processor's own repair messages. Self-describing, and the
+# only thing here classed as noise — see `capture_table_warnings`.
+_TABLE_REPAIRED_RE = re.compile(r"recovered to (?:col|row)=", re.I)
+
+# It logs through `logging.getLogger("MatchingPostProcessor")`: a bare top-level
+# name whose parent is `root`, levelled by the library itself and carrying its
+# own StreamHandler. Nothing set on the `docling` logger can reach it, which is
+# why ~200 of these lines survived every silencer we had.
+_TABLE_LOGGER = "MatchingPostProcessor"
+
+
+class _TableWarningFilter(logging.Filter):
+    """Swallow the table post-processor's output, keeping what is a real loss.
+
+    A `logging.Filter` and not a level: the library calls `setLevel` on that
+    logger itself while the models load, so any level set beforehand is
+    overwritten. Filters are consulted after the level check and survive it.
+    """
+
+    def __init__(self, collected: list[str]) -> None:
+        super().__init__()
+        self.collected = collected
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.WARNING:
+            message = record.getMessage()
+            if not _TABLE_REPAIRED_RE.search(message):
+                self.collected.append(message)
+        return False  # never print: the report is where a loss belongs
+
+
+@contextmanager
+def capture_table_warnings():
+    """Collect the table converter's fidelity warnings for one conversion.
+
+    Yields the list they land in. A cell the converter could not place is text
+    missing from the document, and it reached the user only as a stray line from
+    a third-party library — under ~200 lines of repairs that are genuinely
+    noise. Quieting those without keeping this would hide a fidelity loss.
+
+    **Classification defaults to surfacing.** Only the self-describing repair
+    messages are noise; everything else that logger emits is kept. The wording
+    belongs to `docling-ibm-models` and changes between versions — the message
+    that prompted this does not exist in the version pinned by `docling>=2.0`
+    here — so matching the loss literally would under-report silently on a
+    version nobody has seen. Matching the repair fails the safe way instead.
+    """
+    collected: list[str] = []
+    log = logging.getLogger(_TABLE_LOGGER)
+    handler = _TableWarningFilter(collected)
+    log.addFilter(handler)
+    try:
+        yield collected
+    finally:
+        log.removeFilter(handler)
 
 
 def _quiet_third_party_loggers() -> None:
@@ -267,13 +348,18 @@ def _silence_model_stack():
         logging.disable(previous)
 
 
-def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:
-    """Run docling on a PDF. Returns (page_count, blocks, docling_version)."""
+def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str, list[str]]:
+    """Run docling on a PDF.
+
+    Returns (page_count, blocks, docling_version, table_warnings) — the last
+    being the converter's own fidelity complaints about tables, captured rather
+    than printed. See `capture_table_warnings`.
+    """
     _quiet_third_party_loggers()
     import docling
     from docling.document_converter import DocumentConverter
 
-    with _silence_model_stack():
+    with _silence_model_stack(), capture_table_warnings() as table_warnings:
         result = DocumentConverter().convert(str(pdf_path))
     doc = result.document
 
@@ -289,4 +375,4 @@ def ingest_blocks_docling(pdf_path: Path) -> tuple[int, list[Block], str]:
     # only where the paper writes the compound out somewhere: docling's join is
     # the author's word for a syllabic break, and wrong for a lexical hyphen
     blocks = restore_hyphen_joins(blocks, hyphen_joins(pdf_path))
-    return pages, blocks, version
+    return pages, blocks, version, table_warnings

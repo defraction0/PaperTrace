@@ -48,7 +48,44 @@
               "type": "number"
             },
             "minItems": 4,
-            "maxItems": 4
+            "maxItems": 4,
+            "description": "The block's FIRST rectangle. Where the block's text crosses a column or page break it occupies several, and this is only the one its opening sits in — see `regions` for all of them."
+          },
+          "regions": {
+            "type": "array",
+            "description": "Every rectangle this block's text occupies, in reading order, as the converter states them. `page` and `bbox` above are the first entry. Absent or empty means NOT RECORDED — a map written before regions existed — and never that the block has no continuation; a reader that finds it empty falls back to the single rectangle.",
+            "items": {
+              "type": "object",
+              "required": [
+                "page",
+                "bbox"
+              ],
+              "properties": {
+                "page": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based page this rectangle is on. A block crossing a page break has entries with different pages, so the block-level `page` describes only its opening."
+                },
+                "bbox": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 4,
+                  "maxItems": 4
+                },
+                "char_start": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Offset into the block's text where this rectangle's content begins, inclusive. This is what orders the regions: y-coordinates cannot, because a continuation is usually higher up the page than the opening it follows (the top of the next column)."
+                },
+                "char_end": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Offset into the block's text where this rectangle's content ends, exclusive."
+                }
+              }
+            }
           },
           "heading_path": {
             "type": "array",
@@ -79,6 +116,16 @@
         "null"
       ],
       "description": "sha256 of the PDF bytes this map was built from. `doc` cannot serve as an identity: a cited source is stored as <slug>.pdf, so every source map in a case names a different paper the same way. Absent on maps written before content hashing; absent means unknown, never 'matches'."
+    },
+    "table_warnings": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "Fidelity warnings the table converter raised while reading this file, verbatim. A cell it could not place is text missing from the document. THREE answers: a list of messages (something was lost), [] (the converter was watched and lost nothing), and null (nobody watched — a map written before this was recorded, or a backend with no table model). null must never be read as \"nothing was lost\"."
     }
   }
 }

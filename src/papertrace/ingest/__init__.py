@@ -78,11 +78,14 @@ def ingest_pdf(pdf_path: Path, out_dir: Path, backend: str = "auto") -> SourceMa
             )
         from .docling_ import ingest_blocks_docling
 
-        pages, blocks, version = ingest_blocks_docling(pdf_path)
+        pages, blocks, version, table_warnings = ingest_blocks_docling(pdf_path)
         converter = f"docling {version}"
     else:
         pages, blocks = ingest_blocks_pymupdf(pdf_path)
         converter = "pymupdf"
+        # `[]`, not None: this backend linearises tables with no model to lose
+        # cells in, so "watched and nothing lost" is the honest answer
+        table_warnings = []
 
     # content identity, because `doc` is not one: a cited source is stored as
     # `<slug>.pdf`, so every source map in a case names a different paper the
@@ -97,6 +100,7 @@ def ingest_pdf(pdf_path: Path, out_dir: Path, backend: str = "auto") -> SourceMa
         # what the file says its title is — the layout's first heading is the
         # article-type banner often enough that it cannot be the first choice
         declared_title=declared_title(pdf_path),
+        table_warnings=table_warnings,
     )
     write_outputs(smap, out_dir)
     return smap

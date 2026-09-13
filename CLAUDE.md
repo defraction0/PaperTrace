@@ -103,14 +103,22 @@ ingest → refs → scout → check → highlight → report
   `_supplement_candidates` are that rule with `_SUPPLEMENT_RE` inverted, and a
   supplement attaches only to an already-available reference — the orphan is
   reported by `unused_provided`, never silently dropped.
-  **`identify_by_content` is the second pass**, for files the filename rule
-  cannot place: DOI first, then `titles_match` against a *short* title string.
-  Deliberately **not** `_title_check_text` — that counts a reference's words
-  across a whole page, which is right for vetoing a file the user already named
-  and measurably wrong for discovery (it verified one demo source against two
-  unrelated references). A non-unique match is refused, never ranked, and
-  `titles_match` returning `None` is not an accept: a filename carries the
-  user's assertion, content carries none.
+  **`identify_by_content` decides ownership**: DOI first, then `titles_match`
+  against a *short* title string. Deliberately **not** `_title_check_text` —
+  that counts a reference's words across a whole page, which is right for
+  vetoing a file the user already named and measurably wrong for discovery (it
+  verified one demo source against two unrelated references). A non-unique match
+  is refused, never ranked, and `titles_match` returning `None` is not an
+  accept: a filename carries the user's assertion, content carries none.
+  **Attributing provided files is a matching, not N independent lookups.** One
+  file answers for one reference: `_exact_stem_claims` (the stem *is* the slug)
+  and `identify_by_content` establish ownership, `resolve_all` builds the
+  `owners` map, and `resolve_entry` drops any candidate owned elsewhere. Before
+  that constraint existed, one `li-2023.pdf` answered for four references with
+  `identity confirmed` on each, because `_named_for` keeps only slug tokens over
+  three characters so `nce-2023`/`ma-2023`/`ren-2023` all collapse to the year.
+  Do not restore token containment as an acceptance route: it is a proposal, and
+  the veto behind it has no precision on a single-subject bibliography.
 - **`check.py`** — the **only** module that calls a model, and only through the
   `_ask()` seam (`claude -p` subprocess; inherits the user's Claude Code login,
   no API key). Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per
@@ -123,7 +131,16 @@ ingest → refs → scout → check → highlight → report
 - **`highlight.py`** — the division of labour that keeps evidence trustworthy:
   the model proposes page, block and verbatim anchor phrases; **Python** locates
   them with PyMuPDF `page.search_for` and draws the boxes. Boxes are never
-  model-placed or hand-placed.
+  model-placed or hand-placed. `crop_for_anchor` returns **one image per
+  `Block.region`** — a passage crossing a column or page break is several
+  rectangles and cropping only the first showed where the evidence began and not
+  where it was. The rectangles come from the converter's own provenance, never
+  from clustering the search hits: a derived rule would be guessing at a recorded
+  fact, and both candidate rules were measured and rejected. `crop_evidence`
+  bounds the boxes by intersection with the region it is given, so one call per
+  region needs no new box logic; the continuation filename carries the region
+  **ordinal**, because two regions can share a page and the save is
+  unconditional.
 - **`models.py`** — the dataclasses *are* the wire format. `VERDICTS`,
   `REF_STATUSES`, `BLOCK_TYPES` and `DOCUMENT_KINDS` are the vocabularies;
   `to_json`/`from_json` pairs must stay symmetric, and `from_json` uses

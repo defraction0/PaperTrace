@@ -1,6 +1,6 @@
 # Fact-Check Report
 
-Checker: `claude -p · claude-opus-5` · PaperTrace · 2026-09-06
+Checker: `claude -p · claude-opus-5` · PaperTrace · 2026-09-10
 Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 **Claims:** 4 | ✅ **Supported:** 1 | ⚠️ **Partial:** 0 | ❌ **Contradicted:** 2 | ⊘ **Not retrieved:** 1
@@ -24,7 +24,7 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 ### ❌ CONTRADICTED — `pyrros-2023` (cited as [1])
 
 - **Source:** Page 4 `(block_0050)` 
-> The source reports external validation ROC AUC of 0.77 (internal prospective AUC 0.84); no AUC of 0.94 appears anywhere.
+> The source reports external validation at a separate institution yielding a ROC AUC of 0.77, not 0.94 (internal prospective AUC was 0.84).
 
 ![evidence](evidence/claim_01_pyrros-2023_p4.png)
 *red box = matched text*
@@ -41,17 +41,17 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 ### ✅ SUPPORTED — `sudlow-2015` (cited as [2])
 
-- **Source:** Page 3 `(block_0038)` 
-> Source states over 500,000 participants aged 40-69 recruited 2006-2010 (block_0018/block_0027) and that multimodal imaging is planned in subsets of 100,000 participants (block_0038, Table 3).
+- **Source:** Page 1 `(block_0018)` 
+> Source describes recruitment of over 500,000 participants aged 40-69 years in 2006-2010, and separately states multimodal imaging in subsets of 100,000 participants (block_0038, Table 3).
 
-![evidence](evidence/claim_03_sudlow-2015_p3.png)
-*red box = matched text*
+![evidence](evidence/claim_03_sudlow-2015_p1.png)
+*⚠️ no anchor phrase could be boxed — none was found inside the region this crop shows, so the crop is shown for context only.*
 <br>
 
 ### ✅ SUPPORTED — `littlejohns-2020` (cited as [3])
 
 - **Source:** Page 2 `(block_0013)` 
-> The source states the imaging enhancement aims to image "100,000 of the existing 500,000 UKB participants", and describes the cohort as half a million participants aged 40-69 recruited 2006-2010.
+> This source states the imaging enhancement aims to image 100,000 of the existing 500,000 UKB participants, and describes UKB as half a million participants aged 40-69 recruited 2006-2010.
 
 ![evidence](evidence/claim_03_littlejohns-2020_p2.png)
 *red box = matched text*
@@ -67,10 +67,10 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 ### ❌ CONTRADICTED — `littlejohns-2020` (cited as [3])
 
 - **Source:** Page 3 `(block_0023)` 
-> The source reports that of those eligible who booked an appointment, "97% have attended an imaging assessment centre" — i.e., about 3%, not nearly one in five, had not attended.
+> The source reports that of those eligible who booked an appointment, 97% have attended an imaging assessment centre - i.e. about 3% non-attendance, not nearly one in five.
 
 ![evidence](evidence/claim_04_littlejohns-2020_p3.png)
-*⚠️ no anchor phrase was found on this page — the crop is shown for context and nothing is boxed.*
+*⚠️ no anchor phrase could be boxed — none was found inside the region this crop shows, so the crop is shown for context only.*
 ---
 
 ## Not verified — source not retrieved, or check failed (1 of 4)
@@ -87,7 +87,8 @@ Reported as such — never filled in from memory.
 Statements that would normally carry a reference but don't. Not verified —
 flagged for you to weigh.
 
-- **[U1]** Routine imaging archives are among the largest untapped screening resources in medicine. *(Background)*
+- **[U1]** Routine imaging archives are among the largest untapped screening resources in medicine. *(Background ¶1)*
+
 ## Literature scout — what the reference list doesn't know
 
 

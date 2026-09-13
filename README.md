@@ -81,11 +81,15 @@ went uncited?**
 - Show the evidence: real page crops with the matched text boxed in red.
   Claude proposes the page, the block and verbatim anchor phrases; Python then
   finds those phrases in the PDF and draws the boxes — placed by text search,
-  never by hand, and never by the model. The crop region comes from the source
-  block the verdict names, so a crop whose anchor phrase matched nothing is
-  still shown — unboxed, and captioned as unboxed. Where no anchor phrase was
-  offered at all, the caption says that instead: "searched and not found" and
-  "never searched for" are different facts and are never merged.
+  never by hand, and never by the model. **A passage that crosses a column or a
+  page break gets one image per part of it**, in reading order, each with its own
+  matched text boxed — the rectangles come from the source's own layout
+  provenance, so a paragraph that runs from the foot of one column to the top of
+  the next, or overleaf, is shown in full rather than cut off where it started.
+  A crop whose anchor phrase was not found in any of them is still shown —
+  unboxed, and captioned as unboxed. Where no anchor phrase was offered at all,
+  the caption says that instead: "nothing could be boxed" and "never searched
+  for" are different facts and are never merged.
 - Preserve unavailable sources as explicit gaps: a claim whose source
   couldn't be retrieved is `⊘ not retrieved` — recorded, never guessed.
 - **Check its own reference numbering before trusting it.** The citation label
@@ -335,19 +339,24 @@ compared against the reference list — so `s41467-023-39631-x.pdf`,
 `1-s2.0-S0140673623001234-main.pdf` and `mmc1.pdf` all find their reference
 without being renamed.
 
-Two rules keep that from guessing. A file whose title matches **more than one**
-reference is used for neither, and is named so you can rename it to choose — a
-corrigendum shares nearly every word with its original, and picking the better
-score there would judge a claim against the wrong paper with nothing able to
-notice. And a title too thin to tell papers apart is not a match at all.
+Three rules keep that from guessing. **A file answers for one reference only** —
+once a file is attributed to a reference, by an exact `<author>-<year>.pdf` name
+or by its own DOI, no other reference can be judged against it. A file whose
+title matches **more than one** reference is used for neither, and is named so
+you can rename it to choose — a corrigendum shares nearly every word with its
+original, and picking the better score there would judge a claim against the
+wrong paper with nothing able to notice. And a title too thin to tell papers
+apart is not a match at all.
 
 **A filename that names its reference still wins**, because that is your own
 assertion about the file: `pyrros-2023.pdf`, or anything containing the
 author and year (`pyrros-et-al-2023-chest-radiographs.pdf`); where several
-match, an exact `<author>-<year>.pdf` wins, else the shortest name. Such a file
-is title-checked like a downloaded one, but a mismatch is recorded rather than
-refused — you named it, so it is used and the doubt is disclosed. Content
-identification only fills the gap that leaves.
+match, an exact `<author>-<year>.pdf` wins, else the shortest name. A file whose
+name *is* the reference is title-checked like a downloaded one, but a mismatch is
+recorded rather than refused — you named it, so it is used and the doubt is
+disclosed. A file that merely *contains* the author and year is a weaker claim:
+it is used only if no other reference owns it, since a short surname reduces that
+match to the year alone.
 
 **Nothing in the folder goes unremarked.** Every PDF that ends up attached to
 no reference is listed with the reason — unrecognisable, ambiguous, a spare

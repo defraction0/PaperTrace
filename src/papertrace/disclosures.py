@@ -34,7 +34,12 @@ MULTISOURCE_TOKEN = "cited sources checked"
 # plus a supplement is not two cited works, and this count sits under the headline
 MULTISOURCE_DOCUMENTS_TOKEN = "documents checked"
 ANCHOR_LOCATED_TOKEN = "red box = matched text"
-ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase was found on this page"
+# says nothing about the rest of the page, because nothing established it. The
+# crop region is one block's bbox, so a passage continuing into the next column
+# is on the page and outside the region at once — "was found on this page" made
+# that an absence, and the token is shared by both branches below, so it has to
+# stay true whether the phrase is elsewhere on the page or nowhere at all.
+ANCHOR_NOT_LOCATED_TOKEN = "no anchor phrase could be boxed"
 ANCHOR_UNKNOWN_TOKEN = "anchor match not recorded"
 SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
 REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
@@ -45,6 +50,12 @@ CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
 # so the parity test would fail on a difference the reader never sees
 NO_QUOTE_TOKEN = "judged on a paraphrase, not the sentence in the paper"
 SOURCE_FIDELITY_TOKEN = "cited sources read as flat text"
+# A cell the table converter could not place is text missing from the source.
+# It reached the user only as a stray WARNING from a third-party logger, under
+# roughly two hundred lines of that logger's own repair messages.
+TABLE_LOSS_TOKEN = "table cells were dropped by the converter"
+# how many of the converter's own messages the sentence quotes before counting
+_TABLE_LOSS_SHOWN = 2
 # Neutral on purpose. The token is asserted verbatim in all three formats, so it
 # must stay true whether every supplement was checked, none was, or some were —
 # "carry no identity check" was true when nothing could be verified and became a
@@ -94,8 +105,11 @@ ANCHOR: dict[str, Disclosure] = {
         level="info",
         token=ANCHOR_LOCATED_TOKEN,
         text=(
-            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located on this page "
-            "by text search, not placed by hand or by the model."
+            # not "on this page": a passage crossing a page break is shown in
+            # several images, and the box can be on a page other than the one
+            # the judgement names
+            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located by text "
+            "search, not placed by hand or by the model."
         ),
         short=ANCHOR_LOCATED_TOKEN,
     ),
@@ -104,10 +118,10 @@ ANCHOR: dict[str, Disclosure] = {
         level="warn",
         token=ANCHOR_NOT_LOCATED_TOKEN,
         text=(
-            f"{ANCHOR_NOT_LOCATED_TOKEN} — the crop is shown for context and "
-            "nothing is boxed."
+            f"{ANCHOR_NOT_LOCATED_TOKEN} — none was found inside the region this "
+            "crop shows, so the crop is shown for context only."
         ),
-        short=f"{ANCHOR_NOT_LOCATED_TOKEN} — nothing is boxed",
+        short=f"{ANCHOR_NOT_LOCATED_TOKEN} — crop shown for context",
     ),
     "unknown": Disclosure(
         key="anchor",
@@ -130,8 +144,8 @@ ANCHOR_NO_IMAGE: dict[str, Disclosure] = {
         level="info",
         token=ANCHOR_LOCATED_TOKEN,
         text=(
-            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located on this page "
-            "by text search, though no evidence image was written for it."
+            f"{ANCHOR_LOCATED_TOKEN} — the anchor phrase was located by text "
+            "search, though no evidence image was written for it."
         ),
         short=f"{ANCHOR_LOCATED_TOKEN} — no evidence image",
     ),
@@ -488,6 +502,43 @@ def _source_fidelity(flat: list[str], total: int) -> Disclosure:
     )
 
 
+def _table_loss(losses: dict[str, list[str]]) -> Disclosure:
+    """Cited sources whose tables lost cells while being read.
+
+    `_source_fidelity` above says a table was linearized; this says a table was
+    read as a table and came out incomplete — the converter found cells it could
+    not fit to any row or column and discarded them. A verdict resting on such a
+    table rests on a table with holes in it.
+
+    The converter's own message goes into the sentence rather than a `rows`
+    detail list, because the run-level formats render `text` alone: a `rows`
+    entry here would reach no reader. Each message names how many cells, of how
+    many, and the grid they did not fit, so the count is the finding and is not
+    paraphrased.
+    """
+    named = ", ".join(f"`{slug}`" for slug in sorted(losses))
+    messages = [f"{slug} — {m}" for slug in sorted(losses) for m in losses[slug]]
+    shown = "; ".join(messages[:_TABLE_LOSS_SHOWN])
+    more = len(messages) - _TABLE_LOSS_SHOWN
+    if more > 0:
+        shown += f"; and {more} more (see source_table_warnings in results.json)"
+    return Disclosure(
+        key="table_loss",
+        level="warn",
+        token=TABLE_LOSS_TOKEN,
+        text=(
+            f"{TABLE_LOSS_TOKEN} while reading {len(losses)} cited "
+            f"source{'' if len(losses) == 1 else 's'} — {named}. Those cells are "
+            f"text the judge never saw, so a verdict resting on one of those "
+            f"tables rests on an incomplete one. {shown}."
+        ),
+        short=(
+            f"{TABLE_LOSS_TOKEN} — {len(losses)} source"
+            f"{'' if len(losses) == 1 else 's'}"
+        ),
+    )
+
+
 def _supplement_verification(results) -> tuple[list[str], list[str]]:
     """Supplementary documents read, split into (checked, taken on the filename)."""
     seen: dict[str, bool] = {}
@@ -592,6 +643,17 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
         flat = sorted(s for s, c in recorded.items() if c.split()[0] == "pymupdf")
         if flat:
             out.append(_source_fidelity(flat, len(recorded)))
+    # the empties are filtered BEFORE the truthiness test: `{"a": []}` is a
+    # truthy dict, and it means that source was watched and lost nothing — it
+    # produced a disclosure reading "0 cited sources" until this was measured.
+    # An empty dict means the run did not record it, never that nothing was lost.
+    losses = {
+        slug: msgs
+        for slug, msgs in (getattr(results, "source_table_warnings", None) or {}).items()
+        if msgs
+    }
+    if losses:
+        out.append(_table_loss(losses))
     checked_sup, named_sup = _supplement_verification(results)
     supplements = checked_sup + named_sup
     if supplements:

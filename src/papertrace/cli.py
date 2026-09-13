@@ -886,8 +886,13 @@ def _check_pipeline(
     # converter above says nothing about them, and until this was carried the
     # markdown and HTML reports said nothing about them either.
     source_converters: dict[str, str] = {}
+    source_table_warnings: dict[str, list[str]] = {}
     for doc in manifest.documents():
         sp = case / "ingest" / doc.slug / "source_map.json"
+        if sp.exists() and doc.slug not in source_table_warnings:
+            _tw = SourceMap.from_json(sp).table_warnings
+            if _tw:  # None = nobody watched, [] = watched and clean
+                source_table_warnings[doc.slug] = _tw
         if sp.exists() and doc.slug not in source_converters:
             source_converters[doc.slug] = SourceMap.from_json(sp).converter
 
@@ -901,6 +906,7 @@ def _check_pipeline(
         refs_available=len(manifest.retrieved),
         converter=converter,
         source_converters=source_converters,
+        source_table_warnings=source_table_warnings,
         claims=claims,
         uncited=uncited,
         coverage=coverage,
@@ -957,7 +963,10 @@ def _downgrade_unshowable(anchor) -> bool:
     Returns True when it downgraded, so the caller can say so on the console.
     """
     substantive = ("supported", "partial", "contradicted")
-    if anchor.verdict not in substantive or anchor.evidence_image:
+    # `or continuation_images`: a passage crossing a column break can have its
+    # boxes in the continuation, and that verdict CAN be shown — downgrading it
+    # would discard a judgement the reader is perfectly able to check
+    if anchor.verdict not in substantive or anchor.evidence_image or anchor.continuation_images:
         return False
     anchor.verdict = "unchecked"
     anchor.note = (
@@ -993,8 +1002,8 @@ def highlight(
         # behind each verdict. A results.json written before multi-source
         # checking has no judgements; its own headline anchor is the one target.
         for a in c.judgements or [c]:
-            img = crop_for_anchor(a, c.id, case / "sources_resolved", case / "ingest", out_dir)
-            if img is None and a.source_slug:
+            imgs = crop_for_anchor(a, c.id, case / "sources_resolved", case / "ingest", out_dir)
+            if not imgs and a.source_slug:
                 # sources provided by the user live elsewhere — try the manifest
                 # path. `document()` and not a scan of `entries`: a supplement is
                 # never in `entries`, so scanning them left every supplement
@@ -1007,22 +1016,26 @@ def highlight(
                     if src.exists() and not tmp.exists():
                         tmp.parent.mkdir(parents=True, exist_ok=True)
                         tmp.write_bytes(src.read_bytes())
-                        img = crop_for_anchor(
+                        imgs = crop_for_anchor(
                             a, c.id, case / "sources_resolved", case / "ingest", out_dir
                         )
             tag = f"claim {c.id}" + (f" · {a.source_slug}" if c.is_multi_source() else "")
-            if img:
-                a.evidence_image = str(Path(img).relative_to(case / "out"))
-                done += 1
+            if imgs:
+                rel = [str(Path(i).relative_to(case / "out")) for i in imgs]
+                a.evidence_image, a.continuation_images = rel[0], rel[1:]
+                done += len(rel)
                 # `is True` / `is False` / `is None` — never truthiness. None
                 # means nothing was ever searched for, and calling that "not
-                # found on the page" asserts a search that did not happen.
+                # found" asserts a search that did not happen.
                 if a.anchor_located is True:
                     console.print(f"  [green]✓[/green] {tag}: {a.evidence_image}")
                 elif a.anchor_located is False:
+                    # "in the cropped region", not "on the page" — the region is
+                    # one block, and a quote continuing into the next column is
+                    # on the page and outside it at once
                     console.print(
                         f"  [yellow]○ {tag}: {a.evidence_image} — the anchor phrase "
-                        f"was searched for and not found on the page; crop written "
+                        f"was not found inside the cropped region; crop written "
                         f"unboxed[/yellow]"
                     )
                 else:
@@ -1030,6 +1043,16 @@ def highlight(
                         f"  [yellow]○ {tag}: {a.evidence_image} — no anchor phrase "
                         f"was offered, so none was searched for; crop written "
                         f"unboxed[/yellow]"
+                    )
+                # after the verdict on the first image, not before it: the line
+                # above names that image, and this says where the rest of the
+                # passage went
+                if a.continuation_images:
+                    console.print(
+                        f"    [cyan]↳ the passage crosses a break — "
+                        f"{len(a.continuation_images)} further "
+                        f"image{'' if len(a.continuation_images) == 1 else 's'}: "
+                        f"{', '.join(Path(i).name for i in a.continuation_images)}[/cyan]"
                     )
             elif a.source_slug and a.source_page:
                 # a page the source does not have is not the same as a page that
