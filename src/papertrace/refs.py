@@ -970,7 +970,10 @@ def _title_check_text(raw: str, page_text: str) -> tuple[str, str]:
     is the same as right — collapsing the first two into the third is how a
     scanned wrong paper passes as the source.
     """
-    page = re.sub(r"\s+", " ", page_text).lower()
+    # folded, not merely lowercased: `found` below is a substring test against
+    # this string and `_title_tokens` returns folded tokens, so an unfolded page
+    # matches none of the diacritic-bearing ones — `kustner` is not in `küstner`
+    page = _fold(re.sub(r"\s+", " ", page_text))
     if not page.strip():
         return TITLE_UNVERIFIABLE, "no readable text on its first page (scanned or image-only)"
     tokens = _title_tokens(raw)

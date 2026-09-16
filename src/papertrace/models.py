@@ -98,11 +98,19 @@ _TRANSLITERATE = str.maketrans(
 def _fold(text: str) -> str:
     """Lowercase, transliterated, diacritics decomposed away — `İnce` → `ince`.
 
-    Lives here because three readers need it and none may import another, the
-    same reason `titles_match` and `_title_tokens` do. `_slug` deletes non-ASCII
-    instead (`[^A-Za-z\\-]`), which is why `İnce O` slugs `nce-2023` and `Müller`
-    slugs `mller`. Folding is what a name comparison needs.
+    Lives here because five call sites across `models` and `refs` need it and
+    neither module may import the other — the same reason the shared title rules
+    below it live here. `_slug` deletes non-ASCII instead (`[^A-Za-z\\-]`), which
+    is why `İnce O` slugs `nce-2023` and `Müller` slugs `mller`. Folding is what
+    a name comparison needs.
+
+    **Both sides of any comparison must be folded.** `_title_tokens` folds, so a
+    haystack that is merely lowercased matches none of the folded tokens —
+    `kustner` is not in `küstner`, which deleted correct downloads and blamed
+    the manuscript for a mistyped DOI.
     """
+    # lowercase BEFORE translate: `_TRANSLITERATE` is keyed on lowercase letters
+    # only, so reordering these two silently stops `Ø`, `Æ` and `Ł` folding
     lowered = (text or "").lower().translate(_TRANSLITERATE)
     decomposed = unicodedata.normalize("NFKD", lowered)
     return "".join(c for c in decomposed if not unicodedata.combining(c))
