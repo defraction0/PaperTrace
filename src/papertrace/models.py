@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -74,6 +75,39 @@ _TITLE_STOPWORDS = frozenset(
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
 
 
+# What NFKD cannot decompose, because these are distinct letters rather than a
+# base plus a combining mark. Without them `Weiß` folds to `wei` and `Bjørnsson`
+# to `bjrnsson` — a surname that changed, not one that normalised.
+_TRANSLITERATE = str.maketrans(
+    {
+        "ß": "ss",
+        "ø": "o",
+        "æ": "ae",
+        "œ": "oe",
+        "đ": "d",
+        "ð": "d",
+        "þ": "th",
+        "ł": "l",
+        "ı": "i",
+        "ħ": "h",
+        "ŧ": "t",
+    }
+)
+
+
+def _fold(text: str) -> str:
+    """Lowercase, transliterated, diacritics decomposed away — `İnce` → `ince`.
+
+    Lives here because three readers need it and none may import another, the
+    same reason `titles_match` and `_title_tokens` do. `_slug` deletes non-ASCII
+    instead (`[^A-Za-z\\-]`), which is why `İnce O` slugs `nce-2023` and `Müller`
+    slugs `mller`. Folding is what a name comparison needs.
+    """
+    lowered = (text or "").lower().translate(_TRANSLITERATE)
+    decomposed = unicodedata.normalize("NFKD", lowered)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
 def _title_tokens(raw: str) -> set[str]:
     """The reference's own distinctive words — URLs removed first.
 
@@ -85,7 +119,9 @@ def _title_tokens(raw: str) -> set[str]:
     `publications` — words no first page will carry, so they dilute the ratio
     the check is measured on.
     """
-    return set(re.findall(r"[a-z]{5,}", _URL_RE.sub(" ", raw).lower())) - _TITLE_STOPWORDS
+    # folded, not merely lowercased: `[a-z]{5,}` over raw text drops `Späth`
+    # entirely and truncates `Cristóbal` to `crist`
+    return set(re.findall(r"[a-z]{5,}", _fold(_URL_RE.sub(" ", raw)))) - _TITLE_STOPWORDS
 
 
 # Four distinct words, not three. The observed false positive cleared the 0.35

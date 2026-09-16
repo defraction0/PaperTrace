@@ -8,6 +8,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from papertrace import models  # noqa: E402
 from papertrace.models import RefEntry  # noqa: E402
 
 
@@ -934,3 +935,35 @@ def test_a_truncated_but_real_reference_is_still_searched(tmp_path):
 
     assert any("crossref" in u for u in asked), "a real reference was never looked up"
     assert e.doi == "10.1177/0363546512452714"
+
+
+def test_a_surname_with_an_umlaut_still_contributes_tokens():
+    """`_title_tokens` is `[a-z]{5,}`, so a diacritic splits a word or deletes
+    it. `Späth` and `Müller` contributed NOTHING, and this set is what
+    `titles_match`, `_same_work` and `_title_check_text` all compare — a
+    surname that vanished cannot agree with its own paper.
+
+    `_fold` existed in `refs.py` and was not used here. NFKD alone is not
+    enough: it leaves ß, ø, æ, đ, ł undecomposed.
+    """
+    assert "spath" in models._title_tokens("Späth C, Makowski MR")
+    assert "muller" in models._title_tokens("Müller H")
+    assert "cristobal" in models._title_tokens("Romero-Cristóbal M")
+    assert "kustner" in models._title_tokens("Küstner T")
+    assert "bjornsson" in models._title_tokens("Bjørnsson B")
+
+
+def test_folding_does_not_invent_or_merge_tokens():
+    """Gate 4, the other direction: an ASCII title must tokenise exactly as
+    before, and the stopword list must still bite after folding.
+
+    Note the stopword list holds `commun`, not `communications` — so
+    "Nature Communications" keeps a token. These four are all in the list.
+    """
+    assert models._title_tokens("Nature Science volume press") == set()
+    assert models._title_tokens("Robust segmentation of anatomic structures") == {
+        "robust",
+        "segmentation",
+        "anatomic",
+        "structures",
+    }

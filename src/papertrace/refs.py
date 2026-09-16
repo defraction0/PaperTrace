@@ -9,7 +9,6 @@ fact-check step reports those claims as unverifiable instead of guessing.
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +22,7 @@ from .models import (
     _URL_RE,
     RefEntry,
     Supplement,
+    _fold,
     _title_tokens,
     looks_like_reference,
     titles_match,
@@ -952,17 +952,6 @@ def _provided_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Pat
     slug = (entry.slug or "").lower()
     matches = [p for p in _named_for(entry, provided_dir) if not _SUPPLEMENT_RE.search(p.stem)]
     return sorted(matches, key=lambda p: (p.stem.lower() != slug, len(p.stem), p.name))
-
-
-def _fold(text: str) -> str:
-    """Lowercase, with diacritics decomposed away — `İnce` → `ince`.
-
-    `_slug` deletes non-ASCII instead (`[^A-Za-z\\-]`), which is why `İnce O`
-    slugs `nce-2023` and `Müller` slugs `mller`. Folding is what a name
-    comparison needs: a surname that vanished cannot agree with its own paper.
-    """
-    decomposed = unicodedata.normalize("NFKD", text or "")
-    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
 
 
 def _first_surname(raw: str) -> str:
