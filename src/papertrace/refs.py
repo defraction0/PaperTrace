@@ -797,12 +797,21 @@ def reconcile(
     detail = (
         f"the body cites {led['labels_detected']} distinct labels up to [{cited}]; "
         f"the parsed list holds {led['entries_parsed']} entries carrying "
-        f"{led['numerals_distinct']} distinct printed numerals"
+        f"{led['numerals_distinct']} distinct labels"
     )
     if led["numerals_duplicated"]:
         detail += " — [" + "], [".join(led["numerals_duplicated"]) + "] appear more than once"
     if led["numerals_absent"]:
         detail += " — [" + "], [".join(led["numerals_absent"]) + "] are carried by no entry"
+    if not led["numerals_duplicated"] and not led["numerals_absent"]:
+        # A duplicate or a gap is only visible where the converter left the
+        # printed numerals in place. Three of `parse_references`' four return
+        # paths number by position, and a positional run is 1..N by
+        # construction — so "none found" there is not "none present".
+        detail += (
+            " — no duplicate or missing label was found, though a duplicate or a gap is "
+            "only visible where the printed numerals survived the converter"
+        )
     if crossref is not None:
         detail += f" and the publisher deposited {len(crossref)}"
     elif crossref_absent:

@@ -1178,8 +1178,8 @@ def test_the_note_names_the_dropped_and_duplicated_numerals():
     _entries, rec = reconcile(body, None, parsed, crossref_absent="no DOI")
     assert rec.ledger["numerals_absent"] == ["4", "5", "6"]
     assert rec.ledger["numerals_duplicated"] == ["7"]
-    assert "4" in rec.note and "5" in rec.note and "6" in rec.note
-    assert "7" in rec.note
+    assert "[7] appear more than once" in rec.note
+    assert "[4], [5], [6] are carried by no entry" in rec.note
 
 
 def test_a_contested_but_verified_numbering_reaches_every_format(tmp_path):
