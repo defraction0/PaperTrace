@@ -9,6 +9,7 @@ fact-check step reports those claims as unverifiable instead of guessing.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -593,6 +594,10 @@ class Reconciliation:
     body_labels: int = 0
     crossref_count: int | None = None
     parsed_count: int = 0
+    # Which numerals are missing and which are duplicated, by name. A difference
+    # of two totals cannot reveal a duplicate at all, and a merge-plus-split
+    # keeps the count — the case `_covers` documents itself as blind to.
+    ledger: dict = field(default_factory=dict)
 
 
 def _covers(body: set[str], entries: list[RefEntry]) -> bool:
@@ -697,6 +702,22 @@ def reconcile(
     parse_ok = _covers(body_labels, parsed)
     cited = max((int(x) for x in body_labels), default=0)
 
+    nums = [e.num for e in parsed]
+    counts = Counter(nums)
+    rec.ledger = {
+        "labels_detected": len(body_labels),
+        "labels_max": cited,
+        "labels_absent": sorted(
+            (str(i) for i in range(1, cited + 1) if str(i) not in body_labels), key=int
+        ),
+        "entries_parsed": len(parsed),
+        "numerals_distinct": len(counts),
+        "numerals_duplicated": sorted((n for n, c in counts.items() if c > 1), key=int),
+        "numerals_absent": sorted(
+            (str(i) for i in range(1, cited + 1) if str(i) not in counts), key=int
+        ),
+    }
+
     if cr_ok:
         # both matching is not a tie to break: prefer the deposit, whose DOIs
         # are already resolved, which skips the title search that has been this
@@ -772,7 +793,16 @@ def reconcile(
         )
         return chosen, rec
 
-    detail = f"the manuscript cites [1]-[{cited}], the parsed list has {len(parsed)} references"
+    led = rec.ledger
+    detail = (
+        f"the body cites {led['labels_detected']} distinct labels up to [{cited}]; "
+        f"the parsed list holds {led['entries_parsed']} entries carrying "
+        f"{led['numerals_distinct']} distinct printed numerals"
+    )
+    if led["numerals_duplicated"]:
+        detail += " — [" + "], [".join(led["numerals_duplicated"]) + "] appear more than once"
+    if led["numerals_absent"]:
+        detail += " — [" + "], [".join(led["numerals_absent"]) + "] are carried by no entry"
     if crossref is not None:
         detail += f" and the publisher deposited {len(crossref)}"
     elif crossref_absent:

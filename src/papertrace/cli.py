@@ -709,6 +709,8 @@ def _refs_pipeline(
         numbering_verified=rec.verified,
         numbering_note=rec.note,
         unverified_from=rec.unverified_from,
+        numbering_contested=rec.contested,
+        numbering_ledger=rec.ledger,
     )
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)

@@ -158,6 +158,14 @@
       "minimum": 1,
       "description": "The first citation label from which the numbering is in doubt, or null when it is not in doubt. 1 means 'from the very start', which is what a single unchecked reading warrants: one candidate gives no evidence about where it went wrong."
     },
+    "numbering_contested": {
+      "type": "boolean",
+      "description": "A second reading disagreed about which papers the list names, even though the chosen reading matched the body's labels. Absent on manifests written before 0.7."
+    },
+    "numbering_ledger": {
+      "type": "object",
+      "description": "Which numerals were dropped or duplicated, by name. Absent means never computed, not that nothing was dropped."
+    },
     "manuscript_supplements": {
       "type": "array",
       "description": "Supplementary material belonging to the AUDITED paper, supplied with --supplement. Deliberately not an entry in `entries`: it answers for no citation label, so putting it there would inflate the reference total and let a claim citing a number be handed the paper's own appendix. Absent on manifests written before 0.6.0.",

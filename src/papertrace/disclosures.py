@@ -47,6 +47,7 @@ SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
 REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
 NUMBERING_TOKEN = "reference numbering could not be confirmed"
 CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
+NUMBERING_CONTESTED_TOKEN = "second reading of the reference list disagreed"
 # The keys `claim_disclosures()` can emit. Declared here, where the producers
 # live, because three of the four report formats filter claim disclosures by
 # explicit key and so drop an unlisted one without erroring. The viewer is
@@ -469,6 +470,30 @@ def _numbering(manifest) -> Disclosure:
     )
 
 
+def _numbering_contested(manifest) -> Disclosure | None:
+    """Fires whether or not the numbering was verified.
+
+    `_numbering` is gated on `not verified`, so a contested-but-verified run
+    disclosed nothing in any format — which is the compensating-parse-error case
+    `Reconciliation.contested` was added to catch.
+    """
+    if not getattr(manifest, "numbering_contested", False):
+        return None
+    return Disclosure(
+        key="numbering_contested",
+        level="warn",
+        token=NUMBERING_CONTESTED_TOKEN,
+        text=(
+            f"A {NUMBERING_CONTESTED_TOKEN} — the reading used here accounts for exactly "
+            "the labels the body cites, but another reading of the same bibliography named "
+            "different papers. An extent check cannot see a parse that merges one pair of "
+            "references and splits another, so check the retrieval manifest against the "
+            "paper's own reference list before relying on a verdict."
+        ),
+        short=f"{NUMBERING_CONTESTED_TOKEN} — extent matched, content did not",
+    )
+
+
 def _claim_numbering(claim, manifest) -> Disclosure:
     """The run-level warning, said again where the verdict is read.
 
@@ -704,6 +729,8 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
         # everything above it — a reader who stops reading should have read this
         if not getattr(manifest, "numbering_verified", False):
             out.append(_numbering(manifest))
+        if d := _numbering_contested(manifest):
+            out.append(d)
     return out
 
 

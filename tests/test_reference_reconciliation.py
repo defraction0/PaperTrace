@@ -1148,6 +1148,82 @@ def test_a_narrowed_doubt_still_taints_only_the_tail():
     assert [x for x in ("1", "14", "15", "19") if m.label_is_doubtful(x)] == ["15", "19"]
 
 
+# --- the ledger, and a contested-but-verified numbering -----------------------
+
+
+def _render_with_manifest(results, manifest, tmp_path) -> dict[str, str]:
+    """Render every report format and return each one's text, keyed by filename.
+
+    No existing helper in this module passes a manifest through `write_reports`
+    and reads back every look, so this is added, minimal and local here.
+    """
+    from papertrace.report import write_reports
+
+    write_reports(results, manifest, tmp_path, png=False)
+    names = ("report.md", "report_editor.html", "report_terminal.html", "report_viewer.html")
+    return {name: (tmp_path / name).read_text() for name in names}
+
+
+def test_the_note_names_the_dropped_and_duplicated_numerals():
+    """A difference of two totals understated the real damage sixfold: the run
+    that surfaced this said '[1]-[19] vs 18 references' where 5 references were
+    dropped and 1 numeral duplicated. `_covers` computes the gap set already."""
+    from papertrace.refs import reconcile
+
+    body = {str(i) for i in range(1, 8)}
+    parsed = [
+        _entry("1", "one"), _entry("2", "two"), _entry("3", "three"),
+        _entry("7", "seven-a"), _entry("7", "seven-b"),
+    ]
+    _entries, rec = reconcile(body, None, parsed, crossref_absent="no DOI")
+    assert rec.ledger["numerals_absent"] == ["4", "5", "6"]
+    assert rec.ledger["numerals_duplicated"] == ["7"]
+    assert "4" in rec.note and "5" in rec.note and "6" in rec.note
+    assert "7" in rec.note
+
+
+def test_a_contested_but_verified_numbering_reaches_every_format(tmp_path):
+    """`contested` has never reached a reader. It is declared with a comment
+    saying that burying it was how a compensating parse error passed
+    unmentioned, and it is then buried: never persisted, and `_numbering` is
+    gated on `not verified` so a verified-but-contested run says nothing."""
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        entries=_parsed([1, 2]),
+        numbering_verified=True,
+        numbering_contested=True,
+    )
+    results = _results()
+    reports = _render_with_manifest(results, manifest, tmp_path)
+    for name, text in reports.items():
+        assert "second reading of the reference list disagreed" in text, name
+
+
+def test_the_ledger_round_trips_and_older_manifests_still_load(tmp_path):
+    """Gate 2."""
+    from papertrace.models import RefManifest
+
+    m = RefManifest(
+        manuscript="m.pdf",
+        entries=_parsed([1]),
+        numbering_contested=True,
+        numbering_ledger={"numerals_absent": ["4"], "numerals_duplicated": []},
+    )
+    p = tmp_path / "refs_manifest.json"
+    m.to_json(p)
+    back = RefManifest.from_json(p)
+    assert back.numbering_contested is True
+    assert back.numbering_ledger["numerals_absent"] == ["4"]
+
+    old = {"manuscript": "m.pdf", "entries": [{"num": "1", "raw": "x", "status": "paywalled"}]}
+    p.write_text(json.dumps(old))
+    older = RefManifest.from_json(p)
+    assert older.numbering_contested is False
+    assert older.numbering_ledger == {}
+
+
 # --- a file nobody named for this reference ----------------------------------
 
 

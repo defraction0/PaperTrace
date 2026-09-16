@@ -555,6 +555,12 @@ class RefManifest:
     # candidate, because a single unchecked reading gives no evidence about
     # *where* it went wrong
     unverified_from: int | None = None
+    # A second reading called the list wrong even though the chosen one matched
+    # the body's labels. `_covers` tests extent, not content, so this is worth
+    # the reader's eye even when the count checks out.
+    numbering_contested: bool = False
+    # Absent means never computed, NOT "nothing was dropped".
+    numbering_ledger: dict = field(default_factory=dict)
     # the AUDITED paper's own supplementary material. Not a RefEntry: it answers
     # for no citation label, and putting it in `entries` would inflate
     # `refs_total` and let `_slug_for_ref` hand it to a claim citing a number.
@@ -634,6 +640,8 @@ class RefManifest:
             "numbering_verified": self.numbering_verified,
             "numbering_note": self.numbering_note,
             "unverified_from": self.unverified_from,
+            "numbering_contested": self.numbering_contested,
+            "numbering_ledger": self.numbering_ledger,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -664,6 +672,8 @@ class RefManifest:
             numbering_verified=bool(data.get("numbering_verified", False)),
             numbering_note=data.get("numbering_note", ""),
             unverified_from=data.get("unverified_from"),
+            numbering_contested=bool(data.get("numbering_contested", False)),
+            numbering_ledger=data.get("numbering_ledger", {}),
         )
 
 
