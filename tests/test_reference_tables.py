@@ -15,7 +15,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from papertrace.refs import parse_references  # noqa: E402
+from papertrace.refs import (  # noqa: E402
+    _covers,
+    _entry,
+    _numerals_agree_with_position,
+    _parse_bulleted,
+    parse_references,
+    reconcile,
+)
 
 # 3 flat bullets, then a table holding references 4-7. The table's first row is
 # Esteva's continuation, the separator is second, and reference 5 wraps across
@@ -101,3 +108,78 @@ def test_a_bibliography_rendered_entirely_as_a_table_is_parsed_with_its_printed_
     entries = parse_references(text)
     assert [e.num for e in entries] == ["1", "2", "3"]
     assert entries[1].doi == "10.0002/b"
+
+
+def test_numerals_surviving_on_only_some_items_still_fix_the_labels():
+    """A list docling numbered half as bullets (numerals stripped) and half as
+    a table (numerals kept) prints no [1], so `_usable_printed_numerals`
+    refused it and the caller numbered by position — the guess it exists to
+    avoid making unchecked. Where the numerals that ARE printed sit at the
+    positions they name, position is the printed reading, corroborated.
+    """
+    assert _numerals_agree_with_position([None, None, 3]) is True
+    assert _numerals_agree_with_position([1, None, 3, 4]) is True
+    assert _numerals_agree_with_position([None, None, 9, 10, 11]) is False
+    assert _numerals_agree_with_position([2, 3]) is False
+
+
+def test_printed_numerals_contradicting_their_position_are_not_numbered_by_position():
+    """Gate 4. Numerals 9-11 at positions 3-5 mean something above them was
+    merged or split, so position is KNOWN wrong rather than merely unverified.
+    Neither reading is available: refuse, and refuse to resolve."""
+    text = (
+        "- Shen D, Wu G (2017) Deep learning. Annu Rev. https://doi.org/10.1/a\n"
+        "- Litjens G, Kooi T (2017) A survey. Med Image Anal. https://doi.org/10.2/b\n"
+        "- 9. Esteva A (2017) Dermatologist-level. Nature. https://doi.org/10.3/c\n"
+        "- 10. Erickson BJ (2017) Machine learning. Radiographics. https://doi.org/10.4/d\n"
+        "- 11. Weston AD (2019) Automated abdominal. Radiology. https://doi.org/10.5/e\n"
+    )
+    entries = _parse_bulleted(text)
+    # The nums stay positional — an entry needs some label to be a dict key and
+    # a slug. What changes is that they are no longer *trusted*: every entry
+    # from the first contradiction on refuses to resolve, so no claim is judged
+    # against a paper this numbering picked.
+    affected = [e for e in entries if e.boundary_ambiguous]
+    assert affected, "a contradicted numbering must be refused, not relabelled"
+    assert all(e.doi is None for e in affected)
+    assert all("numbering" in e.reason for e in affected)
+
+
+def test_a_list_printing_no_numeral_anywhere_is_still_numbered_by_position():
+    """Gate 4, the other half, and an explicit regression assertion: the
+    Nature-family case where the converter really did strip them is the one
+    situation in which position is the only reading available. It keeps
+    working, and `reconcile` still marks it unverified."""
+    text = (
+        "- Shen D, Wu G (2017) Deep learning. Annu Rev. https://doi.org/10.1/a\n"
+        "- Litjens G, Kooi T (2017) A survey. Med Image Anal. https://doi.org/10.2/b\n"
+    )
+    entries = _parse_bulleted(text)
+    assert [e.num for e in entries] == ["1", "2"]
+    assert not any(e.boundary_ambiguous for e in entries)
+
+
+def test_a_trailing_run_of_stripped_numerals_is_accepted_but_never_verified():
+    """The shape the real manuscript actually produces, pinned.
+
+    Docling keeps the numerals it found inside a table and strips them from
+    every bullet after it, so the printed run stops partway:
+    [None x5, 6..11, None x13]. A None agrees with any position, so the labels
+    are accepted rather than refused — the contradiction branch never fires.
+
+    That is the honest answer only because nothing calls it verified. Two
+    split-title fragments are still counted as entries, so the list is longer
+    than the highest label the body cites and `_covers` fails. This test exists
+    so a later change cannot quietly promote acceptance into confirmation.
+    """
+    numerals = [None] * 5 + [6, 7, 8, 9, 10, 11] + [None] * 13
+    assert _numerals_agree_with_position(numerals) is True
+
+    body = {str(i) for i in range(1, 20)}  # the body cites [1]-[19]
+    entries = [
+        _entry(str(i), f"Author {i} A (2020) A paper title. J Test. https://doi.org/10.1000/x{i}")
+        for i in range(1, 25)  # the parse holds 24, two of them fragments
+    ]
+    assert not _covers(body, entries)
+    _chosen, rec = reconcile(body, None, entries, crossref_absent="no DOI for the paper")
+    assert rec.verified is False

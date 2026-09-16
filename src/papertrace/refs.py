@@ -213,6 +213,37 @@ def _parse_bulleted(text: str) -> list[RefEntry]:
         # entry's identifiers often live in the half that was cut off
         return [_entry(e.num, e.raw) for e in entries]
 
+    printed = [n for n in numerals if n is not None]
+
+    if printed and _numerals_agree_with_position(numerals):
+        # positional, and corroborated by every numeral that survived
+        return [_entry(str(i), _strip_printed_numeral(raw)) for i, raw in enumerate(items, 1)]
+
+    if printed:
+        # Printed numerals exist and CONTRADICT their positions, so an entry
+        # above them was merged or split: the printed reading is unavailable and
+        # the positional one is known wrong. Refuse from the first disagreement
+        # on, reusing `boundary_ambiguous` — whose documented meaning is already
+        # "nothing derived from this raw may be trusted to name a paper", and
+        # which `resolve_entry` honours by returning `no_doi` without fetching.
+        first = next(i for i, n in enumerate(numerals, 1) if n is not None and n != i)
+        out: list[RefEntry] = []
+        for i, raw in enumerate(items, 1):
+            e = _entry(str(i), _strip_printed_numeral(raw))
+            if i >= first:
+                e.boundary_ambiguous = True
+                e.doi = None
+                e.reason = (
+                    f"printed numbering contradicts position from entry {first} on — the "
+                    f"converter kept a numeral reading [{numerals[first - 1]}] at position "
+                    f"{first}, so an entry above it was merged or split; not resolved rather "
+                    "than risk judging a claim against the wrong paper"
+                )
+            out.append(e)
+        return out
+
+    # No numeral anywhere: the Nature-family case the docstring describes, where
+    # position really is the only reading available. `reconcile` marks it unverified.
     return [_entry(str(i), _strip_printed_numeral(raw)) for i, raw in enumerate(items, 1)]
 
 
@@ -235,6 +266,21 @@ def _usable_printed_numerals(numerals: list[int | None]) -> bool:
     if any(b <= a for a, b in zip(seen, seen[1:], strict=False)):
         return False
     return len(seen) * 2 >= len(numerals)
+
+
+def _numerals_agree_with_position(numerals: list[int | None]) -> bool:
+    """Does every printed numeral equal its item's position in the list?
+
+    The one question that can be asked of a PARTLY numbered list, and a
+    generalisation of `_usable_printed_numerals`' `seen[0] == 1` rather than a
+    weakening of it: when item 1 carries a numeral, its ordinal IS 1.
+
+    Where the numerals that survived the converter sit at exactly the positions
+    they name, the positional reading is not a guess — it is the printed
+    reading, corroborated wherever the printing survived. Where they disagree,
+    something above them was merged or split and neither reading is available.
+    """
+    return all(n is None or n == i for i, n in enumerate(numerals, 1))
 
 
 # `1 . Rivara FP` and `1. Rivara FP` — the list numeral the converter turned
