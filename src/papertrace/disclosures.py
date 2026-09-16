@@ -47,6 +47,20 @@ SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
 REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
 NUMBERING_TOKEN = "reference numbering could not be confirmed"
 CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
+# The keys `claim_disclosures()` can emit. Declared here, where the producers
+# live, because three of the four report formats filter claim disclosures by
+# explicit key and so drop an unlisted one without erroring. The viewer is
+# generic and would keep rendering it, which is what makes the loss silent.
+CLAIM_KEYS = frozenset(
+    {
+        "anchor",
+        "sources",
+        "unjudged_refs",
+        "no_quote",
+        "supplement_headline",
+        "claim_numbering",
+    }
+)
 # no apostrophe, and no `&`, `<` or `>`: a token is asserted as a literal in the
 # HTML formats too, and autoescape would rewrite it there but not in markdown —
 # so the parity test would fail on a difference the reader never sees

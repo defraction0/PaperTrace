@@ -28,6 +28,9 @@ from papertrace.report import write_reports  # noqa: E402
 # render is a disclosure one reader in four never sees
 FORMATS = ("report.md", "report_editor.html", "report_terminal.html", "report_viewer.html")
 
+TEMPLATES = Path(__file__).resolve().parent.parent / "src" / "papertrace" / "templates"
+JINJA_FORMATS = ("report.md.j2", "report_editor.html.j2", "report_terminal.html.j2")
+
 
 def _render(results: RunResults, out: Path) -> dict[str, str]:
     write_reports(results, None, out, png=False)
@@ -224,9 +227,10 @@ def test_the_terminal_template_names_every_disclosure_key_that_exists():
 
     templates = Path(mod.__file__).parent / "templates"
     terminal = (templates / "report_terminal.html.j2").read_text()
-    claim_level = {"anchor", "sources", "unjudged_refs", "judgement_anchor"}
-
-    missing = {k for k in keys - claim_level if f'"{k}"' not in terminal}
+    # claim-level keys are covered by
+    # test_every_claim_disclosure_key_is_rendered_by_every_jinja_format, which
+    # checks all three Jinja formats rather than only this one
+    missing = {k for k in keys - set(mod.CLAIM_KEYS) if f'"{k}"' not in terminal}
     assert not missing, (
         f"report_terminal.html.j2 renders no branch for {sorted(missing)} — "
         "its filter is an allow-list, so a new disclosure is dropped, not surfaced"
@@ -423,3 +427,35 @@ def test_markup_in_source_text_cannot_reach_the_html_reports_unescaped(tmp_path)
 
     # markdown is not HTML and must not grow entities — it stays verbatim
     assert hostile in rendered["report.md"]
+
+
+def test_claim_keys_names_only_keys_a_producer_actually_emits():
+    """A key in the set that no producer emits is dead weight that silently
+    widens the exemption below. `judgement_anchor` was exactly that."""
+    import re
+
+    from papertrace import disclosures as mod
+
+    src = Path(mod.__file__).read_text()
+    real = set(re.findall(r'key="([a-z_]+)"', src))
+    assert mod.CLAIM_KEYS <= real, f"not emitted by any producer: {sorted(mod.CLAIM_KEYS - real)}"
+
+
+def test_every_claim_disclosure_key_is_rendered_by_every_jinja_format():
+    """The viewer renders claim disclosures generically; the other three filter
+    by explicit key. So a new claim-level disclosure reaches one reader in four
+    and vanishes for the rest — the `source_identity` failure one layer down,
+    and the layer with no guard on it.
+
+    The six keys that exist today all pass. The point is that the seventh
+    cannot be added without this going red first.
+    """
+    from papertrace import disclosures as mod
+
+    for name in JINJA_FORMATS:
+        src = (TEMPLATES / name).read_text()
+        missing = {k for k in mod.CLAIM_KEYS if f'"{k}"' not in src}
+        assert not missing, (
+            f"{name} renders no branch for {sorted(missing)} — it filters claim "
+            "disclosures by explicit key, so a new one is dropped, not surfaced"
+        )
