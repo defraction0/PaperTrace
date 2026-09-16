@@ -122,6 +122,28 @@ ingest → refs → scout → check → highlight → report
   three characters so `nce-2023`/`ma-2023`/`ren-2023` all collapse to the year.
   Do not restore token containment as an acceptance route: it is a proposal, and
   the veto behind it has no precision on a single-subject bibliography.
+  **A table row in a bibliography is a reference, not a continuation** (0.7.0).
+  Docling reads a hanging-indent numeral column as a table, so entries arrive as
+  `|  6. | Author A (2019) … |` and the marker regex cannot see them (`\s*` does
+  not cross a `|`). `_unwrap_table_rows` runs first and restores the bullet form;
+  a row with *no* numeral cell is emitted unmarked on purpose, because docling
+  promotes the table's first data row to the header row and that row is the tail
+  of the bullet above it. Treating the rows as wrapped continuations read 22
+  references as 18 and judged every claim citing [6] or above against a different
+  paper — and the title check passed, because the glued raw string held both
+  papers' words.
+  **Never restore positional numbering after a printed numeral contradicts it.**
+  `_numerals_agree_with_position` is the whole distinction: where the surviving
+  numerals sit at the positions they name, position *is* the printed reading and
+  is used; where one does not, an entry above it was merged or split, so the
+  printed reading is unavailable and the positional one is known wrong.
+  Those entries set `boundary_ambiguous` and refuse to resolve. Position remains
+  a legitimate reading in exactly one case — a list that printed no numeral at
+  all — and `reconcile` marks even that unverified. Nor may an extent check
+  confirm a refusal: a refused entry keeps its positional label, so `_covers`'
+  subset test is satisfied by exactly the labels in doubt, and
+  `_refusals_unconfirm` is what stops a matching count printing "numbering
+  confirmed" over a numbering the parser declined to stand behind.
 - **`check.py`** — the **only** module that calls a model, and only through the
   `_ask()` seam (`claude -p` subprocess; inherits the user's Claude Code login,
   no API key). Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per

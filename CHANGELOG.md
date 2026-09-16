@@ -4,6 +4,91 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.7.0] — unreleased
+
+### Fixed — a bibliography rendered as a table was read as four fewer references
+
+Docling reads a hanging-indent numeral column as a table and emits GFM, so the
+entries arrive as `|  6. | Author A (2019) … |` rows. The marker regex cannot
+see them (`\s*` does not cross a `|`) and `_parse_bulleted` treated each row as
+a wrapped continuation of the bullet above it. **On the manuscript that
+surfaced this, 22 printed references parsed as 18, and every claim citing [6]
+or above was judged against a different paper** — the citation label is the
+join key, so the verdicts were confident and about the wrong papers.
+
+The mis-attribution was invisible to the one check that should have caught it:
+gluing five references onto one entry left `_entry` scraping the *next*
+reference's DOI onto it, and the existing title check **passed** on that DOI,
+because the glued raw string contained the words of both papers. A stronger
+check would not have helped either — the reference string really did name the
+paper that was downloaded, alongside the one the label meant.
+
+A pipe row in a bibliography is now a reference: `_unwrap_table_rows` runs
+before the marker regex, a numeral cell restores the bullet form, and a row
+with no numeral cell is emitted unmarked so the existing continuation rule
+joins it to whatever preceded it — which is what docling's promoted header row
+actually is.
+
+### Fixed — a diacritic in a reference deleted its own correct download
+
+`_title_tokens` folds a reference's words (`Küstner` → `kustner`) so that a
+surname with a diacritic contributes tokens at all. `_title_check_text` scored
+those folded tokens against a page that was only lowercased, and the score is a
+substring test — so none of them matched. Measured against a first page
+carrying the reference's own title verbatim, `7/7 verified` became `2/9
+mismatch`, and a mismatch is not a shrug: `_accept` unlinks the downloaded PDF,
+records `mismatch`, and tells the reader the reference has *"a wrong or
+mistyped DOI"*. A correct retrieval destroyed and the manuscript blamed for it,
+on German, Scandinavian, Polish, Turkish, Spanish and Portuguese references —
+the cases folding was introduced for. Both sides of the comparison are folded
+now, and `_fold`'s docstring says so.
+
+### Fixed — printed numerals that contradict their position are refused, not renumbered
+
+`_usable_printed_numerals` required the first numeral to be `1`, so a list
+whose converter stripped the early numerals and kept the later ones was refused
+wholesale — and then numbered by position anyway, which is the guess the rule
+exists to avoid. Position is now checked against every numeral that survived:
+where they agree, the positional reading *is* the printed reading, corroborated
+wherever the printing survived. Where they contradict it, something above them
+was merged or split, so neither reading is available and the entries from the
+first contradiction on refuse to resolve rather than risk a wrong paper.
+
+A refused entry keeps a positional label — it needs one to be a slug and a
+download path — so the extent check `_covers` performs was satisfied by exactly
+the labels in doubt. A five-item list refused from entry 4, against a body
+citing [1]-[5], reported *"numbering confirmed"*, fired no numbering
+disclosure and caveated no claim. `reconcile` no longer confirms a numbering
+any entry in the chosen reading refuses, which closes the same hole on the
+pre-existing duplicate-label refusal.
+
+### Added — the numbering ledger, and a second reading that disagrees is disclosed
+
+`numbering_ledger` (schema: `refs_manifest`) names which labels are duplicated
+and which are carried by no entry, instead of reporting a difference of two
+totals — which understated a real run sixfold: *"[1]-[19] vs 18 references"*
+where five references were dropped and one label duplicated. A difference of
+totals cannot reveal a duplicate at all.
+
+`numbering_contested` is now persisted and rendered in all four formats. It was
+declared with a comment saying that burying it was how a compensating parse
+error could pass unmentioned, and was then never written to the manifest and
+never shown. It fires when the two readings of the bibliography stop describing
+the same paper **at or below a label the body cites** — not merely when the
+other reading failed the extent check, which is satisfied by a deposit
+identical for every cited label and longer by two references nobody cites.
+Publishers routinely deposit those.
+
+### Changed — the unconfirmed-numbering note reads as sentences
+
+The note reaches markdown, editor, terminal and viewer verbatim, and it had
+four em-dashes in one sentence with the Crossref clause spliced into the middle
+of it — where `CROSSREF_NO_DOI` carries an em-dash *and* a full stop of its
+own, so the sentence appeared to end at *"Pass --doi if the paper does have
+one"* and then resumed at *"that does not add up"*. The ledger is its own
+sentence now, the Crossref clause is last and stands on its own, and a single
+duplicated label *appears* rather than *appear*.
+
 ## [0.6.0] — 2026-09-13 (beta)
 
 Carries 0.4.1 and 0.5.0 with it. Neither was ever published, so neither has a
