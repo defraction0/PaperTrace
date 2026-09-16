@@ -58,6 +58,53 @@ ProgressCb = Callable[[RefEntry], None]
 # parsing
 # ---------------------------------------------------------------------------
 
+# A bibliography docling rendered as a markdown table. These rows are CONTENT.
+# The opposite rule is right in the body — `cli._body_citation_labels` skips
+# table blocks because a results table's `[51, 77]` has the same syntax as a
+# citation group — and the two do not conflict because `references_span` has
+# already decided this text IS the reference list. Never call this on body text.
+_TABLE_SEP_ROW = re.compile(r"^\|[\s:|-]*\|\s*$")
+_TABLE_ROW = re.compile(r"^\|(.*)\|\s*$")
+# the numeral must be the WHOLE cell: `2017;19` begins with digits and is a
+# volume, and this module already has the `a-1061` scar from reading an issue
+# number as a year
+_NUMERAL_CELL = re.compile(r"^\(?(\d{1,3})\)?\s*[.):\]]?$")
+
+
+def _unwrap_table_rows(text: str) -> str:
+    """Rewrite a bibliography's table rows as bullets, so one reader sees one shape.
+
+    A pre-pass rather than a branch inside `_parse_bulleted`, because that
+    function runs only when the primary path found NOTHING: a list half flat
+    text and half table would keep the flat half and drop the table half with
+    nothing able to notice.
+
+    Emitting a bullet — `- 7. Weston AD, …` — is deliberate. The primary marker
+    regex cannot see it (`\\s*` cannot cross `-`), so flat-list behaviour stays
+    byte-identical and the table case routes through `_parse_bulleted`, which is
+    where the printed-numeral logic already lives.
+    """
+    out: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if _TABLE_SEP_ROW.match(s):
+            out.append("")  # layout, never content — and never glued to an entry
+            continue
+        m = _TABLE_ROW.match(s)
+        if not m:
+            out.append(line)
+            continue
+        cells = [c.strip() for c in m.group(1).split("|")]
+        if cells and (n := _NUMERAL_CELL.match(cells[0])):
+            out.append(f"- {int(n.group(1))}. " + " ".join(c for c in cells[1:] if c))
+        else:
+            # No numeral cell. Two cases, one rule: a wrapped row (`|   | doi:… |`)
+            # and a table whose first row is the tail of the bullet above it —
+            # which is what docling's header row is. Emitted with no marker, so
+            # the existing continuation rule joins it to whatever preceded.
+            out.append("  " + " ".join(c for c in cells if c))
+    return "\n".join(out)
+
 
 def parse_references(text: str) -> list[RefEntry]:
     """Split a References section into numbered entries.
@@ -77,6 +124,7 @@ def parse_references(text: str) -> list[RefEntry]:
     ordinary prose, and splitting on it would invent entries; the ascending-run
     filter is the second guard behind that.
     """
+    text = _unwrap_table_rows(text)  # a pipe row in a bibliography is a reference
     marker = re.compile(
         r"(?:(?<=\n)|\A)\s*\[?(\d{1,3})[\].:]?\s+"  # line start: `1.` `[1]` `1 `
         r"|\[(\d{1,3})\]\s+",  # bracketed, anywhere in the line
