@@ -563,9 +563,10 @@ class RefManifest:
     # candidate, because a single unchecked reading gives no evidence about
     # *where* it went wrong
     unverified_from: int | None = None
-    # A second reading called the list wrong even though the chosen one matched
-    # the body's labels. `_covers` tests extent, not content, so this is worth
-    # the reader's eye even when the count checks out.
+    # A second reading stopped naming the same paper at or below a label the body
+    # cites, even though the chosen reading matched the body's labels. `_covers`
+    # tests extent, not content, so this is worth the reader's eye even when the
+    # count checks out — and a deposit that is merely longer is not it.
     numbering_contested: bool = False
     # Absent means never computed, NOT "nothing was dropped".
     numbering_ledger: dict = field(default_factory=dict)

@@ -145,6 +145,38 @@ def test_printed_numerals_contradicting_their_position_are_not_numbered_by_posit
     assert all("numbering" in e.reason for e in affected)
 
 
+def test_a_refused_numbering_is_never_confirmed_by_a_matching_count():
+    """The refuse branch and `_covers` compose into a lie.
+
+    A refused entry keeps a positional label — it needs one to be a dict key and
+    a slug — so the parsed list still carries `{1..N}`, `_covers`' subset test
+    cannot bite and only its length test can. A five-item list refused from
+    entry 4 on, against a body citing [1]-[5], therefore reported `verified` and
+    fired neither the run-level `numbering` disclosure nor a single
+    `claim_numbering` caveat, while `refs.py` wrote "printed numbering
+    contradicts position from entry 4 on" onto two of the entries in the same
+    run. An extent check cannot confirm a numbering the parser refused.
+    """
+    text = (
+        "- Shen D, Wu G (2017) Deep learning. Annu Rev. https://doi.org/10.1/a\n"
+        "- Litjens G, Kooi T (2017) A survey. Med Image Anal. https://doi.org/10.2/b\n"
+        "- Esteva A (2017) Dermatologist-level. Nature. https://doi.org/10.3/c\n"
+        "- 9. Erickson BJ (2017) Machine learning. Radiographics. https://doi.org/10.4/d\n"
+        "- 10. Weston AD (2019) Automated abdominal. Radiology. https://doi.org/10.5/e\n"
+    )
+    entries = _parse_bulleted(text)
+    assert [e.num for e in entries] == ["1", "2", "3", "4", "5"]
+    assert [e.num for e in entries if e.boundary_ambiguous] == ["4", "5"]
+
+    body = {"1", "2", "3", "4", "5"}
+    assert _covers(body, entries), "the count agrees — which is the whole trap"
+    _chosen, rec = reconcile(body, None, entries)
+
+    assert rec.verified is False, "the parser refused these labels; a count cannot confirm them"
+    assert rec.unverified_from == 4, "the first refused entry is where the doubt starts"
+    assert "[4], [5]" in rec.note
+
+
 def test_a_list_printing_no_numeral_anywhere_is_still_numbered_by_position():
     """Gate 4, the other half, and an explicit regression assertion: the
     Nature-family case where the converter really did strip them is the one

@@ -871,15 +871,47 @@ def test_a_confirmed_numbering_still_says_when_the_other_reading_disagreed():
     """`_covers` is a cardinality test. If the parse matches the body's labels
     the numbering is confirmed — but a deposit that disagreed is a second
     independent reading saying the list is wrong, and burying it in a field no
-    template renders tells the reader nothing."""
+    template renders tells the reader nothing.
+
+    The fixture was a 39-entry deposit against a 41-entry parse, which is a
+    difference of *extent*: `contested` was `crossref is not None` then, so any
+    deposit failing `_covers` set it. It now asks where the two readings stop
+    naming the same paper, so the fixture has to be a genuine content
+    disagreement to earn the flag the docstring above claims — the deposit names
+    a different work at [7].
+    """
     from papertrace.refs import reconcile
 
+    crossref = _parsed(list(range(1, 41)))
+    crossref[6] = _entry("7", "Quite B. Another work entirely. Nature 1999;1:1.")
     body = {str(n) for n in range(1, 42)}
-    _entries, rec = reconcile(body, crossref=_parsed(list(range(1, 40))),
-                              parsed=_parsed(list(range(1, 42))))
+    _entries, rec = reconcile(body, crossref=crossref, parsed=_parsed(list(range(1, 42))))
 
     assert rec.verified is True and rec.source == "parsed"
     assert rec.contested is True, "the deposit disagreed and nobody is told"
+
+
+def test_a_deposit_that_is_merely_longer_is_not_a_contested_numbering():
+    """`contested` claimed more than the code knew.
+
+    It was `crossref is not None` — the mere existence of a deposit that failed
+    `_covers`, which requires `len(deposit) == max(body)` exactly. Measured with
+    a deposit byte-identical to the parse for every cited label and longer by two
+    references the body never cites — which publishers routinely deposit, for
+    references cited only in a supplement — the run reported `contested` and told
+    the reader "another reading of the same bibliography named different papers"
+    and "extent matched, content did not". Both were false.
+    """
+    from papertrace.refs import reconcile
+
+    body = {str(n) for n in range(1, 42)}
+    parsed = _parsed(list(range(1, 42)))
+    deposit = _parsed(list(range(1, 44)))  # the same works, plus two never cited
+
+    _entries, rec = reconcile(body, crossref=deposit, parsed=parsed)
+
+    assert rec.verified is True and rec.source == "parsed"
+    assert rec.contested is False, "a longer deposit is not a second reading naming other papers"
 
 
 def test_both_readings_agreeing_leaves_no_phantom_divergence():
@@ -1178,8 +1210,60 @@ def test_the_note_names_the_dropped_and_duplicated_numerals():
     _entries, rec = reconcile(body, None, parsed, crossref_absent="no DOI")
     assert rec.ledger["numerals_absent"] == ["4", "5", "6"]
     assert rec.ledger["numerals_duplicated"] == ["7"]
-    assert "[7] appear more than once" in rec.note
+    assert "[7] appears more than once" in rec.note
     assert "[4], [5], [6] are carried by no entry" in rec.note
+
+
+def _unconfirmed_note(**kwargs) -> str:
+    """The note a five-entry parse earns against a body citing [1]-[7]."""
+    from papertrace.refs import reconcile
+
+    body = {str(i) for i in range(1, 8)}
+    parsed = [
+        _entry("1", "one"), _entry("2", "two"), _entry("3", "three"),
+        _entry("7", "seven-a"), _entry("7", "seven-b"),
+    ]
+    _entries, rec = reconcile(body, None, parsed, **kwargs)
+    return rec.note
+
+
+def test_the_unconfirmed_numbering_note_is_sentences_and_not_a_dash_run_on():
+    """Four em-dashes in one sentence, and the crossref clause in the middle of
+    it. `CROSSREF_NO_DOI` carries its own em-dash AND its own full stop, so the
+    rendered sentence appeared to end at "Pass --doi if the paper does have one"
+    and then resumed at "that does not add up, so the numbering could not be
+    confirmed". This text reaches markdown, editor, terminal and viewer verbatim,
+    where the README calls the report a correctness surface.
+    """
+    from papertrace.refs import CROSSREF_NO_DOI
+
+    note = _unconfirmed_note(crossref_absent=CROSSREF_NO_DOI)
+
+    # the ledger ends; the verdict is its own sentence
+    assert "carried by no entry. That does not add up, so the numbering could not be " \
+           "confirmed." in note
+    # and the crossref clause is last, reading as its own sentence
+    assert note.endswith("Pass --doi if the paper does have one")
+    assert note.count("—") == 2, f"one for the ledger, one CROSSREF_NO_DOI's own: {note}"
+
+
+def test_the_ledger_clause_agrees_in_number():
+    """"[7] appear more than once" for a single label. The plural has to stay
+    right for several, so this is not a constant."""
+    one_dup = _unconfirmed_note()
+    assert "[7] appears more than once" in one_dup
+
+    from papertrace.refs import reconcile
+
+    body = {str(i) for i in range(1, 5)}
+    parsed = [_entry("1", "a"), _entry("1", "b"), _entry("2", "c"), _entry("2", "d")]
+    _entries, rec = reconcile(body, None, parsed)
+    assert "[1], [2] appear more than once" in rec.note
+    assert "[3], [4] are carried by no entry" in rec.note
+
+    body = {"1", "2"}
+    _entries, rec = reconcile(body, None, [_entry("1", "a"), _entry("1", "b"), _entry("1", "c")])
+    assert "[2] is carried by no entry" in rec.note
 
 
 def test_a_contested_but_verified_numbering_reaches_every_format(tmp_path):
@@ -1202,20 +1286,42 @@ def test_a_contested_but_verified_numbering_reaches_every_format(tmp_path):
 
 
 def test_the_ledger_round_trips_and_older_manifests_still_load(tmp_path):
-    """Gate 2."""
-    from papertrace.models import RefManifest
+    """Gate 2.
 
+    The ledger a real `reconcile` writes is validated against the schema, not
+    only a hand-made one: `numbering_ledger` documents seven keys and their
+    types, and a hand-made fixture cannot tell whether the code still emits
+    those keys with those types.
+    """
+    import jsonschema
+
+    from papertrace.models import RefManifest
+    from papertrace.refs import reconcile
+
+    _entries, rec = reconcile({"1", "2", "3"}, None, [_entry("1", "a"), _entry("1", "b")])
     m = RefManifest(
         manuscript="m.pdf",
         entries=_parsed([1]),
         numbering_contested=True,
-        numbering_ledger={"numerals_absent": ["4"], "numerals_duplicated": []},
+        numbering_ledger=rec.ledger,
     )
     p = tmp_path / "refs_manifest.json"
     m.to_json(p)
+    schema = json.loads(
+        (Path(__file__).resolve().parent.parent / "schemas" / "refs_manifest.schema.json").read_text()
+    )
+    jsonschema.validate(json.loads(p.read_text()), schema)
+    assert set(rec.ledger) == set(schema["properties"]["numbering_ledger"]["properties"]), \
+        "every ledger key the code writes is documented, and nothing more"
+
     back = RefManifest.from_json(p)
     assert back.numbering_contested is True
-    assert back.numbering_ledger["numerals_absent"] == ["4"]
+    assert back.numbering_ledger["numerals_absent"] == ["2", "3"]
+
+    m.numbering_ledger = {"numerals_absent": ["4"], "numerals_duplicated": []}
+    m.to_json(p)
+    jsonschema.validate(json.loads(p.read_text()), schema)  # a partial ledger is valid
+    assert RefManifest.from_json(p).numbering_ledger["numerals_absent"] == ["4"]
 
     old = {"manuscript": "m.pdf", "entries": [{"num": "1", "raw": "x", "status": "paywalled"}]}
     p.write_text(json.dumps(old))

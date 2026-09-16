@@ -476,6 +476,14 @@ def _numbering_contested(manifest) -> Disclosure | None:
     `_numbering` is gated on `not verified`, so a contested-but-verified run
     disclosed nothing in any format — which is the compensating-parse-error case
     `Reconciliation.contested` was added to catch.
+
+    The text says only what the signal now carries. `contested` was the mere
+    existence of a deposit that failed the extent check, and this said "another
+    reading named different papers" over a deposit identical for every cited
+    label and longer by two references nobody cites. It is now the point where
+    the two readings stop describing one paper, and that point being at or below
+    a label the body cites — which is a disagreement about an entry some verdict
+    rests on, but can still be one reading ending where the other continues.
     """
     if not getattr(manifest, "numbering_contested", False):
         return None
@@ -485,12 +493,14 @@ def _numbering_contested(manifest) -> Disclosure | None:
         token=NUMBERING_CONTESTED_TOKEN,
         text=(
             f"A {NUMBERING_CONTESTED_TOKEN} — the reading used here accounts for exactly "
-            "the labels the body cites, but another reading of the same bibliography named "
-            "different papers. An extent check cannot see a parse that merges one pair of "
-            "references and splits another, so check the retrieval manifest against the "
-            "paper's own reference list before relying on a verdict."
+            "the labels the body cites, but the other reading of the same bibliography "
+            "stops describing the same paper at an entry the body cites: it names a "
+            "different work there, or ends before reaching it. An extent check cannot see "
+            "a parse that merges one pair of references and splits another, so check the "
+            "retrieval manifest against the paper's own reference list before relying on "
+            "a verdict."
         ),
-        short=f"{NUMBERING_CONTESTED_TOKEN} — extent matched, content did not",
+        short=f"{NUMBERING_CONTESTED_TOKEN} — the two readings diverge at a cited entry",
     )
 
 

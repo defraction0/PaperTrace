@@ -583,20 +583,26 @@ class Reconciliation:
 
     source: str = "parsed"  # crossref | parsed
     verified: bool = False
-    # the chosen reading matched the body's labels, but the OTHER reading
-    # disagreed. `_covers` is a test of extent, not of content, so a second
-    # independent reading calling the list wrong is worth the reader's eye even
-    # when the count checks out — burying it in a field no template renders was
-    # how a compensating parse error could pass unmentioned.
+    # The chosen reading matched the body's labels, and the two readings stop
+    # naming the same paper at or below a label the body cites. `_covers` is a
+    # test of extent, not of content, so a second independent reading calling the
+    # list wrong is worth the reader's eye even when the count checks out —
+    # burying it in a field no template renders was how a compensating parse
+    # error could pass unmentioned. It is *not* "the other reading failed
+    # `_covers`": that fires on a deposit identical for every cited label and
+    # longer by two references nobody cites.
     contested: bool = False
     note: str = ""
     unverified_from: int | None = None  # first label whose numbering is in doubt
     body_labels: int = 0
     crossref_count: int | None = None
     parsed_count: int = 0
-    # Which numerals are missing and which are duplicated, by name. A difference
-    # of two totals cannot reveal a duplicate at all, and a merge-plus-split
-    # keeps the count — the case `_covers` documents itself as blind to.
+    # Which labels are missing and which are duplicated, by name — always about
+    # the PARSED list, whichever reading was chosen. A difference of two totals
+    # cannot reveal a duplicate at all, and a merge-plus-split keeps the count —
+    # the case `_covers` documents itself as blind to. The `numerals_*` keys keep
+    # their spelling because they are the published wire format; the values are
+    # `e.num` labels, positional on three of the four parse paths.
     ledger: dict = field(default_factory=dict)
 
 
@@ -627,6 +633,45 @@ def _covers(body: set[str], entries: list[RefEntry]) -> bool:
         return False
     nums = {e.num for e in entries}
     return body <= nums and len(entries) == max(int(x) for x in body)
+
+
+def _label_list(labels: list[str]) -> str:
+    """`["4", "5"]` → `[4], [5]` — citation labels as the reader sees them."""
+    return "[" + "], [".join(labels) + "]"
+
+
+def _as_sentence(text: str) -> str:
+    """One of the `CROSSREF_*` notes as a sentence that can stand on its own.
+
+    They are written to be spliced after a semicolon, so they open lowercase; the
+    caller's join supplies the closing stop. Fixed here rather than in the
+    constants, which the two verified branches still splice mid-sentence.
+    """
+    text = (text or "").strip()
+    return text[:1].upper() + text[1:] if text else ""
+
+
+def _refusals_unconfirm(rec: Reconciliation, entries: list[RefEntry]) -> None:
+    """An extent check cannot confirm a numbering the parser itself refused.
+
+    `_covers` is blind to a refused entry by construction. A refusal leaves the
+    positional label in place — the entry needs one to be a dict key, a slug and
+    a download path — so `nums` is still `{1..N}`, the subset test is satisfied
+    by exactly the labels in doubt, and only the length test can bite, which a
+    refusal does not change. Both refusal routes land here: the duplicate label
+    inside its own span, and the printed numeral that contradicts its position.
+    """
+    refused = [e.num for e in entries if e.boundary_ambiguous]
+    if not refused:
+        return
+    numeric = sorted(int(n) for n in refused if n.isdigit())
+    rec.verified = False
+    rec.unverified_from = numeric[0] if numeric else 1
+    rec.note = (
+        f"{rec.note.rstrip('. ')}. But the parser refused to number "
+        f"{_label_list(refused)}, so the count cannot confirm this numbering — the labels "
+        "it counted are the ones in doubt, and each affected entry carries its own reason"
+    )
 
 
 def _same_work(x: RefEntry, y: RefEntry) -> bool:
@@ -702,6 +747,20 @@ def reconcile(
     parse_ok = _covers(body_labels, parsed)
     cited = max((int(x) for x in body_labels), default=0)
 
+    # Where the two readings stop naming the same paper — the only question that
+    # can support `contested`. "The other reading failed `_covers`" cannot:
+    # `_covers` is an extent test requiring `len == max(body)` exactly, so a
+    # deposit that agrees about every cited label and merely carries two more
+    # fails it — and publishers routinely deposit references cited only in a
+    # supplement. `_first_divergence` returns `min(len)+1` where the readings
+    # agree as far as the shorter one goes, which is what excludes a deposit that
+    # is only longer; a divergence at or below `cited` is a disagreement about an
+    # entry some claim is judged against.
+    divergence = (
+        _first_divergence(crossref, parsed) if crossref is not None and parsed else None
+    )
+    contested = divergence is not None and divergence <= cited
+
     nums = [e.num for e in parsed]
     counts = Counter(nums)
     rec.ledger = {
@@ -723,31 +782,47 @@ def reconcile(
         # are already resolved, which skips the title search that has been this
         # module's richest source of wrong-paper bugs
         rec.source, rec.verified = "crossref", True
-        rec.contested = not parse_ok and bool(parsed)
+        rec.contested = contested
         rec.note = (
             f"the publisher's deposited list has {len(crossref)} references and the "
             f"manuscript cites [1]-[{cited}] — they agree"
-            + (f"; the parsed list has {len(parsed)}, which does not, so it was not used"
-               if rec.contested else "")
         )
+        # this clause is about extent, so it stays on the extent test: a parse
+        # that does not account for the body's labels was not used, whether or
+        # not it also diverges from the deposit
+        if not parse_ok and parsed:
+            rec.note += f"; the parsed list has {len(parsed)}, which does not, so it was not used"
+        if rec.contested:
+            rec.note += (
+                f"; and the two readings stop naming the same paper at [{divergence}], "
+                "which is an entry the body cites"
+            )
+        _refusals_unconfirm(rec, crossref)
         return list(crossref), rec
 
     if parse_ok:
         rec.source, rec.verified = "parsed", True
-        rec.contested = crossref is not None
+        rec.contested = contested
         rec.note = (
             f"the parsed list has {len(parsed)} references and the manuscript cites "
             f"[1]-[{cited}] — they agree"
         )
-        if crossref is not None:
+        if rec.contested:
             rec.note += (
-                f"; the publisher deposited {len(crossref)}, which does not. The count "
-                "checks out, but a second independent reading calls this list wrong — "
-                "and a count cannot tell a right list from one that merged two "
-                "references and split another"
+                f"; the publisher deposited {len(crossref)}, and the two readings stop "
+                f"naming the same paper at [{divergence}]. The count checks out, but a "
+                "second independent reading calls this list wrong — and a count cannot "
+                "tell a right list from one that merged two references and split another"
+            )
+        elif crossref is not None:
+            rec.note += (
+                f"; the publisher deposited {len(crossref)}, which does not match the "
+                "body's labels — but the two readings agree about every entry the body "
+                "cites, so nothing here contradicts this numbering"
             )
         elif crossref_absent:
             rec.note += f"; {crossref_absent}"
+        _refusals_unconfirm(rec, parsed)
         return list(parsed), rec
 
     # Nothing matched. Use the parse — it is at least a reading of the paper in
@@ -761,9 +836,7 @@ def reconcile(
     # deposit have no common failure mode. Only where they diverge is the
     # numbering actually in doubt. With one reading there is no such evidence,
     # and claiming a divergence point would present unchecked entries as checked.
-    rec.unverified_from = (
-        _first_divergence(crossref, parsed) if crossref is not None and parsed else 1
-    )
+    rec.unverified_from = divergence if crossref is not None and parsed else 1
     if not body_labels:
         # A third fact, not a failure of either candidate: the arbiter does not
         # exist. Superscript-numeric styles are the common case and the numbering
@@ -794,28 +867,36 @@ def reconcile(
         return chosen, rec
 
     led = rec.ledger
-    detail = (
+    # Sentences, not one run-on. The ledger's own em-dash, the duplicate clause's
+    # and the gap clause's used to sit in one sentence with the crossref clause
+    # spliced between them — and `CROSSREF_NO_DOI` carries an em-dash *and* a
+    # full stop of its own, so the rendered sentence appeared to end at "Pass
+    # --doi if the paper does have one" and then resume at "that does not add
+    # up". Four formats print this verbatim.
+    ledger_sentence = (
         f"the body cites {led['labels_detected']} distinct labels up to [{cited}]; "
         f"the parsed list holds {led['entries_parsed']} entries carrying "
         f"{led['numerals_distinct']} distinct labels"
     )
-    if led["numerals_duplicated"]:
-        detail += " — [" + "], [".join(led["numerals_duplicated"]) + "] appear more than once"
-    if led["numerals_absent"]:
-        detail += " — [" + "], [".join(led["numerals_absent"]) + "] are carried by no entry"
-    if not led["numerals_duplicated"] and not led["numerals_absent"]:
+    findings: list[str] = []
+    if dup := led["numerals_duplicated"]:
+        findings.append(
+            f"{_label_list(dup)} {'appears' if len(dup) == 1 else 'appear'} more than once"
+        )
+    if gaps := led["numerals_absent"]:
+        findings.append(
+            f"{_label_list(gaps)} {'is' if len(gaps) == 1 else 'are'} carried by no entry"
+        )
+    if not findings:
         # A duplicate or a gap is only visible where the converter left the
         # printed numerals in place. Three of `parse_references`' four return
         # paths number by position, and a positional run is 1..N by
         # construction — so "none found" there is not "none present".
-        detail += (
-            " — no duplicate or missing label was found, though a duplicate or a gap is "
+        findings.append(
+            "no duplicate or missing label was found, though a duplicate or a gap is "
             "only visible where the printed numerals survived the converter"
         )
-    if crossref is not None:
-        detail += f" and the publisher deposited {len(crossref)}"
-    elif crossref_absent:
-        detail += f", and {crossref_absent}"
+    ledger_sentence += " — " + ", and ".join(findings)
     scope = (
         f"Entries from [{rec.unverified_from}] on may name a different paper than the "
         "label they carry, and verdicts on claims citing them are marked accordingly"
@@ -823,9 +904,21 @@ def reconcile(
         else "The two readings agree with each other entry for entry, so both are "
              "wrong in the same way or the body's labels were read incompletely"
     )
-    rec.note = (
-        f"{detail} — that does not add up, so the numbering could not be confirmed. "
-        + scope
+    # last, because it is about a *third* reading nobody could consult, and it
+    # answers the reader with an action rather than a count
+    if crossref is not None:
+        crossref_sentence = f"The publisher deposited {len(crossref)} references"
+    else:
+        crossref_sentence = _as_sentence(crossref_absent)
+    rec.note = ". ".join(
+        part.rstrip(". ")
+        for part in (
+            ledger_sentence,
+            "That does not add up, so the numbering could not be confirmed",
+            scope,
+            crossref_sentence,
+        )
+        if part
     )
     return chosen, rec
 
