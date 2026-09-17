@@ -11,12 +11,20 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .ask import (  # noqa: F401 — CLAUDE_TIMEOUT and claude_available re-exported here
+    ASK_ATTEMPTS,
+    CLAUDE_TIMEOUT,
+    SITE_CHECK,
+    _ask,
+    _parse_json_array,
+    _parse_json_object,
+    claude_available,
+    for_site,
+    model_for,
+)
 from .models import (
     _LABEL_GROUP,
     JUDGMENT_VERDICTS,
@@ -30,20 +38,35 @@ from .models import (
     is_references_heading,
 )
 
-CLAUDE_TIMEOUT = 600
-
-# `claude -p` fails transiently, so a judging call gets one retry. Named here
-# because the wizard quotes a worst-case cost and the two must not drift:
-# a promised ceiling that the retry can exceed is a false promise about money.
-ASK_ATTEMPTS = 2
-
-# model actually used by the last `claude -p` call, when the CLI reports it —
-# stamped into results.json so the report discloses its judge
-_LAST_MODEL: str | None = None
-
 
 def last_model() -> str | None:
-    return _LAST_MODEL
+    """The model that judged the claims, for the report's `Checker:` line.
+
+    Reads the `check` site rather than one shared global: `refs` calls the same
+    seam now, and a run whose judging made zero calls — every cited source
+    `not_retrieved`, so there is nothing to judge — would otherwise report the
+    reference-list model as the judge of verdicts it never produced.
+    """
+    return model_for(SITE_CHECK)
+
+
+def _ask_judge(prompt: str, model: str | None = None) -> str:
+    """One judging call, attributed to this stage and retried `ASK_ATTEMPTS` times.
+
+    The retry was a hardcoded second attempt that never read `ASK_ATTEMPTS` —
+    it matched only because the constant is 2. The wizard prints a worst-case
+    bill derived from that constant, and `CHANGELOG.md` records the incident
+    where the advertised ceiling drifted from the real policy, so the two are
+    wired together here rather than left agreeing by coincidence.
+    """
+    with for_site(SITE_CHECK):
+        for attempt in range(ASK_ATTEMPTS):
+            try:
+                return _ask(prompt, model)
+            except (RuntimeError, ValueError):
+                if attempt == ASK_ATTEMPTS - 1:
+                    raise
+        raise AssertionError("unreachable: ASK_ATTEMPTS must be >= 1")
 
 
 # Text past these limits is never sent to the model, so it is never checked.
@@ -191,69 +214,6 @@ SOURCE (<<SLUG>>):
 """
 
 
-def claude_available() -> bool:
-    return shutil.which("claude") is not None
-
-
-_SCRATCH_CWD: str | None = None
-
-
-def _scratch_cwd() -> str:
-    # /tmp itself is shared and world-writable; a private 0700 directory (one per
-    # process, reused across calls) keeps another local user from planting
-    # anything the judging call would walk into
-    global _SCRATCH_CWD
-    if _SCRATCH_CWD is None:
-        _SCRATCH_CWD = tempfile.mkdtemp(prefix="papertrace-ask-")
-    return _SCRATCH_CWD
-
-
-def _ask(prompt: str, model: str | None = None) -> str:
-    # judging happens wherever the user ran papertrace from — never that repo's own
-    # CLAUDE.md, and never with more than the ability to read the prompt and answer
-    cmd = ["claude", "-p", "--output-format", "json", "--safe-mode", "--tools", ""]
-    if model:
-        cmd += ["--model", model]
-    try:
-        proc = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=CLAUDE_TIMEOUT,
-            cwd=_scratch_cwd(),
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"claude -p timed out after {CLAUDE_TIMEOUT}s") from None
-    if proc.returncode != 0:
-        raise RuntimeError(f"claude -p failed: {proc.stderr.strip()[:400]}")
-    payload = json.loads(proc.stdout)
-    global _LAST_MODEL
-    usage = payload.get("modelUsage")
-    _LAST_MODEL = (
-        payload.get("model")
-        or (next(iter(usage), None) if isinstance(usage, dict) else None)
-        or _LAST_MODEL
-    )
-    return payload.get("result", "")
-
-
-def _parse_json_array(text: str) -> list[dict]:
-    text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.M).strip()
-    start, end = text.find("["), text.rfind("]")
-    if start == -1 or end == -1:
-        raise ValueError(f"no JSON array in model output: {text[:200]}")
-    return json.loads(text[start : end + 1])
-
-
-def _parse_json_object(text: str) -> dict:
-    text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.M).strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1:
-        raise ValueError(f"no JSON object in model output: {text[:200]}")
-    return json.loads(text[start : end + 1])
-
-
 def _ctx_labels(claim: dict) -> list[str]:
     """The `ctx` values one returned claim carries, however it phrased them.
 
@@ -311,7 +271,7 @@ def extract_claims(
         "<<CONTEXTS>>",
         _clip(inventory or "(none found)", CONTEXT_CHAR_LIMIT, "citation contexts", truncations),
     )
-    raw = _ask(prompt + text, model)
+    raw = _ask_judge(prompt + text, model)
     data = _parse_json_object(raw)
     cited = [
         ClaimResult(
@@ -988,10 +948,7 @@ def check_claims(
                     _clip(annotated.read_text(), SOURCE_CHAR_LIMIT, f"source:{slug}", truncations),
                 )
             )
-            try:
-                raw = _ask(prompt, model)
-            except (RuntimeError, ValueError):
-                raw = _ask(prompt, model)  # one retry — claude -p fails transiently
+            raw = _ask_judge(prompt, model)
             verdicts = {v["id"]: v for v in _parse_json_array(raw)}
         except Exception as e:  # noqa: BLE001 — a failed check must never kill the run
             msg = f"{type(e).__name__}: {str(e)[:300]}"

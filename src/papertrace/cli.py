@@ -835,7 +835,8 @@ def _check_pipeline(
     arriving here would fail an audit at the judging step after the retrieval
     work was already done.
     """
-    from .check import Truncations, check_claims, claude_available, extract_claims
+    from .ask import claude_available
+    from .check import Truncations, check_claims, extract_claims
 
     case = _stage_case(case)
     if not claude_available():

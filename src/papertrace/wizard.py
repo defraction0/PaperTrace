@@ -25,8 +25,8 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
 from . import config
+from .ask import ASK_ATTEMPTS, claude_available
 from .brand import BANNER
-from .check import ASK_ATTEMPTS, claude_available
 from .ingest import _docling_available as docling_available
 from .models import _LABEL_GROUP, _expand_label_group, is_references_heading
 from .refs import DOI_RE
@@ -218,10 +218,10 @@ def workload(pdf: Path) -> dict:
         "multi": multi,
         "labels": len(labels),
         "model_calls": 1 + cited_source_calls,
-        # the retry is real spend: one extraction plus, per judging call, up to
-        # ASK_ATTEMPTS attempts. Derived from check.py rather than a local
-        # multiplier, so the estimate cannot drift from the policy.
-        "model_calls_max": 1 + ASK_ATTEMPTS * cited_source_calls,
+        # the retry is real spend: ASK_ATTEMPTS attempts for extraction, and
+        # ASK_ATTEMPTS attempts per judging call. Derived from ask.py rather
+        # than a local multiplier, so the estimate cannot drift from the policy.
+        "model_calls_max": ASK_ATTEMPTS * (1 + cited_source_calls),
         "style_unrecognised": len(groups) == 0,
     }
 
@@ -236,7 +236,7 @@ def supplement_workload(provided_dir: Path | None, supplement: list[Path]) -> in
 
     Counted from the folder rather than from the manifest because this runs
     before `refs` does. The alternative is to state a price that leaves the
-    supplements out, and check.py's own comment on ASK_ATTEMPTS is the rule
+    supplements out, and ask.py's own comment on ASK_ATTEMPTS is the rule
     here: a cost ceiling that gets exceeded is a false promise about money.
     """
     from .refs import _SUPPLEMENT_RE

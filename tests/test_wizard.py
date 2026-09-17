@@ -665,16 +665,16 @@ def test_a_path_with_a_quote_is_still_one_argument(tmp_path):
 def test_the_worst_case_call_count_includes_the_retry(tmp_path):
     """The wizard promised "up to N model calls" from one extraction plus one
     per cited source. `_ask` retries once, so a single-source run advertised as
-    2 could issue 3. The ceiling now comes from check.py's own attempt count,
+    2 could issue 3. The ceiling now comes from ask.py's own attempt count,
     so the two cannot drift."""
-    from papertrace.check import ASK_ATTEMPTS
+    from papertrace.ask import ASK_ATTEMPTS
 
     pdf = _one_pager(tmp_path / "m.pdf",
                      "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
     w = wizard.workload(pdf)
 
     assert w["model_calls"] == 2, w
-    assert w["model_calls_max"] == 1 + ASK_ATTEMPTS * 1, w
+    assert w["model_calls_max"] == ASK_ATTEMPTS * (1 + 1), w
     assert w["model_calls_max"] >= w["model_calls"]
 
 
