@@ -8,6 +8,7 @@ fact-check step reports those claims as unverifiable instead of guessing.
 
 from __future__ import annotations
 
+import itertools
 import re
 from collections import Counter
 from collections.abc import Callable
@@ -604,6 +605,26 @@ class Reconciliation:
     # their spelling because they are the published wire format; the values are
     # `e.num` labels, positional on three of the four parse paths.
     ledger: dict = field(default_factory=dict)
+    # A second, independent axis from `verified`/`contested` above: whether
+    # EVERY label the body cites was agreed by two or more readings, named.
+    # `numbering_verified` keeps its exact current meaning through this whole
+    # plan — nothing here may redefine it or be read as a substitute for it.
+    corroborated: bool = False
+    corroborating_readings: list[str] = field(default_factory=list)
+    # Citation labels where two or more readings actively named different
+    # papers — the set `label_agreement` marked `disputed`, and the set whose
+    # verdicts a downstream withholding filter must drop.
+    labels_disputed: list[str] = field(default_factory=list)
+    # Labels that WERE in `labels_disputed` and were then settled — by a
+    # targeted model call the user accepted, or by choosing one reading whole.
+    labels_resolved: list[str] = field(default_factory=list)
+    # How a disputed numbering was left, when the interactive escalation ran.
+    # "" means the escalation never ran — nothing here has fired yet.
+    choice: str = ""  # "" | withheld | llm_resolved | parsed | pymupdf
+    # Who is responsible for `choice`. "user" is what makes an escalation
+    # honest: a person consenting to proceed is an input, never evidence that
+    # the numbering was verified.
+    chosen_by: str = ""  # "" | default | user
 
 
 def _covers(body: set[str], entries: list[RefEntry]) -> bool:
@@ -718,6 +739,65 @@ def _first_divergence(a: list[RefEntry], b: list[RefEntry]) -> int | None:
         # the first entry the two readings disagree about existing is in doubt
         return min(len(a), len(b)) + 1
     return None
+
+
+# Published so a consumer has something to check membership against, rather
+# than trusting a bare string a typo could silently narrow to three states.
+LABEL_AGREEMENT = ("agreed", "single", "disputed", "absent")
+
+
+def label_agreement(
+    candidates: dict[str, list[RefEntry]],
+    body: set[str],
+) -> dict[str, str]:
+    """Per cited label, do the readings that carry it still name one paper?
+
+    The join key is `e.num` — the printed numeral, a recorded fact — never
+    position. `_first_divergence` cannot be reused here: it zips two readings
+    by POSITION, so on a reading that split one entry into two, it would
+    compare reading A's 6th entry against reading B's 6th and report a
+    disagreement (or a false agreement) about the wrong label entirely. This
+    feature's whole point is the label, so the join has to be on it.
+
+    A `boundary_ambiguous` entry does not speak for its label (invariant 5):
+    it is a reading that has already refused to say what paper this label
+    names, and counting it as a vote would turn that refusal into evidence.
+    That can leave a label `single`, which is safe precisely because a refusal
+    is self-limiting — `resolve_entry` honours `boundary_ambiguous` by setting
+    `no_doi` and fetching nothing, so no verdict rests on it either way.
+
+    A **duplicate** is not self-limiting and is therefore treated harder: a
+    reading carrying one label twice makes that label `disputed` outright. Both
+    carriers have DOIs, so one of them really would be downloaded, read and
+    judged — and which one the printed numeral meant is exactly the question
+    the duplicate raises. Downgrading that to `single` on the strength of the
+    other reading would let a verdict rest on the coin-flip.
+
+    Any disagreement among the voters that remain is `disputed`, never a
+    majority (invariant 3): "a non-unique match is refused, never ranked" is
+    this codebase's own rule for exactly this shape of choice, applied here to
+    readings instead of provided files.
+    """
+    result: dict[str, str] = {}
+    for label in body:
+        voters: list[RefEntry] = []
+        duplicated = False
+        for entries in candidates.values():
+            carriers = [e for e in entries if e.num == label and not e.boundary_ambiguous]
+            if len(carriers) == 1:
+                voters.append(carriers[0])
+            elif carriers:
+                duplicated = True  # see the docstring: a duplicate is judgeable
+        if duplicated:
+            result[label] = "disputed"
+        elif not voters:
+            result[label] = "absent"
+        elif len(voters) == 1:
+            result[label] = "single"
+        else:
+            agree = all(_same_work(x, y) for x, y in itertools.combinations(voters, 2))
+            result[label] = "agreed" if agree else "disputed"
+    return result
 
 
 def reconcile(

@@ -90,6 +90,13 @@
             "type": "boolean",
             "description": "True when the reference label occurred more than once before the next reference, so the entry's start is a guess. Such an entry is never resolved: nothing derived from its text may be trusted to name a paper."
           },
+          "seen_in": {
+            "type": "array",
+            "description": "Which named readings of the bibliography (e.g. \"parsed\", \"pymupdf\", \"llm\") contributed this entry. Absent means never computed — either an entry from a manifest written before this feature, or one whose candidate reading was never compared against others. An entry seen only in the model's reading is spottable as a list of length one.",
+            "items": {
+              "type": "string"
+            }
+          },
           "title_check": {
             "type": [
               "string",
@@ -224,6 +231,62 @@
             "description": "Local path to the supplementary PDF, as supplied by the user."
           }
         }
+      }
+    },
+    "numbering_corroborated": {
+      "type": "boolean",
+      "description": "True when every label the manuscript cites was agreed by two or more independent readings of the bibliography. A second, independent axis from `numbering_verified`, which is about matching the body's labels, not about readings agreeing with each other — a manifest can be verified and uncorroborated, or corroborated and unverified. Absent means never computed, not 'not corroborated'."
+    },
+    "corroborating_readings": {
+      "type": "array",
+      "description": "Which named readings (e.g. 'parsed', 'pymupdf', 'llm') fed `numbering_corroborated`, named rather than merely counted. Absent means never computed.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "labels_disputed": {
+      "type": "array",
+      "description": "Citation labels where two or more readings of the bibliography actively named different papers, so the verdict on any claim citing them was withheld rather than printed. Absent means never computed — NOT 'none disputed' — the same three-state discipline as `table_warnings`.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "labels_resolved": {
+      "type": "array",
+      "description": "Citation labels that were in `labels_disputed` and were then settled — by a targeted model call the user accepted, or by the user choosing one reading whole. Absent means never computed, not 'none resolved'.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "numbering_choice": {
+      "type": "string",
+      "enum": [
+        "",
+        "withheld",
+        "llm_resolved",
+        "parsed",
+        "pymupdf"
+      ],
+      "description": "How a disputed numbering was left, when the interactive escalation ran. '' means the escalation never ran, which is true of most manifests. Never set from a model's own say-so alone — see `numbering_chosen_by`."
+    },
+    "numbering_chosen_by": {
+      "type": "string",
+      "enum": [
+        "",
+        "default",
+        "user"
+      ],
+      "description": "Who is responsible for `numbering_choice`: '' when no escalation ran, 'default' when nobody was actually asked, 'user' when a person consented to it. A person consenting to proceed is an input, never evidence that the numbering was verified — `numbering_verified` cannot be set from this."
+    },
+    "reflist_model": {
+      "type": "string",
+      "description": "The model that produced the LLM's structured reading of the bibliography, when --llm-refs ran and produced anything usable. '' means no such call was made, or nothing it proposed survived verbatim verification against the two texts it was shown."
+    },
+    "reflist_fields_discarded": {
+      "type": "array",
+      "description": "Which fields of the LLM's proposed reading could not be found verbatim in either text it was shown, and were discarded rather than trusted. Absent or empty means either no LLM reading was attempted, or every field it proposed was verified.",
+      "items": {
+        "type": "string"
       }
     }
   }

@@ -515,6 +515,11 @@ class RefEntry:
     # appendix while calling it the cited source is the laundering this
     # codebase exists to prevent.
     supplements: list[Supplement] = field(default_factory=list)
+    # which named readings of the bibliography (e.g. "parsed", "pymupdf",
+    # "llm") contributed THIS entry. An entry seen only in the model's reading
+    # must be spottable — `["llm"]` says so; `[]` on an older manifest means
+    # never computed, not "seen nowhere".
+    seen_in: list[str] = field(default_factory=list)
 
 
 def _ref_entry_from(d: dict) -> RefEntry:
@@ -574,6 +579,28 @@ class RefManifest:
     # for no citation label, and putting it in `entries` would inflate
     # `refs_total` and let `_slug_for_ref` hand it to a claim citing a number.
     manuscript_supplements: list[Supplement] = field(default_factory=list)
+    # A second, independent axis from `numbering_verified` above: whether
+    # EVERY label the body cites was agreed by >= 2 readings. Absent means
+    # never computed — not "not corroborated", the same three-state
+    # discipline as `numbering_ledger`.
+    numbering_corroborated: bool = False
+    corroborating_readings: list[str] = field(default_factory=list)
+    # Absent means never computed, NOT "none disputed" — a manifest written
+    # before this feature says nothing about disputes, it does not assert
+    # there were none.
+    labels_disputed: list[str] = field(default_factory=list)
+    labels_resolved: list[str] = field(default_factory=list)
+    # How a disputed numbering was left; "" means the interactive escalation
+    # never ran. Never set from a model's own say-so alone.
+    numbering_choice: str = ""  # "" | withheld | llm_resolved | parsed | pymupdf
+    numbering_chosen_by: str = ""  # "" | default | user
+    # The model that produced the LLM's structured reading of the
+    # bibliography, when --llm-refs ran and produced anything usable. "" means
+    # no such call was made, or nothing it proposed survived verification.
+    reflist_model: str = ""
+    # Which fields of the LLM's proposed reading could not be found verbatim
+    # in either text it was shown, and were discarded rather than trusted.
+    reflist_fields_discarded: list[str] = field(default_factory=list)
 
     def document(self, slug: str) -> Document | None:
         """The judgeable file this slug names, article or supplement, or None."""
@@ -651,6 +678,14 @@ class RefManifest:
             "unverified_from": self.unverified_from,
             "numbering_contested": self.numbering_contested,
             "numbering_ledger": self.numbering_ledger,
+            "numbering_corroborated": self.numbering_corroborated,
+            "corroborating_readings": self.corroborating_readings,
+            "labels_disputed": self.labels_disputed,
+            "labels_resolved": self.labels_resolved,
+            "numbering_choice": self.numbering_choice,
+            "numbering_chosen_by": self.numbering_chosen_by,
+            "reflist_model": self.reflist_model,
+            "reflist_fields_discarded": self.reflist_fields_discarded,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -683,6 +718,15 @@ class RefManifest:
             unverified_from=data.get("unverified_from"),
             numbering_contested=bool(data.get("numbering_contested", False)),
             numbering_ledger=data.get("numbering_ledger", {}),
+            numbering_corroborated=bool(data.get("numbering_corroborated", False)),
+            corroborating_readings=data.get("corroborating_readings", []),
+            # absent means never computed, not "none disputed" or "none resolved"
+            labels_disputed=data.get("labels_disputed", []),
+            labels_resolved=data.get("labels_resolved", []),
+            numbering_choice=data.get("numbering_choice", ""),
+            numbering_chosen_by=data.get("numbering_chosen_by", ""),
+            reflist_model=data.get("reflist_model", ""),
+            reflist_fields_discarded=data.get("reflist_fields_discarded", []),
         )
 
 
