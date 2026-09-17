@@ -186,7 +186,10 @@ def test_a_duplicated_numeral_is_recorded_and_never_repaired(monkeypatch):
     ]""")
 
     assert [e.num for e in entries] == ["2", "2"], "an entry was dropped or renumbered"
-    assert any("twice" in f for f in prov.fields_discarded), prov.fields_discarded
+    # a numbering finding, not a discarded field — the two carry different
+    # consequences and are reported separately
+    assert any("twice" in f for f in prov.numbering_findings), prov.numbering_findings
+    assert not any("twice" in f for f in prov.fields_discarded), prov.fields_discarded
 
 
 def test_a_reply_that_is_not_json_yields_an_empty_candidate_not_an_exception(monkeypatch):
@@ -318,3 +321,79 @@ def test_the_entry_level_seen_in_round_trips_through_the_manifest(tmp_path):
     jsonschema.validate(payload, schema)
     assert "seen_in" not in schema["properties"]["entries"]["items"].get("required", [])
     assert RefManifest.from_json(path).entries[0].seen_in == ["docling", "pymupdf"]
+
+
+# --- an entry that names no paper is not an entry ---------------------------
+
+
+def test_a_reply_with_a_numeral_and_nothing_else_yields_no_entry(monkeypatch):
+    """The whole-candidate discard fires when a title is PROPOSED and fails.
+
+    A reply supplying only `{"num": "9", "reading": "A"}` never reaches it, and
+    would otherwise become a voter carrying no claim about any work. It cannot
+    produce a wrong verdict — `label_agreement` compares through
+    `_comparably_same`, which refuses to call two uncomparable entries `agreed`
+    — but it can make the label `disputed` and withhold verdicts the model never
+    said anything against. A degenerate reply may cost this reading its vote; it
+    may not cost the audit its answers.
+    """
+    entries, prov = _propose(monkeypatch, '[{"num":"9","reading":"A"}]')
+
+    assert entries == []
+    assert any("no verified title or doi" in f for f in prov.fields_discarded), (
+        prov.fields_discarded
+    )
+
+
+def test_an_entry_kept_on_a_doi_alone_still_counts(monkeypatch):
+    """The rule is "names no paper", not "has no title". A DOI identifies a work
+    on its own — `_same_work` settles on it before it looks at anything else —
+    so an entry whose title the converter mangled but whose DOI is printed and
+    whole is a legitimate voter."""
+    entries, _ = _propose(
+        monkeypatch,
+        '[{"num":"7","doi":"10.1038/s41591-019-0673-2","reading":"A"}]',
+    )
+
+    assert len(entries) == 1
+    assert entries[0].doi == "10.1038/s41591-019-0673-2"
+    assert entries[0].title is None
+
+
+def test_a_numbering_finding_is_not_reported_as_a_discarded_field(monkeypatch):
+    """Two different things, two different lists.
+
+    A discarded field is "this value was not printed, so it was dropped". A
+    numbering finding is "this reading's labels do not add up", which the spec
+    gives a different consequence. Sharing one list made
+    `reflist_fields_discarded` report a count of discarded fields that included
+    things no field ever lost.
+    """
+    entries, prov = _propose(
+        monkeypatch,
+        '[{"num":"6","title":"Characterization of brain volume changes in aging '
+        'individuals","reading":"A"}]',
+    )
+
+    assert len(entries) == 1
+    assert prov.fields_discarded == [], prov.fields_discarded
+    assert any("absent from 1..max" in f for f in prov.numbering_findings), (
+        prov.numbering_findings
+    )
+
+
+def test_a_reading_letter_of_the_wrong_type_is_reported_as_a_wrong_shape(monkeypatch):
+    """A reply of `5` is a different failure from a field the model left out,
+    and folding both into "nothing to say" loses the distinction. Either way
+    `seen_in` stays empty — the outcome was always honest, only the record was
+    silent."""
+    entries, prov = _propose(
+        monkeypatch,
+        '[{"num":"6","title":"Characterization of brain volume changes in aging '
+        'individuals","reading":5}]',
+    )
+
+    assert entries[0].seen_in == []
+    assert any("reading: not a string" in f for f in prov.fields_discarded), (
+        prov.fields_discarded
+    )

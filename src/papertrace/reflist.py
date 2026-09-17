@@ -131,6 +131,19 @@ class ReflistProvenance:
     model: str = ""
     entries_proposed: int = 0
     fields_discarded: list[str] = field(default_factory=list)
+    # Kept apart from `fields_discarded` on purpose. A discarded field is "this
+    # value was not printed, so it was dropped"; a numbering finding is "this
+    # reading's labels do not add up", which the spec gives a different
+    # consequence — it marks the candidate as not covering, not as missing a
+    # value. One list holding both made `reflist_fields_discarded` report a
+    # count of discarded fields that included things no field ever lost.
+    #
+    # There is deliberately no `covers` flag: "not covering" needs no separate
+    # signal because `label_agreement` already enforces it, refusing to let a
+    # reading speak for a label it carries twice, and simply not seeing a label
+    # the reading never carried. A flag would be a published field with no
+    # consumer.
+    numbering_findings: list[str] = field(default_factory=list)
     # non-empty means the whole reading was refused, and says why. It is never
     # "the model agreed": a reading that could not be checked is not a reading.
     discarded_whole: str = ""
@@ -261,7 +274,13 @@ def propose(
         # "A" — landing a sentence the model wrote in a published field whose
         # only legal values are "A", "B" and "AB".
         said = item.get("reading")
-        said_norm = said.strip().upper() if isinstance(said, str) else ""
+        if said is not None and not isinstance(said, str):
+            # a reply of `5` or `{"text": "A"}` is a wrong SHAPE, which is a
+            # different report from a field the model simply left out
+            prov.fields_discarded.append(f"[{num}] reading: not a string")
+            said_norm = ""
+        else:
+            said_norm = said.strip().upper() if isinstance(said, str) else ""
         letters = list(said_norm) if said_norm in _READING_LETTERS else []
         seen_in = [{"A": label_a, "B": label_b}[c] for c in letters]
         if said_norm and not letters:
@@ -274,6 +293,19 @@ def propose(
         # `_title_tokens` read `raw` to decide whether two readings name one
         # paper. Composing it from unverified values would be the invention this
         # module refuses; composing it from verified ones is re-assembly.
+        # An entry that names no paper is not an entry. The whole-candidate
+        # discard above fires only when a title was PROPOSED and failed; a reply
+        # supplying a numeral and nothing else never reaches it, and would
+        # otherwise become a voter carrying no claim about any work. That voter
+        # cannot produce a wrong verdict — `label_agreement` compares through
+        # `_comparably_same`, which refuses to call two uncomparable entries
+        # `agreed` — but it can make a label `disputed` and withhold verdicts
+        # the model never said anything against. A degenerate reply may cost
+        # this reading its vote; it may not cost the audit its answers.
+        if "title" not in kept and "doi" not in kept:
+            prov.fields_discarded.append(f"[{num}]: no verified title or doi, so no entry")
+            continue
+
         parts = [kept[k] for k in ("authors", "year", "title", "journal") if k in kept]
         raw_text = ". ".join(parts)
         if "doi" in kept:
@@ -304,9 +336,9 @@ def propose(
     nums = [e.num for e in out]
     twice = sorted({n for n in nums if nums.count(n) > 1}, key=_label_key)
     if twice:
-        prov.fields_discarded.append("numerals proposed twice: " + ", ".join(twice))
+        prov.numbering_findings.append("numerals proposed twice: " + ", ".join(twice))
     if gaps := _numeral_gaps(nums):
-        prov.fields_discarded.append("numerals absent from 1..max: " + ", ".join(gaps))
+        prov.numbering_findings.append("numerals absent from 1..max: " + ", ".join(gaps))
     return out, prov
 
 
