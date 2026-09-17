@@ -71,6 +71,12 @@ def test_a_disputed_label_is_dropped_and_the_other_cited_source_is_still_judged(
     slugs = {j.source_slug for j in claims[0].judgements}
     assert slugs == {"nine-2021"}
     assert claims[0].verdict == "supported"
+    # the verdict and the judged slugs are both computed from `avail`, so they
+    # would survive an edit that only populated `withheld_refs` in the
+    # nothing-survives branch — and `claim_pairing` reads this field, so every
+    # co-cited claim keeping a real verdict would silently lose its disclosure
+    assert claims[0].withheld_refs == ["6"]
+    assert claims[0].unjudged_refs == []
 
 
 def test_a_claim_whose_only_cited_source_is_disputed_is_unchecked_not_not_retrieved(
@@ -173,3 +179,27 @@ def test_withheld_refs_round_trips_and_validates_against_the_schema(tmp_path):
         (Path(__file__).resolve().parent.parent / "schemas" / "results.schema.json").read_text()
     )
     jsonschema.Draft202012Validator(schema).validate(json.loads(path.read_text()))
+
+
+def test_any_iterable_of_labels_withholds_every_claim_not_just_the_first(tmp_path, monkeypatch):
+    """`disputed` is typed `set[str] | None`, and a set is what the CLI passes.
+
+    A generator, though, is truthy with no `__len__`, and each `r in disputed`
+    consumes it — so the first claim would withhold and every claim after it
+    would see an exhausted iterator and be judged normally. A silently partial
+    withholding is worse than a loud type error, so the parameter is copied into
+    a set on the way in and this test is what says so.
+    """
+    _write_source(tmp_path, "six-2019")
+    manifest = _manifest(_entry("6", "six-2019"))
+    monkeypatch.setattr(check_mod, "_ask", lambda prompt, model=None: _reply(1, "supported"))
+    claims = [
+        ClaimResult(id=1, claim="first", location="Results", refs=["6"]),
+        ClaimResult(id=2, claim="second", location="Results", refs=["6"]),
+    ]
+
+    check_claims(claims, manifest, tmp_path, backend="pymupdf",
+                 disputed=(label for label in ("6",)))
+
+    assert [c.verdict for c in claims] == ["unchecked", "unchecked"]
+    assert [c.withheld_refs for c in claims] == [["6"], ["6"]]

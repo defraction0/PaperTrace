@@ -863,7 +863,11 @@ def check_claims(
     paper and not on the papers it is judged against had the asymmetry
     backwards.
     """
-    disputed = disputed or set()
+    # set(), not `or set()`: the labels are membership-tested once per cited ref,
+    # and a generator handed in here would be consumed by the first test and read
+    # as empty for every claim after it — a silently partial withholding. Taking
+    # a copy makes any iterable safe and costs one pass over a handful of labels.
+    disputed = set(disputed or ())
     by_slug: dict[str, list[ClaimResult]] = {}
     for c in claims:
         pairs = [(r, _slug_for_ref(manifest, r)) for r in c.refs]

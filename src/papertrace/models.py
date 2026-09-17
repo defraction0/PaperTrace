@@ -864,7 +864,10 @@ class ClaimResult:
     # it). NOT `unjudged_refs`: an entry here means the source was fetched and
     # read. `unjudged_refs` means nobody could get to it at all — conflating
     # the two would report a retrieval gap that does not exist and erase the
-    # numbering gap that does.
+    # disputed-identity gap that does. Deliberately not called a "numbering"
+    # gap: `numbering_verified` already means whether reference *positions* were
+    # confirmed, which is a different question from whether two readings name
+    # the same paper under one label.
     withheld_refs: list[str] = field(default_factory=list)
     # False when no anchor phrase was found inside the cropped region — which is
     # one block's bbox, so this is NOT "absent from the page". The crop is still
