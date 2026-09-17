@@ -50,8 +50,14 @@ def last_model() -> str | None:
     return model_for(SITE_CHECK)
 
 
-def _ask_judge(prompt: str, model: str | None = None) -> str:
-    """One judging call, attributed to this stage and retried `ASK_ATTEMPTS` times.
+def _ask_with_retry(prompt: str, model: str | None = None) -> str:
+    """Every model call this module makes, attributed to the check stage.
+
+    **Both** of them: the single extraction call and each per-source judging
+    call. Extraction had no retry at all before this, which is why the wizard's
+    advertised ceiling is `ASK_ATTEMPTS * (1 + sources)` and not
+    `1 + ASK_ATTEMPTS * sources` — a reader of this module should not have to
+    find that out from the changelog.
 
     The retry was a hardcoded second attempt that never read `ASK_ATTEMPTS` —
     it matched only because the constant is 2. The wizard prints a worst-case
@@ -66,7 +72,10 @@ def _ask_judge(prompt: str, model: str | None = None) -> str:
             except (RuntimeError, ValueError):
                 if attempt == ASK_ATTEMPTS - 1:
                     raise
-        raise AssertionError("unreachable: ASK_ATTEMPTS must be >= 1")
+        # reached only if ASK_ATTEMPTS < 1, i.e. a policy that forbids the call
+        # it exists to bound. Raised rather than clamped to 1: silently making
+        # one attempt would hide a nonsense setting behind a working run.
+        raise RuntimeError(f"ASK_ATTEMPTS is {ASK_ATTEMPTS} — no model call was attempted")
 
 
 # Text past these limits is never sent to the model, so it is never checked.
@@ -271,7 +280,7 @@ def extract_claims(
         "<<CONTEXTS>>",
         _clip(inventory or "(none found)", CONTEXT_CHAR_LIMIT, "citation contexts", truncations),
     )
-    raw = _ask_judge(prompt + text, model)
+    raw = _ask_with_retry(prompt + text, model)
     data = _parse_json_object(raw)
     cited = [
         ClaimResult(
@@ -948,7 +957,7 @@ def check_claims(
                     _clip(annotated.read_text(), SOURCE_CHAR_LIMIT, f"source:{slug}", truncations),
                 )
             )
-            raw = _ask_judge(prompt, model)
+            raw = _ask_with_retry(prompt, model)
             verdicts = {v["id"]: v for v in _parse_json_array(raw)}
         except Exception as e:  # noqa: BLE001 — a failed check must never kill the run
             msg = f"{type(e).__name__}: {str(e)[:300]}"

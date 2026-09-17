@@ -6,6 +6,7 @@ bibliography, it is a rule with a test behind it.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -27,21 +28,52 @@ class _Completed:
         self.stderr = ""
 
 
+# Every way a python file can start another process, not just the one `ask.py`
+# happens to use. Matching `subprocess.run(` alone would have let a future file
+# shell out via `Popen`, `check_output` or `os.system` and still pass a test
+# whose name promises it cannot. `subprocess.TimeoutExpired:` carries no
+# parenthesis, so the `\w+\(` is what keeps the `except` clause from matching.
+_SHELLS_OUT = re.compile(
+    r"subprocess\.\w+\(|\bPopen\(|os\.system\(|os\.popen\(|os\.exec\w*\(|os\.spawn\w*\("
+)
+
+
 def test_only_ask_py_shells_out_to_a_model():
-    """One file in `src/` may run a subprocess, and this is the test that says so.
+    """One file in `src/` may start a process, and this is the test that says so.
 
     CLAUDE.md used to phrase this as "check.py is the only module that calls a
     model", which was a convention with nothing enforcing it. `refs` needs a
     reading of the bibliography from a model, so the rule moves to the seam —
     where it can be checked.
+
+    A grep cannot prove a negative about execution — a file could reach a
+    process through a name this pattern does not know. What it does prove is
+    that no file in `src/` reaches one by any of the spellings a person would
+    actually write, which is enough to make an accident loud.
     """
     src = Path(__file__).resolve().parent.parent / "src" / "papertrace"
     shelling = sorted(
         p.relative_to(src).as_posix()
         for p in src.rglob("*.py")
-        if "subprocess.run(" in p.read_text()
+        if _SHELLS_OUT.search(p.read_text())
     )
     assert shelling == ["ask.py"], shelling
+
+
+def test_a_retry_policy_of_zero_says_so_rather_than_quietly_making_one_call(monkeypatch):
+    """`ASK_ATTEMPTS` is the attempt budget, so zero forbids the call the budget
+    exists to bound. Clamping it to one would hide a nonsense setting behind a
+    working run; the old text claimed the branch was unreachable while standing
+    in it. It raises `RuntimeError`, the same type the seam raises for a failed
+    or timed-out call, so `check_claims`'s existing handler turns it into
+    `unchecked` with a note rather than something new to catch."""
+    called = []
+    monkeypatch.setattr(check_mod, "_ask", lambda p, model=None: called.append(1) or "")
+    monkeypatch.setattr(check_mod, "ASK_ATTEMPTS", 0)
+
+    with pytest.raises(RuntimeError, match="ASK_ATTEMPTS is 0"):
+        check_mod._ask_with_retry("prompt", None)
+    assert called == [], "no call may be made under a zero attempt budget"
 
 
 def test_two_call_sites_do_not_clobber_each_others_model(monkeypatch):
@@ -130,5 +162,5 @@ def test_the_judging_retry_attempts_exactly_ask_attempts_times(monkeypatch):
     monkeypatch.setattr(check_mod, "_ask", boom)
     monkeypatch.setattr(check_mod, "ASK_ATTEMPTS", 3)
     with pytest.raises(RuntimeError):
-        check_mod._ask_judge("prompt", None)
+        check_mod._ask_with_retry("prompt", None)
     assert len(calls) == 3, calls
