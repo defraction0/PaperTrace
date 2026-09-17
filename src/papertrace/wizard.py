@@ -312,6 +312,47 @@ def _ask_paper() -> Path:
         return path
 
 
+def _ask_case(paper: Path) -> Path:
+    """Where the audit is written — the one path answer that creates, not finds.
+
+    Routed through `clean_path` like every other path prompt. It was not, and a
+    quoted answer — what Finder's drag-and-drop produces for any path holding a
+    space — became a *relative* name starting with a literal quote, so the case
+    landed under the cwd while every printed line named an absolute folder that
+    did not exist. The other prompts were immune only because they check
+    `.exists()`; nothing can contradict a folder that is about to be created.
+
+    `default_case` already refused the working directory as a case location for
+    this reason ("appears wherever the user happened to be standing"), so a
+    relative answer here is worth a word rather than a silent accept: it is
+    resolved and the resolution is printed. A relative answer is legitimate —
+    `-c demo_case` is in the README — but it is also what a mangled path
+    degrades into, and the resolved line is the one place the difference shows
+    before any money is spent.
+    """
+    while True:
+        raw = Prompt.ask(
+            "\n[bold]Where should I keep this audit?[/bold]\n  folder",
+            default=_suggest_case(paper),
+        )
+        case = clean_path(raw)
+        if case.is_absolute():
+            return case
+        if case == Path("."):
+            # `default_case` refuses the working directory outright, and an
+            # answer of whitespace arrives here as `.` — the one relative answer
+            # that names no folder of its own
+            console.print(
+                "  [red]That is the folder you are standing in.[/red] An audit needs "
+                "its own,\n  so it cannot be mistaken for the rest of the directory."
+            )
+            continue
+        # soft_wrap: a path broken across two lines is a path a reader skims
+        # past, which is the failure this print exists to prevent
+        console.print(f"  [dim]relative — writing the audit to[/dim] {case.resolve()}", soft_wrap=True)
+        return case.resolve()
+
+
 def _ask_sources(case: Path) -> Path | None:
     """The folder of reference PDFs the user already holds.
 
@@ -471,10 +512,7 @@ def run_wizard() -> None:
             "'coverage not audited' rather than zero gaps.[/dim]"
         )
 
-    case = Path(
-        Prompt.ask("\n[bold]Where should I keep this audit?[/bold]\n  folder",
-                   default=_suggest_case(paper))
-    )
+    case = _ask_case(paper)
     provided = _ask_sources(case)
     supplement = _ask_supplements()
     doi, with_scout = _ask_doi(paper)

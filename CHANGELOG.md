@@ -89,6 +89,24 @@ one"* and then resumed at *"that does not add up"*. The ledger is its own
 sentence now, the Crossref clause is last and stands on its own, and a single
 duplicated label *appears* rather than *appear*.
 
+### Fixed — the guided wizard wrote the audit somewhere the user had not named
+
+The case-folder prompt was the one path answer that never went through
+`clean_path`. Finder's drag-and-drop quotes any path containing a space, so the
+answer began with a literal `'` — which made it a *relative* name, and the
+audit was written to a directory called `'` under wherever the user happened to
+be standing, while every line the run printed named an absolute folder that did
+not exist. The other three path prompts were immune by accident: they check
+`.exists()`, and a quoted path fails that. A case folder is *created*, so
+nothing could contradict it.
+
+All four prompts share `clean_path` now. A relative answer is still accepted —
+`-c demo_case` is in the README — but it is resolved and the resolution is
+printed on one unwrapped line, which is where a mangled path becomes visible
+before the first paid model call rather than after all of them. An answer of
+whitespace arrives as `.` and is refused, for the reason `default_case` already
+refuses the working directory: an audit needs a folder of its own.
+
 ## [0.6.0] — 2026-09-13 (beta)
 
 Carries 0.4.1 and 0.5.0 with it. Neither was ever published, so neither has a

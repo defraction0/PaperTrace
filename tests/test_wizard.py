@@ -140,6 +140,65 @@ def test_clean_path_expands_tilde(monkeypatch):
     assert wizard.clean_path("~/nope.pdf") == Path.home() / "nope.pdf"
 
 
+def test_the_case_folder_accepts_a_dragged_quoted_path(tmp_path, monkeypatch):
+    """The one path prompt that skipped `clean_path`.
+
+    A quoted answer made the case name start with a literal `'`, so the path was
+    relative: the audit was written under a directory named `'` beneath the cwd,
+    while every line the run printed named an absolute folder that did not
+    exist. Finder's drag-and-drop adds those quotes whenever the path holds a
+    space, so this is the default way to reach it, not an unusual one.
+
+    The other three prompts were immune only by accident — they check
+    `.exists()`, and a quoted path fails that. A case folder is *created*, so
+    nothing ever contradicted it.
+    """
+    target = tmp_path / "EuroRad Review" / "untitled folder"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wizard.Prompt, "ask", staticmethod(lambda *a, **k: f"'{target}'"))
+    assert wizard._ask_case(tmp_path / "paper.pdf") == target
+
+
+def test_a_relative_case_folder_is_accepted_as_the_path_it_resolves_to(tmp_path, monkeypatch):
+    """`-c demo_case` is in the README, so a relative answer is legitimate.
+
+    What it may not do is stay relative. The wizard prints the equivalent
+    command and hands the path to `run`, and a relative path means both of those
+    are only true from the directory the user happened to be standing in.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wizard.Prompt, "ask", staticmethod(lambda *a, **k: "demo_case"))
+    assert wizard._ask_case(tmp_path / "paper.pdf") == (tmp_path / "demo_case").resolve()
+
+
+def test_a_resolved_case_folder_is_echoed_so_a_mangled_path_is_visible(tmp_path, monkeypatch, capsys):
+    """The whole point of resolving rather than rejecting.
+
+    A quoted answer used to degrade into a *relative* name beginning with a
+    literal quote. Resolving it silently would still write the audit somewhere
+    the user did not name; printing the resolution puts the mistake on screen
+    before the first paid model call rather than after all ~32 of them.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wizard.Prompt, "ask", staticmethod(lambda *a, **k: "'a b"))
+    case = wizard._ask_case(tmp_path / "paper.pdf")
+    assert case == (tmp_path / "'a b").resolve()
+    assert str(case) in _plain(capsys.readouterr().out)
+
+
+def test_the_working_directory_is_refused_as_a_case_folder(tmp_path, monkeypatch):
+    """`default_case` already refuses it; the prompt may not be the way around.
+
+    Whitespace arrives here as `.`, so this is also the blank-answer path — and
+    a case folder that *is* the working directory cannot be told apart from
+    whatever else the user keeps there.
+    """
+    answers = iter(["   ", str(tmp_path / "case")])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wizard.Prompt, "ask", staticmethod(lambda *a, **k: next(answers)))
+    assert wizard._ask_case(tmp_path / "paper.pdf") == tmp_path / "case"
+
+
 # --- DOI detection: replacing a definition with a yes/no -------------------
 
 
