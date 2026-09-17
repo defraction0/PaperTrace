@@ -4607,7 +4607,11 @@ renders the disclosure twice.
   - `cli._interactive() -> bool`
   - `cli._write_disagreement(case, labels, candidates, texts) -> Path`
   - `cli._escalate_disputed(...) -> list[RefEntry]` — mutates `rec` in place and
-    returns the entry list to carry forward (changed only by menu option 3)
+    returns the entry list to carry forward. **Changed by menu option 3 (a whole
+    reading substituted) and by menu option 1 (each resolved label's entry
+    substituted).** An earlier draft of this block said "option 3 only", which
+    would leave option 1 un-disputing a label while judging it against the entry
+    the resolution ruled against — see Step 5's comment and its test.
   - `reflist.Resolution` — `resolved: dict[str, RefEntry]`,
     `still_disputed: list[str]`, `provenance: ReflistProvenance`
   - `reflist.resolve_disputed(labels, entries, texts, *, model=None) -> Resolution`
@@ -5363,11 +5367,61 @@ def _escalate_disputed(
         "accepted that. It is a reading, not a confirmation — the numbering is still "
         "unconfirmed"
     )
-    return entries
+    # The resolved entry REPLACES the one in the chosen list, in place, same
+    # order, same length. Returning `entries` unchanged here — which an earlier
+    # draft of this plan did — takes the label out of `labels_disputed` so
+    # `check` judges it again, while leaving the entry the resolution just ruled
+    # AGAINST as the paper it judges against. That is the original wrong-paper
+    # bug reached through the one path a user consented to, and the report would
+    # say "you accepted that" over it.
+    #
+    # This is the ONLY place in the codebase where a model reading changes what
+    # gets resolved and judged, and it is legal only because
+    # `rec.chosen_by == "user"` is recorded beside it. `rec.verified` stays
+    # False regardless; Task 8 proves that over every reply shape and choice.
+    return [res.resolved.get(e.num, e) for e in entries]
 ```
 
 `_label_list` lives in `refs.py`; add it to the `from .refs import (…)` block
 inside `_refs_pipeline` rather than reimplementing the bracket join.
+
+**A test this step must carry**, because nothing else in the plan would notice:
+
+```python
+def test_a_resolved_label_judges_against_the_resolved_entry(tmp_path, monkeypatch):
+    """Un-disputing a label without substituting its entry is the original bug.
+
+    Menu option 1 takes a label out of `labels_disputed`, so `check` judges it
+    again. If the chosen list still holds the entry the resolution ruled
+    against, the verdict is printed against the very paper the model said was
+    wrong — and the report says the user accepted it. The resolved entries exist
+    in `Resolution.resolved`; the failure mode is computing them and throwing
+    them away.
+    """
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
+    resolved = _entry("13", "Weston AD (2019) The paper the label really names. "
+                            "https://doi.org/10.1148/x13")
+    monkeypatch.setattr(
+        reflist_mod, "resolve_disputed",
+        lambda labels, cands, texts, model=None: reflist_mod.Resolution(
+            resolved={"13": resolved}, still_disputed=[],
+            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5"),
+        ),
+    )
+
+    rec = _rec(labels_disputed=["13"])
+    wrong = _entry("13", "Somebody Else (1999) A different paper entirely. "
+                         "https://doi.org/10.1148/x99")
+    out = cli._escalate_disputed(
+        tmp_path, rec, [wrong], {"parsed": [wrong]}, {"parsed": "text"},
+    )
+
+    assert rec.labels_disputed == []          # the label will be judged again
+    assert out[0].doi == "10.1148/x13"        # against the RESOLVED paper
+    assert rec.chosen_by == "user"            # which is what authorises it
+    assert rec.verified is False              # and it is still not confirmed
+```
 
 Wire it in at `cli.py:659`, immediately after the `if parse_only: … return`
 block:
