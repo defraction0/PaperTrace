@@ -354,11 +354,24 @@ def test_one_garbled_reading_cannot_corroborate_a_legible_one():
 
 def test_two_doi_less_readings_that_do_share_a_title_still_agree():
     """The tightening must not go so far that a DOI-less bibliography can never
-    corroborate itself. Elsevier prints no DOIs on some reference lists, and
+    corroborate itself. Some publishers print no DOIs in a reference list, and
     title-token overlap is the only evidence available there — refusing it would
-    make every label on such a paper `disputed` and the audit worthless."""
+    make every label on such a paper `disputed` and the audit worthless.
+
+    The two fixtures overlap **partially** (ratio 0.4, above `_same_work`'s 0.34
+    floor), not identically. An identical pair would exercise the overlap
+    arithmetic trivially and would still pass if the floor were raised almost to
+    1.0, so it would guard the structural case and nothing else. These two
+    differ the way two converters' readings of one entry actually differ —
+    author list truncated on one side, `aging`/`ageing`, a subtitle read two
+    ways — and share only `fujita` and `characterization`.
+    """
     a = RefEntry(num="7", raw="Fujita S (2023) Characterization of brain volume changes in aging")
-    b = RefEntry(num="7", raw="Fujita, Mori, Onda. Characterization of brain volume changes, aging")
+    b = RefEntry(
+        num="7",
+        raw="Fujita, Mori, Onda. Characterization of cerebral volume trajectories "
+            "during healthy ageing",
+    )
     assert label_agreement({"parsed": [a], "pymupdf": [b]}, {"7"}) == {"7": "agreed"}
 
 
