@@ -24,8 +24,17 @@ from papertrace.refs import _entry  # noqa: E402
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "refs_manifest.schema.json"
 
 
-def _paper(path: Path) -> Path:
-    """A one-page PDF citing [1] and [2], with both references printed."""
+def _paper(path: Path, *, extra_uncited: bool = False) -> Path:
+    """A one-page PDF citing [1] and [2], with both references printed.
+
+    `extra_uncited=True` also prints a THIRD, uncited [3] — used by exactly one
+    test (`test_no_model_reply_can_set_numbering_verified`) where the parse
+    alone must fail `reconcile`'s own extent check (`_covers`), because on the
+    plain two-reference fixture that check is satisfied by the parse alone and
+    nothing about the model reading could be shown to matter (see that test's
+    docstring). One fixture with a flag, not two independent copies that would
+    otherwise be free to drift apart.
+    """
     doc = pymupdf.open()
     page = doc.new_page()
     page.insert_text((72, 100), "A Fixture Imaging Study", fontsize=16)
@@ -33,6 +42,9 @@ def _paper(path: Path) -> Path:
     page.insert_text((72, 200), "References", fontsize=14)
     page.insert_text((72, 230), "[1] Alpha A. A first paper. J Fixture. 2020;1:1-9.", fontsize=11)
     page.insert_text((72, 250), "[2] Beta B. A second paper. J Fixture. 2021;2:10-19.", fontsize=11)
+    if extra_uncited:
+        page.insert_text((72, 270), "[3] Gamma G. A third, uncited paper. J Fixture. 2019;3:1-5.",
+                         fontsize=11)
     path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(path)
     doc.close()
@@ -46,7 +58,7 @@ def _work(num: str, doi: str) -> RefEntry:
     return _entry(num, f"Author for entry {num}. A distinctive title. doi:{doi}")
 
 
-def _wire_offline(monkeypatch) -> None:
+def _wire_offline(monkeypatch, *, needs_flat: bool = True) -> None:
     """No network and no model call by default: retrieval is a no-op, Crossref
     answers nothing, and `claude` is treated as PRESENT regardless of the host.
 
@@ -60,6 +72,21 @@ def _wire_offline(monkeypatch) -> None:
     take the "not attempted" branch instead and never call the mock at all.
     The one test that wants the real "claude absent" branch overrides this
     itself, after this fixture runs.
+
+    `needs_flat` patches `cli._needs_flat_reading` rather than the smap's own
+    converter, because these tests all ingest with `backend="pymupdf"` for
+    speed (no docling download) and `_refs_pipeline` now decides `enabled` for
+    the model call as `llm_refs and not parse_only and _needs_flat_reading(smap)`
+    (Major 2 of the Task 6 review) — so on the real pymupdf backend the model
+    call would never even be attempted, and every test below that mocks
+    `reflist.propose` directly would be testing a branch that never runs. This
+    is the same technique the review used to reproduce the real,
+    docling-shaped path without docling: force the PREDICATE, not the backend.
+    Default `True` because that is what most of these tests need; the one test
+    for the real pymupdf skip (`test_a_pymupdf_backend_run_never_asks_the_model`)
+    passes `needs_flat=False` explicitly, which happens to equal what the real
+    function already returns for this fixture's backend — set explicitly for
+    the reader's benefit, not because the patch changes anything there.
     """
     import papertrace.ask as ask_mod
     import papertrace.refs as refs_mod
@@ -72,6 +99,7 @@ def _wire_offline(monkeypatch) -> None:
                         lambda client, doi, email: CrossrefDeposit(absent="no deposit, in a test"))
     monkeypatch.setattr(cli, "_detected_doi", lambda m: None)
     monkeypatch.setattr(ask_mod, "claude_available", lambda: True)
+    monkeypatch.setattr(cli, "_needs_flat_reading", lambda smap: needs_flat)
     monkeypatch.setenv("PAPERTRACE_EMAIL", "test@example.org")
 
 
@@ -80,7 +108,7 @@ def offline(monkeypatch):
     _wire_offline(monkeypatch)
 
 
-def _run_refs(tmp_path: Path, monkeypatch, **kw) -> RefManifest:
+def _run_refs(tmp_path: Path, monkeypatch, *, needs_flat: bool = True, **kw) -> RefManifest:
     """Wire the offline doubles, run `_refs_pipeline` on the fixture paper, and
     hand back the manifest it wrote — schema-validated on the way, so every
     caller of this helper gets Gate 2 for free rather than each writing its own
@@ -92,7 +120,7 @@ def _run_refs(tmp_path: Path, monkeypatch, **kw) -> RefManifest:
     """
     import jsonschema
 
-    _wire_offline(monkeypatch)
+    _wire_offline(monkeypatch, needs_flat=needs_flat)
     pdf = _paper(tmp_path / "paper.pdf")
     case = tmp_path / "case"
     args = dict(manuscript=pdf, case=case, provided=None, email="test@example.org",
@@ -120,13 +148,28 @@ def _smap(converter: str) -> SourceMap:
 def test_a_model_naming_different_papers_changes_no_resolved_entry(tmp_path, offline, monkeypatch):
     """Ruling 2, as an equality. The safety property the whole design rests on.
 
-    The model's reading is a voter. It can withhold a verdict; it cannot put a
-    paper into the manifest, cannot change a numeral, and cannot cause anything
-    to be resolved or downloaded. So a run whose model reading names two
-    completely different works must produce byte-identical entries to a run that
-    never asked a model at all. If this test ever fails, `others["llm"]` has
-    reached `reconcile`'s arguments or `resolve_all`, and no other test in this
-    suite would notice.
+    The model's reading is a voter: it can withhold a verdict, and — via
+    `stamp_seen_in` — record which readings also carried a chosen entry's
+    work. It cannot put a paper into the manifest, cannot change a numeral,
+    and cannot cause anything to be resolved or downloaded. So a run whose
+    model reading names two completely different works must produce
+    byte-identical entries to a run that never asked a model at all.
+
+    That equality holds only because the fabricated reading DISAGREES (Minor 4
+    of the Task 6 review). `stamp_seen_in` is precisely a model-driven write
+    into the manifest's entries (`RefEntry.seen_in`): an AGREEING model
+    reading legitimately changes `seen_in` and the two runs would NOT be
+    byte-identical — see `test_no_model_reply_can_set_numbering_verified` for
+    that case. Do not "fix" `stamp_seen_in` to restore byte-identical equality
+    under agreement; that was never the invariant, only the disagreeing case
+    is.
+
+    The equality alone also cannot see the other half of Ruling 2 (Major 3):
+    `resolve_all`'s return value is discarded at the call site (it mutates in
+    place), so a violation shaped `resolve_all(entries + others["llm"], ...)`
+    would download and judge the fabricated papers while `entries` — and so
+    this equality — stayed untouched. The capturing stub below closes that
+    gap by recording exactly what reached `resolve_all`.
 
     `backend="pymupdf"`, not `"docling"`: the brief's own draft of this test used
     `"docling"` on a real PDF with no mock in front of `ingest_pdf`, which would
@@ -135,16 +178,29 @@ def test_a_model_naming_different_papers_changes_no_resolved_entry(tmp_path, off
     is fully mocked below and ignores its arguments, so which backend produced
     the parse is irrelevant to what this test actually checks.
     """
+    import papertrace.refs as refs_mod
+
     pdf = _paper(tmp_path / "paper.pdf")
+    fabricated_titles = {"An entirely different paper", "Another different paper"}
     fabricated = (
         [RefEntry(num="1", raw="Zeta Z. An entirely different paper. 1999.",
                   title="An entirely different paper", year="1999", seen_in=["docling"]),
          RefEntry(num="2", raw="Eta E. Another different paper. 1998.",
                   title="Another different paper", year="1998", seen_in=["pymupdf"])],
         reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2,
-                                      readings=["docling", "pymupdf"]),
+                                      readings=["docling", "pymupdf"], attempted=True),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: fabricated)
+
+    # what actually reaches retrieval — the half of Ruling 2 the
+    # entries-equality assertion below cannot see on its own (Major 3)
+    captured: list[list[RefEntry]] = []
+
+    def _capturing_resolve_all(entries, dest, email, provided_dir=None, progress=None, taken=None):
+        captured.append(list(entries))
+        return entries
+
+    monkeypatch.setattr(refs_mod, "resolve_all", _capturing_resolve_all)
 
     with_llm, without = tmp_path / "with", tmp_path / "without"
     cli._refs_pipeline(manuscript=pdf, case=with_llm, provided=None,
@@ -156,6 +212,13 @@ def test_a_model_naming_different_papers_changes_no_resolved_entry(tmp_path, off
 
     assert _entries(with_llm) == _entries(without)
     assert "different paper" not in _entries(with_llm)
+
+    assert len(captured) == 2, "resolve_all should have run once per _refs_pipeline call"
+    for handed in captured:
+        handed_titles = {e.title for e in handed if e.title}
+        assert not (handed_titles & fabricated_titles), (
+            f"a fabricated entry reached resolve_all: {handed}"
+        )
 
 
 def test_the_pymupdf_reading_is_skipped_on_a_pymupdf_backend_run():
@@ -174,6 +237,15 @@ def test_the_pymupdf_reading_is_skipped_on_a_pymupdf_backend_run():
 
     assert set(flat_run) == {"parsed"}, flat_run
     assert set(layout_run) == {"parsed", "pymupdf"}, layout_run
+
+
+def test_needs_flat_reading_does_not_crash_on_an_empty_converter():
+    """Minor 1 of the Task 6 review. `"".split()` is `[]`, not `[""]` —
+    `smap.converter.split()[0]` raises `IndexError` on a `source_map.json`
+    that never recorded a converter, killing the whole refs stage on
+    something the rest of this module treats as a routine "not known to be
+    pymupdf" case rather than a crash."""
+    assert cli._needs_flat_reading(_smap("")) is True
 
 
 def test_a_reading_that_is_absent_is_omitted_rather_than_empty():
@@ -225,16 +297,55 @@ def test_parse_only_makes_no_model_call_even_with_llm_refs_on(tmp_path, offline,
     assert calls == []
 
 
-def test_an_unavailable_claude_degrades_to_a_stated_absence(tmp_path, offline, monkeypatch):
+def test_a_pymupdf_backend_run_never_asks_the_model(tmp_path, monkeypatch):
+    """Major 2 of the Task 6 review: `--backend pymupdf` — what every other
+    test and all of CI pin — must never even reach `reflist.propose`, and the
+    published reason must name the deliberate skip rather than blame the PDF.
+
+    `reflist.propose` is deliberately left UNMOCKED here: the point is that it
+    is never called at all, not that it is called and handled well. Before the
+    fix, `enabled` did not consider the backend, so `propose` ran, was handed
+    one empty text (the flat reading, skipped on purpose) and one real one,
+    and reported "only one of the two extractions of the bibliography had any
+    text" — true of nothing: both extractions had text, the second was simply
+    never taken.
+    """
+    import papertrace.ask as ask_mod
+
+    calls = []
+    monkeypatch.setattr(ask_mod, "_ask", lambda prompt, model=None: calls.append(1) or "[]")
+    manifest = _run_refs(tmp_path, monkeypatch, needs_flat=False, llm_refs=True)
+
+    assert calls == [], "propose must never be reached on a pymupdf-backend run"
+    assert manifest.reflist_attempted is False
+    assert manifest.reflist_model == ""
+    assert any(
+        "this run's backend is pymupdf" in f for f in manifest.reflist_fields_discarded
+    ), manifest.reflist_fields_discarded
+    assert not any(
+        "only one of the two extractions" in f for f in manifest.reflist_fields_discarded
+    ), "the published reason must name the deliberate skip, not blame the PDF's extraction"
+
+
+def test_an_unavailable_claude_degrades_to_a_stated_absence(tmp_path, monkeypatch):
     """The cardinal rule, at this seam. Never "it agreed" — "it was not asked".
 
     `claude` missing from PATH is the ordinary case for someone who installed
     papertrace and not Claude Code. The run proceeds on the deterministic
     readings, the manifest records the reason, and no format anywhere says a
     model corroborated anything.
+
+    `needs_flat=False` (not the shared fixture's default): with the flat
+    reading also forced on, "parsed" and the real flat-text reading of this
+    same pymupdf-backend PDF are identical and genuinely corroborate each
+    other with no model involved at all, which would make
+    `numbering_corroborated` legitimately `True` for a reason this test is not
+    about. Keeping the fixture single-voter here is what isolates "claude was
+    unavailable" as the one fact under test.
     """
     import papertrace.ask as ask_mod
 
+    _wire_offline(monkeypatch, needs_flat=False)
     monkeypatch.setattr(ask_mod, "claude_available", lambda: False)
     monkeypatch.setattr(ask_mod, "_ask",
                         lambda prompt, model=None: pytest.fail("claude was absent and asked anyway"))
@@ -246,6 +357,7 @@ def test_an_unavailable_claude_degrades_to_a_stated_absence(tmp_path, offline, m
 
     payload = json.loads((case / "refs_manifest.json").read_text())
     assert payload["reflist_model"] == ""
+    assert payload["reflist_attempted"] is False
     assert any("not attempted" in f for f in payload["reflist_fields_discarded"]), payload
     assert "llm" not in payload["corroborating_readings"]
     assert payload["numbering_corroborated"] is False
@@ -288,7 +400,7 @@ def test_corroboration_requires_every_cited_label_to_agree(tmp_path, offline, mo
                   title="A first paper", year="2020", seen_in=["docling", "pymupdf"]),
          RefEntry(num="2", raw="Gamma G. A wholly unrelated third paper. 2015.",
                   title="A wholly unrelated third paper", year="2015", seen_in=["A"])],
-        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2),
+        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, attempted=True),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: disagrees)
     case = tmp_path / "case"
@@ -309,36 +421,32 @@ def test_no_model_reply_can_set_numbering_verified(tmp_path, offline, monkeypatc
     would be most tempting — a model agreeing with the parse entry for entry.
     Corroboration is a second axis, not evidence of a checked numbering.
 
-    Not `_paper()`: that fixture cites exactly the two references it prints, so
+    Not `_paper()`'s default shape: with only the two cited references printed,
     `_covers` — the extent check `reconcile` uses on its own, with no model in
     the loop at all — is already satisfied by the parse alone, and `verified`
     would come back `True` regardless of anything this test does. Nothing here
     could then tell "verified because the parse already covered the body's
-    labels" apart from "verified because a mocked model agreed with it". This
-    fixture prints a THIRD, uncited reference, so the parse alone has three
-    entries against two cited labels and fails `_covers` on its own — the only
-    way to make the two cases distinguishable.
+    labels" apart from "verified because a mocked model agreed with it".
+    `extra_uncited=True` prints a THIRD, uncited reference, so the parse alone
+    has three entries against two cited labels and fails `_covers` on its own —
+    the only way to make the two cases distinguishable.
+
+    `corroborating_readings` names three, not two: `offline`'s default
+    `needs_flat=True` means the real, local flat-text reading of this same PDF
+    also runs and also carries labels [1] and [2] (identical text to the
+    parse, since the real backend here is pymupdf too) — so it votes exactly
+    where "parsed" does, and Major 1's fix (name only readings that actually
+    carried a cited label) correctly counts it alongside "llm" and "parsed".
     """
-    doc = pymupdf.open()
-    page = doc.new_page()
-    page.insert_text((72, 100), "A Fixture Imaging Study", fontsize=16)
-    page.insert_text((72, 140), "Body text citing [1] and also [2] here.", fontsize=11)
-    page.insert_text((72, 200), "References", fontsize=14)
-    page.insert_text((72, 230), "[1] Alpha A. A first paper. J Fixture. 2020;1:1-9.", fontsize=11)
-    page.insert_text((72, 250), "[2] Beta B. A second paper. J Fixture. 2021;2:10-19.", fontsize=11)
-    page.insert_text((72, 270), "[3] Gamma G. A third, uncited paper. J Fixture. 2019;3:1-5.",
-                     fontsize=11)
-    pdf = tmp_path / "paper.pdf"
-    doc.save(pdf)
-    doc.close()
     agrees = (
         [RefEntry(num="1", raw="Alpha A. A first paper. J Fixture. 2020;1:1-9.",
                   title="A first paper", year="2020", seen_in=["docling", "pymupdf"]),
          RefEntry(num="2", raw="Beta B. A second paper. J Fixture. 2021;2:10-19.",
                   title="A second paper", year="2021", seen_in=["docling", "pymupdf"])],
-        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2),
+        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, attempted=True),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: agrees)
+    pdf = _paper(tmp_path / "paper.pdf", extra_uncited=True)
     case = tmp_path / "case"
 
     cli._refs_pipeline(manuscript=pdf, case=case, provided=None, email="test@example.org",
@@ -347,7 +455,76 @@ def test_no_model_reply_can_set_numbering_verified(tmp_path, offline, monkeypatc
     payload = json.loads((case / "refs_manifest.json").read_text())
     assert payload["numbering_verified"] is False
     assert payload["numbering_corroborated"] is True
-    assert payload["corroborating_readings"] == ["llm", "parsed"]
+    assert payload["corroborating_readings"] == ["llm", "parsed", "pymupdf"]
+
+
+def test_a_successful_reading_that_named_no_model_still_discloses_the_attempt(tmp_path, monkeypatch):
+    """Critical 1 of the Task 6 review, reproduced end to end through the real
+    pipeline rather than only at the disclosure layer.
+
+    `ask._ask` records a model name only when `claude -p`'s own JSON reports
+    one — a case `ask.py` explicitly anticipates ("a reply that names no
+    model is not evidence the model changed"). `reflist.propose` mirrors that
+    exactly: a real call that verifies cleanly and votes can still leave
+    `prov.model == ""`. Before `reflist_attempted` existed, that state
+    published as `reflist_model: ""` (the schema's OWN words for "no such
+    call was made") with no console line and no `reflist` disclosure, while
+    `numbering_corroboration` told the reader `llm` had corroborated the
+    numbering anyway.
+    """
+    unnamed = (
+        [RefEntry(num="1", raw="Alpha A. A first paper. J Fixture. 2020;1:1-9.",
+                  title="A first paper", year="2020"),
+         RefEntry(num="2", raw="Beta B. A second paper. J Fixture. 2021;2:10-19.",
+                  title="A second paper", year="2021")],
+        # the exact shape a real `propose()` call produces when
+        # `ask.model_for(ask.SITE_REFS)` returns `None` — `model=""`,
+        # `attempted=True`, a real vote in hand
+        reflist_mod.ReflistProvenance(model="", entries_proposed=2, attempted=True),
+    )
+    monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: unnamed)
+
+    manifest = _run_refs(tmp_path, monkeypatch, llm_refs=True)
+
+    assert manifest.reflist_attempted is True, "a call that voted must be recorded as attempted"
+    assert manifest.reflist_model == ""
+
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    fired = {d.key for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)}
+    assert "reflist" in fired, "a reading that ran and voted must not be silently 'not asked for'"
+
+
+def test_corroborating_readings_excludes_a_reading_that_carried_no_cited_label(
+    tmp_path, monkeypatch, capsys
+):
+    """Major 1 of the Task 6 review. `others` is every reading TAKEN, not
+    every reading that AGREED. A reading proposing entries only for labels the
+    body never cites abstains everywhere in `label_agreement` and must not be
+    named as having corroborated anything — `stamp_seen_in`'s own `_same_work`
+    test already refuses to credit a reading this way for `seen_in`; this is
+    the same fact applied to the field a reader is most likely to trust as
+    reassurance. The console count must match the named list, not `len(others)`.
+    """
+    abstains = (
+        [_work("3", "10.1000/x3"), _work("4", "10.1000/x4")],
+        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, attempted=True),
+    )
+    monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: abstains)
+    capsys.readouterr()  # discard anything buffered before this run
+
+    manifest = _run_refs(tmp_path, monkeypatch, llm_refs=True)
+
+    assert "llm" not in manifest.corroborating_readings, manifest.corroborating_readings
+    assert manifest.corroborating_readings == ["parsed", "pymupdf"]
+    assert manifest.numbering_corroborated is True
+
+    out = capsys.readouterr().out
+    assert "3 readings of the reference list agree" not in out, (
+        "the printed count must match the named readings, not len(others)"
+    )
+    assert "2 readings of the reference list agree" in out
 
 
 def test_both_commands_declare_the_flag_and_run_forwards_it(tmp_path, monkeypatch):
@@ -396,7 +573,8 @@ def test_the_reflist_disclosure_reaches_every_format_and_carries_the_ceiling(tmp
     from papertrace.disclosures import REFLIST_TOKEN, run_disclosures
     from papertrace.models import RunResults
 
-    manifest = RefManifest(manuscript="p.pdf", reflist_model="claude-opus-5",
+    manifest = RefManifest(manuscript="p.pdf", reflist_attempted=True,
+                           reflist_model="claude-opus-5",
                            reflist_fields_discarded=["[2] journal"])
     fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
              if d.key == "reflist"]
@@ -424,6 +602,26 @@ def test_a_model_reading_that_was_not_obtained_still_discloses_that(tmp_path):
     assert len(fired) == 1, fired
     assert "not attempted" in fired[0].text
     assert "agreed" not in fired[0].text
+    assert fired[0].level == "warn", "a failed attempt is a warning, not routine information"
+
+
+def test_an_attempted_reading_that_named_no_model_is_worded_as_a_gap_in_reporting(tmp_path):
+    """Critical 1, at the disclosure layer directly. The two failure modes read
+    differently on purpose: "not obtained" means nothing happened; this one
+    means something happened and the CLI could not say who answered — and the
+    text must not blur the two into one "not obtained" sentence.
+    """
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = RefManifest(manuscript="p.pdf", reflist_attempted=True, reflist_model="",
+                           reflist_fields_discarded=[])
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert len(fired) == 1, fired
+    text = fired[0].text
+    assert "not obtained" not in text
+    assert "did not report which model answered" in text
 
 
 def test_corroboration_is_disclosed_without_claiming_the_numbering_was_verified(tmp_path):
@@ -513,6 +711,33 @@ def test_reflist_numbering_findings_round_trips_and_validates(tmp_path):
     assert old.reflist_numbering_findings == []
 
 
+def test_reflist_attempted_round_trips_and_validates(tmp_path):
+    """Gate 2, for Critical 1's field. Absent means never computed / no call
+    ever made — the same three-state discipline as `numbering_ledger` — never
+    "the model agreed" and never folded into `reflist_model`'s own emptiness,
+    which cannot by itself distinguish "no call" from "a call that named no
+    model" (see `RefManifest.reflist_attempted`'s own docstring).
+    """
+    import jsonschema
+
+    m = RefManifest(manuscript="p.pdf", reflist_attempted=True, reflist_model="")
+    path = tmp_path / "refs_manifest.json"
+    m.to_json(path)
+    payload = json.loads(path.read_text())
+    schema = json.loads(SCHEMA_PATH.read_text())
+    jsonschema.validate(payload, schema)
+    assert "reflist_attempted" not in schema.get("required", [])
+
+    back = RefManifest.from_json(path)
+    assert back.reflist_attempted is True
+    assert back.reflist_model == ""
+
+    del payload["reflist_attempted"]
+    path.write_text(json.dumps(payload))
+    old = RefManifest.from_json(path)
+    assert old.reflist_attempted is False
+
+
 def test_a_numbering_finding_from_the_model_reading_reaches_the_manifest(tmp_path, monkeypatch):
     """`reflist.propose` reports a duplicated or missing numeral separately from
     a discarded field, because the two mean different things. An earlier draft
@@ -525,6 +750,7 @@ def test_a_numbering_finding_from_the_model_reading_reaches_the_manifest(tmp_pat
             entries_proposed=2,
             numbering_findings=["numerals proposed twice: 2"],
             readings=["pymupdf", "docling"],
+            attempted=True,
         ),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: proposed)

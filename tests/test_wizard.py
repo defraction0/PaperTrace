@@ -662,21 +662,28 @@ def test_a_path_with_a_quote_is_still_one_argument(tmp_path):
 # --- the cost estimate must not be exceeded by the documented retry ---------
 
 
-def test_the_worst_case_call_count_includes_the_retry(tmp_path):
+def test_the_worst_case_call_count_includes_the_retry(tmp_path, monkeypatch):
     """The wizard promised "up to N model calls" from one extraction plus one
     per cited source. `_ask` retries once, so a single-source run advertised as
     2 could issue 3. The ceiling now comes from ask.py's own attempt count,
     so the two cannot drift.
 
     Both figures also carry the reference-list reading `refs` now makes before
-    `check` ever runs: one un-retried call, so it adds exactly 1 to each side
+    `check` ever runs, WHEN the wizard's own backend choice ("auto") would
+    actually attempt it: one un-retried call, so it adds exactly 1 to each side
     of the estimate rather than multiplying through the retried figure — this
     task adds that call on top of the `ASK_ATTEMPTS * (1 + cited_source_calls)`
     shape a previous task already moved `model_calls_max` to, rather than
     reverting it back to a flat `ASK_ATTEMPTS * cited_source_calls`.
+
+    Pinned with `docling_available` forced `True` rather than left to whatever
+    this machine happens to have installed — `workload()` derives the +1 from
+    it, and a test whose expected numbers depend on the host environment is
+    not really pinning anything.
     """
     from papertrace.ask import ASK_ATTEMPTS
 
+    monkeypatch.setattr(wizard, "docling_available", lambda: True)
     pdf = _one_pager(tmp_path / "m.pdf",
                      "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
     w = wizard.workload(pdf)
@@ -684,6 +691,26 @@ def test_the_worst_case_call_count_includes_the_retry(tmp_path):
     assert w["model_calls"] == 3, w
     assert w["model_calls_max"] == 1 + ASK_ATTEMPTS * (1 + 1), w
     assert w["model_calls_max"] >= w["model_calls"]
+
+
+def test_the_worst_case_call_count_drops_the_reflist_call_on_a_pymupdf_only_install(
+    tmp_path, monkeypatch
+):
+    """`run_wizard` always requests `backend="auto"`, which resolves to pymupdf
+    when docling is not importable — and on a pymupdf run the flat second
+    reading is skipped as identical to the first, so the reference-list call
+    is never attempted either (Major 2 / Minor 3 of the Task 6 review: the
+    base estimate must not advertise a call this run's own backend cannot
+    produce)."""
+    from papertrace.ask import ASK_ATTEMPTS
+
+    monkeypatch.setattr(wizard, "docling_available", lambda: False)
+    pdf = _one_pager(tmp_path / "m.pdf",
+                     "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
+    w = wizard.workload(pdf)
+
+    assert w["model_calls"] == 2, w
+    assert w["model_calls_max"] == ASK_ATTEMPTS * (1 + 1), w
 
 
 def test_the_printed_estimate_does_not_promise_a_ceiling_it_can_exceed():

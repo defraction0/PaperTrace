@@ -212,21 +212,30 @@ def workload(pdf: Path) -> dict:
     # one extraction call, then one per cited source. Sources are judged in
     # groups, so this is an upper bound on the judging calls, not a promise.
     cited_source_calls = sum(len(g) for g in groups)
+    # `run_wizard` always requests `backend="auto"`, which resolves to docling
+    # when it is importable and to pymupdf otherwise (`ingest.resolve_backend`).
+    # On a pymupdf run the flat second reading is skipped as identical to the
+    # first — `cli._needs_flat_reading`'s own predicate, mirrored here rather
+    # than imported, since importing `.ingest`'s `resolve_backend` would do —
+    # so the reference-list call is never attempted either, and the estimate
+    # must not promise a call this run's own backend will not produce.
+    llm_call = 1 if docling_available() else 0
     return {
         "pages": pages,
         "places": len(groups),
         "multi": multi,
         "labels": len(labels),
-        # one reference-list reading, one extraction call, then one per cited
-        # source. The reference-list call gets no retry — `reflist.propose` asks
-        # once and reports what it got — so it adds exactly 1 to the base figure
-        # and 1 to the ceiling, on top of the retried figure below rather than
-        # inside it.
-        "model_calls": 2 + cited_source_calls,
+        # one reference-list reading (when the backend leaves a second text to
+        # check it against), one extraction call, then one per cited source.
+        # The reference-list call gets no retry — `reflist.propose` asks once
+        # and reports what it got — so it adds exactly `llm_call` to the base
+        # figure and to the ceiling, on top of the retried figure below rather
+        # than inside it.
+        "model_calls": 1 + llm_call + cited_source_calls,
         # the retry is real spend: ASK_ATTEMPTS attempts for extraction, and
         # ASK_ATTEMPTS attempts per judging call. Derived from ask.py rather
         # than a local multiplier, so the estimate cannot drift from the policy.
-        "model_calls_max": 1 + ASK_ATTEMPTS * (1 + cited_source_calls),
+        "model_calls_max": llm_call + ASK_ATTEMPTS * (1 + cited_source_calls),
         "style_unrecognised": len(groups) == 0,
     }
 

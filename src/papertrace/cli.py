@@ -509,7 +509,10 @@ def _needs_flat_reading(smap) -> bool:
     reading would turn every `single` label into `agreed` and report
     corroboration that nothing corroborated.
     """
-    return smap.converter.split()[0] != "pymupdf"
+    # `"".split()` is `[]`, not `[""]` — guard rather than let a `source_map.json`
+    # that never recorded a converter (empty string) crash the whole refs stage
+    # on an IndexError instead of just treating it as "not known to be pymupdf"
+    return (smap.converter.split() or [""])[0] != "pymupdf"
 
 
 def _reference_readings(
@@ -555,6 +558,7 @@ def _llm_reference_reading(
     label_a: str,
     label_b: str,
     enabled: bool,
+    disabled_reason: str = "",
 ) -> tuple[list[RefEntry], ReflistProvenance]:
     """A model's reading of the bibliography, or a stated reason there is none.
 
@@ -571,12 +575,20 @@ def _llm_reference_reading(
     leave the reason where the manifest and the report can read it, because
     silence here would be read as "no news" about a reading that was asked for
     and did not happen.
+
+    `disabled_reason` names a STRUCTURAL cause when `not enabled` — the run's
+    own backend leaves no second reading to compare against — as opposed to a
+    bare, silent `ReflistProvenance()` for the two causes that are simply the
+    caller's choice (`--no-llm-refs`, `--parse-only`) and need no explaining.
     """
     from . import ask
     from .reflist import ReflistProvenance, propose
 
     if not enabled:
-        return [], ReflistProvenance()
+        # a caller's own choice is silent (empty `fields_discarded`); a
+        # structural reason the caller had no choice about is disclosed, same
+        # as "claude not on PATH" below
+        return [], ReflistProvenance(fields_discarded=[disabled_reason] if disabled_reason else [])
     if not ask.claude_available():
         # the ordinary case for someone who installed papertrace and not Claude
         # Code. The run proceeds on the deterministic readings and says so —
@@ -595,8 +607,13 @@ def _llm_reference_reading(
         # closed on the next one. The failure is recorded, not swallowed:
         # `reflist_fields_discarded` carries it into the manifest and a console
         # line says it at the time. Same shape as `check.py:996`.
+        # `attempted=True`: every exception reaching here came out of `propose`
+        # actually invoking the subprocess (its own two early returns for "not
+        # enough text" and "not a JSON array" return normally, not raise) — a
+        # failed call is still a call that happened, not one that never was.
         return [], ReflistProvenance(
-            fields_discarded=[f"not obtained — {type(e).__name__}: {str(e)[:200]}"]
+            attempted=True,
+            fields_discarded=[f"not obtained — {type(e).__name__}: {str(e)[:200]}"],
         )
     if prov.discarded_whole:
         # the entries are already `[]` in this branch; the reason is what travels,
@@ -628,6 +645,11 @@ def _refs_pipeline(
     """
     from .ingest import ingest_pdf, references_span, references_span_flat
     from .models import SourceMap, citation_labels, is_references_heading, paper_title
+
+    # `_label_key` is shared with `reflist.propose`'s own numbering-findings
+    # sort, rather than a third inline copy of the same tuple key — a
+    # divergence between them would sort the same labels two ways in one report
+    from .reflist import _label_key
     from .refs import (
         _client,
         crossref_deposit,
@@ -759,27 +781,41 @@ def _refs_pipeline(
     # flat-text reading can cause a source to be resolved, downloaded or judged.
     # They can only cause a verdict to be withheld.
     flat_text, flat_entries = "", None
-    if _needs_flat_reading(smap):
+    needs_flat = _needs_flat_reading(smap)
+    if needs_flat:
         flat_text, _ = references_span_flat(manuscript)
         flat_entries = parse_references(flat_text)
+    # --parse-only promises "no network"; a `claude -p` subprocess is both
+    # network and spend, so the flag is forced off here rather than trusted to
+    # the caller. `needs_flat` is decided HERE, where the backend is known —
+    # on a pymupdf run the model would be handed the same text twice, which
+    # `reflist.propose` can only read as "one of the two extractions had no
+    # text" and blame on the PDF rather than on this deliberate skip.
+    llm_wanted = llm_refs and not parse_only
     llm_entries, reflist_prov = _llm_reference_reading(
         refs_text,
         flat_text,
         label_a=smap.converter,
         label_b="pymupdf",
-        # --parse-only promises "no network"; a `claude -p` subprocess is both
-        # network and spend, so the flag is forced off here rather than trusted
-        # to the caller
-        enabled=llm_refs and not parse_only,
+        enabled=llm_wanted and needs_flat,
+        disabled_reason=(
+            "not attempted — this run's backend is pymupdf, so a second flat "
+            "reading of the bibliography would be the same text"
+            if llm_wanted and not needs_flat
+            else ""
+        ),
     )
     others = _reference_readings(
         smap=smap, crossref=crossref_entries, parsed=parsed,
         flat=flat_entries, llm=llm_entries,
     )
-    if reflist_prov.model:
+    if reflist_prov.attempted:
+        # named, even when the reply itself did not — see `ReflistProvenance.attempted`'s
+        # docstring for why `model` alone cannot stand in for "this happened"
+        named_model = reflist_prov.model or "an unnamed model"
         dropped = len(reflist_prov.fields_discarded)
         console.print(
-            f"the reference list was also read by [bold]{reflist_prov.model}[/bold] · "
+            f"the reference list was also read by [bold]{named_model}[/bold] · "
             f"{dropped} field{'' if dropped == 1 else 's'} discarded as "
             f"not printed [dim]— a second reading, not confirmation[/dim]"
         )
@@ -805,20 +841,30 @@ def _refs_pipeline(
     agreement = label_agreement(others, body_labels)
     rec.labels_disputed = sorted(
         (label for label, state in agreement.items() if state == "disputed"),
-        key=lambda s: (0, int(s), "") if s.isdigit() else (1, 0, s),
+        key=_label_key,
     )
     # every cited label, or it is not corroboration. One disputed label is not
     # "mostly corroborated", and `single` is not agreement — it is one reading
     rec.corroborated = bool(body_labels) and all(
         agreement.get(label) == "agreed" for label in body_labels
     )
-    # named only when it holds: an empty list means no corroboration was
-    # established, never that these readings disagreed
-    rec.corroborating_readings = sorted(others) if rec.corroborated else []
+    # Named only when corroboration holds, and only the readings that actually
+    # voted on a cited label — never every reading `others` happened to carry.
+    # `sorted(others)` names a reading that carried none of the cited labels
+    # (it proposed only entries for labels the body never cites) as having
+    # corroborated them, which `stamp_seen_in`'s own `_same_work` test would
+    # never do for that same reading. Since `rec.corroborated` already requires
+    # every cited label to be `agreed`, a reading that carries any cited label
+    # at all necessarily agreed on it — filtering to "carries one" is enough.
+    rec.corroborating_readings = (
+        sorted(name for name, cand in others.items() if any(e.num in body_labels for e in cand))
+        if rec.corroborated else []
+    )
     if rec.corroborated:
         console.print(
-            f"[green]✓ {len(others)} readings of the reference list agree[/green] on every "
-            f"cited label [dim]({', '.join(sorted(others))}) — corroboration, not a "
+            f"[green]✓ {len(rec.corroborating_readings)} readings of the reference list "
+            f"agree[/green] on every cited label "
+            f"[dim]({', '.join(rec.corroborating_readings)}) — corroboration, not a "
             f"confirmed numbering[/dim]"
         )
     if rec.labels_disputed:
@@ -902,6 +948,7 @@ def _refs_pipeline(
         numbering_corroborated=rec.corroborated,
         corroborating_readings=rec.corroborating_readings,
         labels_disputed=rec.labels_disputed,
+        reflist_attempted=reflist_prov.attempted,
         reflist_model=reflist_prov.model,
         reflist_fields_discarded=reflist_prov.fields_discarded,
         reflist_numbering_findings=reflist_prov.numbering_findings,
@@ -946,7 +993,8 @@ def refs(
     llm_refs: bool = typer.Option(
         True, "--llm-refs/--no-llm-refs",
         help="Also have a model read the printed reference list as a second opinion "
-             "on the numbering (one extra model call; off under --parse-only)",
+             "on the numbering (one extra model call — none under --parse-only, or on a "
+             "pymupdf backend, which leaves no second reading to compare)",
     ),
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest."""
@@ -1382,7 +1430,8 @@ def run(
     llm_refs: bool = typer.Option(
         True, "--llm-refs/--no-llm-refs",
         help="Also have a model read the printed reference list as a second opinion "
-             "on the numbering (one extra model call; off under --parse-only)",
+             "on the numbering (one extra model call — none under --parse-only, or on a "
+             "pymupdf backend, which leaves no second reading to compare)",
     ),
 ) -> None:
     """Full pipeline: ingest → refs → scout → check → highlight → report."""

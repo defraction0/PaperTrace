@@ -148,6 +148,15 @@ class ReflistProvenance:
     # "the model agreed": a reading that could not be checked is not a reading.
     discarded_whole: str = ""
     readings: list[str] = field(default_factory=list)
+    # Whether `claude -p` was actually invoked — set the instant `propose`
+    # commits to the call, never derived from `model`. `ask._ask` records a
+    # model name only when the subprocess's own JSON reports one ("a reply
+    # that names no model is not evidence the model changed", `ask.py`), so a
+    # call that succeeded, verified cleanly and voted can still leave `model`
+    # `""`. A caller that read `model` as the proxy for "did this happen at
+    # all" would publish that vote as "no such call was made" — the exact
+    # state a real run reached before this field existed.
+    attempted: bool = False
 
 
 # order matters only for `raw` below, which is re-assembled in printed order
@@ -187,6 +196,9 @@ def propose(
             "nothing the model proposed could have been checked against a second reading"
         )
         return [], prov
+    # committed to the call from here on — everything past this point is a real
+    # attempt, whatever it returns
+    prov.attempted = True
 
     # labels before texts: a label is a short fixed string ("pymupdf",
     # "docling 2.8.0") and cannot contain a placeholder, while page text

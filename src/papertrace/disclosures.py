@@ -555,34 +555,48 @@ def _reflist(manifest) -> Disclosure | None:
     no news. The token is phrased AROUND in every branch, the way
     `SUPPLEMENT_IDENTITY_TOKEN` is: it is asserted verbatim in all four formats,
     so a branch where it is not literally true would make one format lie.
+
+    Branches on `reflist_attempted`, never on whether `reflist_model` is set.
+    `claude -p` only reports a model name when its own JSON does — a reply
+    naming none is not evidence nothing was asked — so a call that happened,
+    verified cleanly and voted can still leave `reflist_model == ""`. Reading
+    that emptiness as "no reading was obtained" is precisely the state a real
+    run reached before `reflist_attempted` existed: one real call, nothing on
+    the console, the manifest asserting no such call was made.
     """
     model = getattr(manifest, "reflist_model", "") or ""
+    attempted = bool(getattr(manifest, "reflist_attempted", False))
     notes = list(getattr(manifest, "reflist_fields_discarded", []) or [])
     # a different kind of finding, and it must reach the reader too: a reading
     # whose own labels do not add up is worth knowing about even when every
     # value it proposed was printed
     numbering = list(getattr(manifest, "reflist_numbering_findings", []) or [])
-    if not model and not notes:
+    if not attempted and not notes:
         return None  # no model reading was asked for
     ceiling = (
         "A model agreeing with a parse is a second reading, not confirmation: it read "
         "the same document, so a reference the layout destroyed is one it may also "
         "have missed."
     )
-    if not model:
+    # named even when the reply itself did not — see this function's own
+    # docstring for why `model` alone cannot stand in for "this happened"
+    named = model or "a model that did not report its own name"
+    if not attempted:
         head = (
             f"This run asked that {REFLIST_TOKEN}, and no reading was obtained: "
             f"{notes[0]}. The reference numbering therefore rests on the readings above "
             f"it and nothing else."
         )
         short = f"{REFLIST_TOKEN}: asked for, not obtained — {notes[0]}"
+        level = "warn"  # a failed attempt, not routine information
     elif any(n.startswith("reading discarded") for n in notes):
         why = next(n for n in notes if n.startswith("reading discarded"))
         head = (
-            f"Here {REFLIST_TOKEN} ({model}), and its reading was discarded rather than "
+            f"Here {REFLIST_TOKEN} ({named}), and its reading was discarded rather than "
             f"used: {why}. Nothing it proposed contributed to the list below."
         )
-        short = f"{REFLIST_TOKEN} ({model}) — discarded as unusable"
+        short = f"{REFLIST_TOKEN} ({named}) — discarded as unusable"
+        level = "info"
     else:
         dropped = (
             f"{len(notes)} value{'' if len(notes) == 1 else 's'} it proposed "
@@ -591,10 +605,15 @@ def _reflist(manifest) -> Disclosure | None:
             if notes else "every value it proposed was found in the printed text"
         )
         head = (
-            f"Here {REFLIST_TOKEN} ({model}), shown two extractions of the same printed "
+            f"Here {REFLIST_TOKEN} ({named}), shown two extractions of the same printed "
             f"bibliography and asked what numbered list it carries; {dropped}."
         )
-        short = f"{REFLIST_TOKEN} ({model}) — {len(notes)} discarded"
+        if not model:
+            # a reading was taken and voted — the gap is what the CLI could
+            # report about it, not whether anything happened at all
+            head += " The CLI did not report which model answered."
+        short = f"{REFLIST_TOKEN} ({named}) — {len(notes)} discarded"
+        level = "info"
     if numbering:
         # appended rather than folded into `dropped`: "3 values discarded" and
         # "it numbered one entry twice" are different facts, and a reader who
@@ -606,7 +625,7 @@ def _reflist(manifest) -> Disclosure | None:
         )
     return Disclosure(
         key="reflist",
-        level="info",
+        level=level,
         token=REFLIST_TOKEN,
         text=f"{head} {ceiling}",
         short=short,

@@ -110,7 +110,7 @@
     <div class="log"><span class="step">▸ resolve</span><span class="dim">{{ d.short }}</span></div>
 {% endfor %}
 {% for d in disclosures if d.key == "reflist" %}
-    <div class="log"><span class="step">▸ resolve</span><span class="dim">{{ d.short }}</span></div>
+    <div class="log"><span class="step">▸ resolve</span><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
     <div class="log"><span class="step">▸ check</span><span class="k">{{ r.claims|length }} citation-backed claims · reading each against its cited page{% if r.uncited %} · </span><span class="amber">{{ r.uncited|length }} uncited assertions flagged</span><span class="k">{% endif %}</span></div>
 {% if scout and not scout.error %}

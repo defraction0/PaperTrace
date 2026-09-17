@@ -278,9 +278,13 @@
       ],
       "description": "Who is responsible for `numbering_choice`: '' when no escalation ran, 'default' when nobody was actually asked, 'user' when a person consented to it. A person consenting to proceed is an input, never evidence that the numbering was verified — `numbering_verified` cannot be set from this."
     },
+    "reflist_attempted": {
+      "type": "boolean",
+      "description": "Whether `refs` actually invoked a model to read the bibliography, regardless of whether the reply named itself. False means the call was never made at all — --llm-refs was off, --parse-only forced it off, the backend left no second reading to compare against, claude was not on PATH, or the subprocess failed before any reply was verified. Distinguishes \"no call happened\" from \"a call happened and voted but reported no name\", which `reflist_model` alone cannot: it is empty in both cases."
+    },
     "reflist_model": {
       "type": "string",
-      "description": "The model that produced the LLM's structured reading of the bibliography, when --llm-refs ran and produced anything usable. '' means no such call was made, or nothing it proposed survived verbatim verification against the two texts it was shown."
+      "description": "The model that produced the LLM's structured reading of the bibliography, when --llm-refs ran, produced anything usable, AND the reply itself reported a model name. '' means EITHER no such call was made OR one was made, verified and voted but did not report which model answered — see `reflist_attempted` for which; this field alone cannot tell them apart, and never means the reading was rejected."
     },
     "reflist_fields_discarded": {
       "type": "array",

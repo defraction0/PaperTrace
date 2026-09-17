@@ -594,11 +594,22 @@ class RefManifest:
     # never ran. Never set from a model's own say-so alone.
     numbering_choice: str = ""  # "" | withheld | llm_resolved | parsed | pymupdf
     numbering_chosen_by: str = ""  # "" | default | user
+    # Whether `refs` actually invoked a model to read the bibliography — set
+    # regardless of whether the reply named itself. False means the call was
+    # never made at all: --llm-refs was off, --parse-only forced it off, the
+    # backend left no second reading to compare against, claude was not on
+    # PATH, or the subprocess itself failed before any reply was verified.
+    # This is the field that distinguishes "no call happened" from "a call
+    # happened and voted, but the CLI did not learn its name" — `reflist_model`
+    # alone cannot, because `claude -p` only reports a model name when its own
+    # JSON does, and a reply naming none is not evidence nothing was asked.
+    reflist_attempted: bool = False
     # The model that produced the LLM's structured reading of the
-    # bibliography, when --llm-refs ran and produced anything usable. "" means
-    # no such call was made, or nothing it proposed survived verbatim
-    # verification against the two texts it was shown — same sentence as the
-    # schema's, on purpose: two accounts of what "" means is one too many.
+    # bibliography, when --llm-refs ran, produced anything usable, AND the
+    # subprocess's own reply reported a name. "" means EITHER no such call was
+    # made OR one was made and answered but did not report which model —
+    # `reflist_attempted` is what tells those two apart; this field alone
+    # cannot.
     reflist_model: str = ""
     # Which fields of the LLM's proposed reading could not be found verbatim
     # in either text it was shown, and were discarded rather than trusted.
@@ -693,6 +704,7 @@ class RefManifest:
             "labels_resolved": self.labels_resolved,
             "numbering_choice": self.numbering_choice,
             "numbering_chosen_by": self.numbering_chosen_by,
+            "reflist_attempted": self.reflist_attempted,
             "reflist_model": self.reflist_model,
             "reflist_fields_discarded": self.reflist_fields_discarded,
             "reflist_numbering_findings": self.reflist_numbering_findings,
@@ -735,6 +747,7 @@ class RefManifest:
             labels_resolved=data.get("labels_resolved", []),
             numbering_choice=data.get("numbering_choice", ""),
             numbering_chosen_by=data.get("numbering_chosen_by", ""),
+            reflist_attempted=bool(data.get("reflist_attempted", False)),
             reflist_model=data.get("reflist_model", ""),
             reflist_fields_discarded=data.get("reflist_fields_discarded", []),
             reflist_numbering_findings=data.get("reflist_numbering_findings", []),
