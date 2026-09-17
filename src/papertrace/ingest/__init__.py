@@ -27,7 +27,7 @@ from .pymupdf_ import (
 )
 
 __all__ = ["ingest_pdf", "references_section", "references_span",
-           "available_backends", "resolve_backend"]
+           "references_span_flat", "available_backends", "resolve_backend"]
 
 
 def _docling_available() -> bool:
@@ -104,6 +104,40 @@ def ingest_pdf(pdf_path: Path, out_dir: Path, backend: str = "auto") -> SourceMa
     )
     write_outputs(smap, out_dir)
     return smap
+
+
+def references_span_flat(pdf_path: Path) -> tuple[str, bool]:
+    """A second, independent reading of the bibliography, from flat pymupdf text.
+
+    Same contract as `references_span`: the reference-list text, and whether it
+    was picked up again after an intervening section. Built by running the
+    pymupdf block extraction and handing its blocks straight to
+    `references_span`, which reads only `smap.blocks` — nothing else on the
+    `SourceMap` needs to be genuine, so no converter tag, no fingerprint, no
+    declared title are computed here.
+
+    Exists because docling and pymupdf lose different things. Docling's table
+    model can render bibliography rows as a GFM table and misplace the numeral
+    column; pymupdf never renders a table at all, so it cannot make that
+    mistake — it has its own instead (a multi-column layout's reading order).
+    Two readings whose failure modes do not overlap are worth checking against
+    each other, and cheaply: this is free on a docling run and identical to the
+    existing parse on a pymupdf one.
+
+    **Writes nothing, ever.** This is a READING, not an ingest — it has to be
+    cheap enough to run on every docling run without asking permission, so it
+    never calls `write_outputs`, takes no `out_dir`, and touches neither a
+    model nor the network. `--parse-only` already carries the scar of a
+    read that forgot this distinction: it used to risk overwriting the case's
+    own `ingest/manuscript/source_map.json` with a reading of a paper the run
+    was not finishing (`cli.py:543-549`, fixed by reading into a scratch
+    `tempfile.TemporaryDirectory()` instead). A second reading taken purely to
+    vote on a citation label must not reopen that risk, so it is given no
+    directory to write into at all.
+    """
+    pages, blocks = ingest_blocks_pymupdf(pdf_path)
+    smap = SourceMap(doc=pdf_path.name, pages=pages, blocks=blocks)
+    return references_span(smap)
 
 
 # ---------------------------------------------------------------------------
