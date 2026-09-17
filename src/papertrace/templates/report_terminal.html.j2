@@ -103,6 +103,9 @@
 {% for d in disclosures if d.key == "numbering_contested" %}
     <div class="log"><span class="step">▸ resolve</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
+{% for d in disclosures if d.key == "labels_disputed" %}
+    <div class="log"><span class="step">▸ check</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
     <div class="log"><span class="step">▸ check</span><span class="k">{{ r.claims|length }} citation-backed claims · reading each against its cited page{% if r.uncited %} · </span><span class="amber">{{ r.uncited|length }} uncited assertions flagged</span><span class="k">{% endif %}</span></div>
 {% if scout and not scout.error %}
     <div class="log"><span class="step">▸ scout</span><span class="k">europe pmc · citing articles + keyword neighbourhood · </span><span class="cyan">{{ scout.newer|length }} newer</span><span class="k"> · </span><span class="cyan">{{ scout.overlooked|length }} possibly overlooked</span></div>
@@ -124,6 +127,8 @@
 {% if c.quote %}      <div class="cl-meta"><span class="lab">quote </span><span class="it">{{ c.quote }}</span></div>
 {% endif %}
 {% for d in claim_disclosures(c) if d.key == "claim_numbering" %}      <div class="cl-meta"><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
+{% for d in claim_disclosures(c) if d.key == "claim_pairing" %}      <div class="cl-meta"><span class="{{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
       <div class="cl-meta">
         <span style="display:inline-block;width:190px"><span class="lab">status </span><span class="st {{ c.verdict }}"><span class="dot">●</span> {{ c.verdict|upper }}</span></span>
@@ -203,7 +208,7 @@
 {% for section, items in gaps.items() %}
 {% for c in items %}
     <div class="nrrow"><span class="sec">{{ section|lower if loop.first else "" }}</span><span class="n">{{ c.verdict|replace("_", " ") }}</span><span class="it">{{ c.claim }}{% if c.note %} <span class="s">·</span> {{ c.note }}{% endif %}</span></div>
-{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs", "claim_numbering") %}
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs", "claim_numbering", "claim_pairing") %}
     <div class="nrrow"><span class="sec"></span><span class="n"></span><span class="it {{ 'amber' if d.level == 'warn' else 'dim' }}">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.short }}</span></div>
 {% endfor %}
 {% for j in c.judgements %}

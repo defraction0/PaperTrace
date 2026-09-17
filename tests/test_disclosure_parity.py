@@ -21,7 +21,7 @@ from papertrace.disclosures import (  # noqa: E402
     claim_disclosures,
     run_disclosures,
 )
-from papertrace.models import ClaimResult, RunResults  # noqa: E402
+from papertrace.models import ClaimResult, RefManifest, RunResults  # noqa: E402
 from papertrace.report import write_reports  # noqa: E402
 
 # four, since the interactive viewer: a disclosure the browser page cannot
@@ -405,6 +405,15 @@ def test_an_anchor_state_without_a_crop_still_reaches_every_format(tmp_path, anc
         assert anchor.token in body, f"anchor token missing from {name}"
 
 
+def test_a_withheld_claim_pairing_disclosure_appears_in_every_format(tmp_path):
+    claim = _claim(refs=["9"], verdict="unchecked", withheld_refs=["9"])
+    rendered = _render(RunResults(manuscript="m.pdf", claims=[claim]), tmp_path)
+
+    pairing = next(d for d in claim_disclosures(claim) if d.key == "claim_pairing")
+    for name, body in rendered.items():
+        assert pairing.token in body, f"claim_pairing token missing from {name}"
+
+
 # --- the HTML reports actually escape what they interpolate ------------------
 
 
@@ -439,6 +448,37 @@ def test_claim_keys_names_only_keys_a_producer_actually_emits():
     src = Path(mod.__file__).read_text()
     real = set(re.findall(r'key="([a-z_]+)"', src))
     assert mod.CLAIM_KEYS <= real, f"not emitted by any producer: {sorted(mod.CLAIM_KEYS - real)}"
+
+
+def test_claim_disclosures_emits_no_key_missing_from_claim_keys():
+    """The direction the test above does NOT check: a key `claim_disclosures()`
+    emits at runtime but `CLAIM_KEYS` omits would still reach the viewer (its
+    catch-all) while silently vanishing from the other three formats, and
+    nothing here would go red. Exercises every branch `claim_disclosures()` can
+    take today, including `claim_pairing`, so this would have caught it being
+    added to the producer without being added to the set."""
+    from papertrace.models import SourceJudgement
+
+    manifest = RefManifest(manuscript="m.pdf", entries=[], unverified_from=1)
+    claims = [
+        _claim(refs=["7", "9"], verdict="contradicted",
+               judgements=[SourceJudgement(source_slug="a", ref="7", verdict="contradicted"),
+                           SourceJudgement(source_slug="b", ref="9", verdict="supported")]),
+        _claim(unjudged_refs=["11"]),
+        _claim(quote="", verdict="supported"),
+        _claim(verdict="supported",
+               judgements=[SourceJudgement(source_slug="s", ref="7", kind="supplement",
+                                            verified=True)]),
+        _claim(refs=["1"], verdict="supported"),
+        _claim(refs=["9"], verdict="unchecked", withheld_refs=["9"]),
+        _claim(evidence_image=None, anchor_located=False, source_page=3, verdict="supported"),
+    ]
+    seen = set()
+    for c in claims:
+        for d in claim_disclosures(c, manifest=manifest):
+            seen.add(d.key)
+    from papertrace import disclosures as mod
+    assert seen <= mod.CLAIM_KEYS, f"emitted but not declared: {sorted(seen - mod.CLAIM_KEYS)}"
 
 
 def test_every_claim_disclosure_key_is_rendered_by_every_jinja_format():

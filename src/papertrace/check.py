@@ -842,6 +842,11 @@ def check_claims(
     # honest. "auto" drags docling into an offline test run; "pymupdf" silently
     # downgrades a caller who asked for layout. So there is no default.
     backend: str,
+    # labels `refs.label_agreement` (Task 3) returned "disputed" for — two or
+    # more readings of the bibliography name different papers under this
+    # printed number. None and an empty set behave identically: nothing is
+    # withheld, matching every call site written before this parameter existed.
+    disputed: set[str] | None = None,
 ) -> list[ClaimResult]:
     """Fill verdicts in place. One model call per source that carries claims.
 
@@ -858,25 +863,52 @@ def check_claims(
     paper and not on the papers it is judged against had the asymmetry
     backwards.
     """
+    disputed = disputed or set()
     by_slug: dict[str, list[ClaimResult]] = {}
     for c in claims:
         pairs = [(r, _slug_for_ref(manifest, r)) for r in c.refs]
-        avail = [(r, e) for r, e in pairs if e and e.status in ("retrieved", "provided") and e.slug]
+        avail_all = [
+            (r, e) for r, e in pairs if e and e.status in ("retrieved", "provided") and e.slug
+        ]
+        # Partitioned AFTER the retrieval filter above, never before it: a
+        # withheld label must describe a source that was actually fetched and
+        # read. A disputed label that was never retrieved for the ordinary
+        # reasons (paywalled, no DOI, ...) stays exactly that — see the
+        # `avail`/`own` branch below, which never sees it as withheld.
+        withheld = [(r, e) for r, e in avail_all if r in disputed]
+        avail = [(r, e) for r, e in avail_all if r not in disputed]
+        c.withheld_refs = sorted({r for r, _ in withheld}, key=lambda r: int(r))
         own = manifest.manuscript_supplements if c.own_supplement else []
         if not avail and not own:
-            c.verdict = "not_retrieved"
-            if c.own_supplement:
-                # the paper said exactly where its evidence was and nobody
-                # opened it. That is a retrieval gap, not an uncited assertion.
+            if withheld:
+                # NOT not_retrieved: every one of these sources WAS fetched and
+                # read. not_retrieved would falsely claim the source could not
+                # be obtained; the true reason is that two readings of the
+                # bibliography disagree about which paper this label names, so
+                # no verdict can safely name the paper it was fetched for.
+                c.verdict = "unchecked"
+                labels = f"[{'], ['.join(c.withheld_refs)}]"
                 c.note = (
-                    "points at this paper's own supplementary material, which was not "
-                    "provided — pass it with --supplement"
+                    f"withheld: the reference list's readings disagree about {labels}, "
+                    "so the source retrieved under that label may not be the paper the "
+                    "manuscript cites — check the retrieval manifest before relying on "
+                    "this claim"
                 )
             else:
-                reasons = {e.status for _, e in pairs if e}
-                c.note = (
-                    f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
-                )
+                c.verdict = "not_retrieved"
+                if c.own_supplement:
+                    # the paper said exactly where its evidence was and nobody
+                    # opened it. That is a retrieval gap, not an uncited assertion.
+                    c.note = (
+                        "points at this paper's own supplementary material, which was not "
+                        "provided — pass it with --supplement"
+                    )
+                else:
+                    reasons = {e.status for _, e in pairs if e}
+                    c.note = (
+                        f"cited source not available "
+                        f"({', '.join(sorted(reasons)) or 'unknown ref'})"
+                    )
             continue
         # Co-citation is an offer of support: every source cited for this claim
         # was put forward as backing it, so every one that could be obtained is
@@ -917,9 +949,11 @@ def check_claims(
             )
             by_slug.setdefault(s.slug, []).append(c)
         # what is left here could NOT be obtained — the only remaining reason a
-        # cited source goes unopened
-        avail_refs = {r for r, _ in avail}
-        c.unjudged_refs = [r for r in c.refs if r not in avail_refs]
+        # cited source goes unopened. Computed from `avail_all`, not `avail`: a
+        # withheld label WAS obtained, so it belongs in `withheld_refs` above,
+        # never here — this is retrieval failure only.
+        avail_all_refs = {r for r, _ in avail_all}
+        c.unjudged_refs = [r for r in c.refs if r not in avail_all_refs]
 
     for slug, group in by_slug.items():
         try:

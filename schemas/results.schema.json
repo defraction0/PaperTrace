@@ -198,6 +198,13 @@
             },
             "description": "Co-cited labels that could NOT be obtained, so were never opened. The verdict says nothing about these. Sources that WERE available appear in `judgements` instead."
           },
+          "withheld_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Cited labels whose source WAS retrieved but withheld from judgement because two or more readings of the reference list disagree about which paper that label names. Distinct from `unjudged_refs`: an entry here means the source was fetched and read, not that it could not be reached. Absent, or an empty array, means nothing was withheld for this claim."
+          },
           "anchor_located": {
             "type": [
               "boolean",

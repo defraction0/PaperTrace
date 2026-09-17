@@ -48,6 +48,17 @@ REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
 NUMBERING_TOKEN = "reference numbering could not be confirmed"
 CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
 NUMBERING_CONTESTED_TOKEN = "second reading of the reference list disagreed"
+# no apostrophe, matching NO_QUOTE_TOKEN's own rule above: autoescape rewrites
+# one to `&#39;` in the two HTML formats but not in markdown, so a token that
+# carries one passes here and fails the parity test that asserts it verbatim
+# in all four — "reference list's" was tried first and had to be reworded.
+LABELS_DISPUTED_TOKEN = "labels where the reference list readings disagree"
+# `claim_pairing` gains three more states in Tasks 6 and 7 (resolved by a
+# model call, chosen by the user, corroborated by a second agreeing reading) —
+# each needs its own token, the same way ANCHOR_LOCATED_TOKEN /
+# ANCHOR_NOT_LOCATED_TOKEN / ANCHOR_UNKNOWN_TOKEN are one Disclosure key with
+# one token per state actually reached. Only this state's token exists yet.
+CLAIM_PAIRING_WITHHELD_TOKEN = "verdict withheld — the reference list readings disagree"
 # The keys `claim_disclosures()` can emit. Declared here, where the producers
 # live, because three of the four report formats filter claim disclosures by
 # explicit key and so drop an unlisted one without erroring. The viewer is
@@ -60,6 +71,7 @@ CLAIM_KEYS = frozenset(
         "no_quote",
         "supplement_headline",
         "claim_numbering",
+        "claim_pairing",
     }
 )
 # no apostrophe, and no `&`, `<` or `>`: a token is asserted as a literal in the
@@ -504,6 +516,32 @@ def _numbering_contested(manifest) -> Disclosure | None:
     )
 
 
+def _labels_disputed(manifest) -> Disclosure | None:
+    """Run-level roll-up of every label a claim's verdict was withheld for.
+
+    A reader who stops at the top of the report should see the scope before
+    finding it claim by claim: `claim_pairing` says the same thing per claim,
+    but only for the claims that actually cite one of these labels.
+    """
+    labels = sorted(getattr(manifest, "labels_disputed", None) or [], key=lambda r: int(r))
+    if not labels:
+        return None
+    named = f"[{'], ['.join(labels)}]"
+    return Disclosure(
+        key="labels_disputed",
+        level="warn",
+        token=LABELS_DISPUTED_TOKEN,
+        text=(
+            f"{named} are {LABELS_DISPUTED_TOKEN}: two or more readings of the "
+            "reference list name different papers for each of these labels, so "
+            "every claim citing one had that source withheld from judgement "
+            "rather than risk a verdict about the wrong paper. See each claim's "
+            "own note for which of its citations this affected."
+        ),
+        short=f"{named} {LABELS_DISPUTED_TOKEN}",
+    )
+
+
 def _claim_numbering(claim, manifest) -> Disclosure:
     """The run-level warning, said again where the verdict is read.
 
@@ -741,6 +779,8 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
             out.append(_numbering(manifest))
         if d := _numbering_contested(manifest):
             out.append(d)
+        if d := _labels_disputed(manifest):
+            out.append(d)
     return out
 
 
@@ -846,6 +886,40 @@ def _no_quote(claim) -> Disclosure:
     )
 
 
+def _claim_pairing(claim) -> Disclosure | None:
+    """Which pairing state this claim's cited labels are in, if not a clean one.
+
+    Only `withheld` exists yet — `withheld_refs` is the only field a pairing
+    state has written to `ClaimResult` so far. Tasks 6 and 7 add the
+    model-resolved, user-chosen and corroborated states as further branches
+    reading their own new fields, never a second function — so `CLAIM_KEYS`
+    keeps exactly one claim-level entry covering all four.
+    """
+    if claim.withheld_refs:
+        labels = f"[{'], ['.join(claim.withheld_refs)}]"
+        one = len(claim.withheld_refs) == 1
+        return Disclosure(
+            key="claim_pairing",
+            level="warn",
+            token=CLAIM_PAIRING_WITHHELD_TOKEN,
+            text=(
+                f"This claim cites {labels}, and the {CLAIM_PAIRING_WITHHELD_TOKEN} about "
+                f"{'that label' if one else 'those labels'}: two readings of the "
+                "bibliography name different papers for it, so the source fetched under "
+                f"that label may not be the paper the manuscript actually cites. No "
+                f"verdict was reached on {'it' if one else 'them'} — check the retrieval "
+                "manifest before treating this claim as checked."
+            ),
+            short=f"{labels} {CLAIM_PAIRING_WITHHELD_TOKEN}",
+        )
+    # Task 6: `resolved_by_model` — the resolution call named a reading and the
+    # default (non-interactive) run accepted it.
+    # Task 7: `chosen_by_user` — an interactive session picked one reading
+    # whole; `corroborated`, level="info", fires only when the claim already
+    # carries a warn-level disclosure, so a clean claim stays silent.
+    return None
+
+
 def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
     """Every claim-level disclosure this ClaimResult owes its reader.
 
@@ -871,6 +945,8 @@ def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
         out.append(_supplement_headline(claim))
     if manifest is not None and any(manifest.label_is_doubtful(r) for r in claim.refs):
         out.append(_claim_numbering(claim, manifest))
+    if (d := _claim_pairing(claim)) is not None:
+        out.append(d)
     if (d := anchor_disclosure(claim)) is not None:
         out.append(d)
     return out

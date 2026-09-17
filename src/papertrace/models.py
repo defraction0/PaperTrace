@@ -858,6 +858,14 @@ class ClaimResult:
     # not be read as having backed the verdict. Sources that WERE available are
     # in `judgements`, not here.
     unjudged_refs: list[str] = field(default_factory=list)
+    # co-cited refs whose source WAS obtained but withheld from judgement,
+    # because two or more readings of the reference list disagree about which
+    # paper this label names (`refs.label_agreement` returned "disputed" for
+    # it). NOT `unjudged_refs`: an entry here means the source was fetched and
+    # read. `unjudged_refs` means nobody could get to it at all — conflating
+    # the two would report a retrieval gap that does not exist and erase the
+    # numbering gap that does.
+    withheld_refs: list[str] = field(default_factory=list)
     # False when no anchor phrase was found inside the cropped region — which is
     # one block's bbox, so this is NOT "absent from the page". The crop is still
     # written for context, but it carries no red box and must not claim one

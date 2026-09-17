@@ -870,6 +870,9 @@ def _check_pipeline(
         check_claims(
             claims, manifest, case, model, progress=tick, on_error=fail,
             truncations=truncations, backend=backend,
+            # Task 3 populates this; [] on any manifest it never touched, so an
+            # older run or one where nothing disagreed withholds nothing here.
+            disputed=set(manifest.labels_disputed),
         )
 
     from .check import coverage_audit
