@@ -217,11 +217,16 @@ def workload(pdf: Path) -> dict:
         "places": len(groups),
         "multi": multi,
         "labels": len(labels),
-        "model_calls": 1 + cited_source_calls,
+        # one reference-list reading, one extraction call, then one per cited
+        # source. The reference-list call gets no retry — `reflist.propose` asks
+        # once and reports what it got — so it adds exactly 1 to the base figure
+        # and 1 to the ceiling, on top of the retried figure below rather than
+        # inside it.
+        "model_calls": 2 + cited_source_calls,
         # the retry is real spend: ASK_ATTEMPTS attempts for extraction, and
         # ASK_ATTEMPTS attempts per judging call. Derived from ask.py rather
         # than a local multiplier, so the estimate cannot drift from the policy.
-        "model_calls_max": ASK_ATTEMPTS * (1 + cited_source_calls),
+        "model_calls_max": 1 + ASK_ATTEMPTS * (1 + cited_source_calls),
         "style_unrecognised": len(groups) == 0,
     }
 
@@ -578,7 +583,7 @@ def run_wizard() -> None:
     run_cmd(
         manuscript=paper, case=case, provided=provided, email=email, model=None,
         png=png, backend="auto", with_scout=with_scout, doi=doi, formats=formats,
-        supplement=supplement,
+        supplement=supplement, llm_refs=True,
     )
 
 

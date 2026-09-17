@@ -666,15 +666,23 @@ def test_the_worst_case_call_count_includes_the_retry(tmp_path):
     """The wizard promised "up to N model calls" from one extraction plus one
     per cited source. `_ask` retries once, so a single-source run advertised as
     2 could issue 3. The ceiling now comes from ask.py's own attempt count,
-    so the two cannot drift."""
+    so the two cannot drift.
+
+    Both figures also carry the reference-list reading `refs` now makes before
+    `check` ever runs: one un-retried call, so it adds exactly 1 to each side
+    of the estimate rather than multiplying through the retried figure — this
+    task adds that call on top of the `ASK_ATTEMPTS * (1 + cited_source_calls)`
+    shape a previous task already moved `model_calls_max` to, rather than
+    reverting it back to a flat `ASK_ATTEMPTS * cited_source_calls`.
+    """
     from papertrace.ask import ASK_ATTEMPTS
 
     pdf = _one_pager(tmp_path / "m.pdf",
                      "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
     w = wizard.workload(pdf)
 
-    assert w["model_calls"] == 2, w
-    assert w["model_calls_max"] == ASK_ATTEMPTS * (1 + 1), w
+    assert w["model_calls"] == 3, w
+    assert w["model_calls_max"] == 1 + ASK_ATTEMPTS * (1 + 1), w
     assert w["model_calls_max"] >= w["model_calls"]
 
 

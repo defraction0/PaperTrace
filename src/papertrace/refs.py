@@ -828,6 +828,27 @@ def label_agreement(
     return result
 
 
+def stamp_seen_in(chosen: list[RefEntry], candidates: dict[str, list[RefEntry]]) -> None:
+    """Record, per chosen entry, which readings also carried that work.
+
+    In place, because the entries are already the manifest's. An entry carried
+    by one reading only is the interesting case — especially `["llm"]`, which
+    means no deterministic reading found it at all.
+
+    Matched on the label AND `_same_work`: a reading that carries [12] naming a
+    different paper has not corroborated this entry, and stamping its name here
+    on the strength of the shared numeral would turn a disagreement into
+    provenance. That is the same mistake `_covers` makes about extent, and it is
+    the reason this is not simply `label in {e.num for e in cand}`.
+    """
+    for e in chosen:
+        e.seen_in = sorted(
+            name
+            for name, cand in candidates.items()
+            if any(o.num == e.num and _same_work(e, o) for o in cand)
+        )
+
+
 def reconcile(
     body_labels: set[str],
     crossref: list[RefEntry] | None,

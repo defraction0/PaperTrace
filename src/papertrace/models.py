@@ -603,6 +603,13 @@ class RefManifest:
     # Which fields of the LLM's proposed reading could not be found verbatim
     # in either text it was shown, and were discarded rather than trusted.
     reflist_fields_discarded: list[str] = field(default_factory=list)
+    # A different kind of finding, kept in its own field for that reason: the
+    # model reading's own labels did not add up — a numeral proposed twice, or a
+    # gap in 1..max. Not a value that went missing, so counting it among the
+    # discarded fields would report a number of dropped values that never
+    # dropped. Empty means none found, which on a reading that produced no
+    # entries is not the same as none present.
+    reflist_numbering_findings: list[str] = field(default_factory=list)
 
     def document(self, slug: str) -> Document | None:
         """The judgeable file this slug names, article or supplement, or None."""
@@ -688,6 +695,7 @@ class RefManifest:
             "numbering_chosen_by": self.numbering_chosen_by,
             "reflist_model": self.reflist_model,
             "reflist_fields_discarded": self.reflist_fields_discarded,
+            "reflist_numbering_findings": self.reflist_numbering_findings,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -729,6 +737,7 @@ class RefManifest:
             numbering_chosen_by=data.get("numbering_chosen_by", ""),
             reflist_model=data.get("reflist_model", ""),
             reflist_fields_discarded=data.get("reflist_fields_discarded", []),
+            reflist_numbering_findings=data.get("reflist_numbering_findings", []),
         )
 
 

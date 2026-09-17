@@ -36,6 +36,7 @@ from papertrace.refs import (  # noqa: E402
     _entry,
     _same_work,
     label_agreement,
+    stamp_seen_in,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -386,3 +387,33 @@ def test_same_work_keeps_its_own_direction_for_its_own_callers():
     b = RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")
     assert _same_work(a, b) is True
     assert _comparably_same(a, b) is False
+
+
+# --- seen_in: which readings also carried a chosen entry's work ------------
+
+
+def test_an_entry_only_the_model_found_is_spottable_in_the_manifest():
+    """The published field's whole purpose. An entry no deterministic reading
+    carried is the one a reader most needs to see flagged, and `seen_in ==
+    ["llm"]` is how they see it."""
+    chosen = [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")]
+    candidates = {
+        "parsed": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
+        "llm": [_work("1", "10.1000/x1")],
+    }
+    stamp_seen_in(chosen, candidates)
+    assert chosen[0].seen_in == ["llm", "parsed"]
+    assert chosen[1].seen_in == ["parsed"]
+
+
+def test_a_reading_naming_a_different_paper_under_the_same_label_is_not_provenance():
+    """Sharing a numeral is not agreeing about a work.
+
+    Stamping on the label alone would record the disagreeing reading as having
+    corroborated this entry — the extent-for-content substitution `_covers` is
+    documented as blind to, reintroduced in a published field."""
+    chosen = [_work("5", "10.1000/x5")]
+    candidates = {"parsed": [_work("5", "10.1000/x5")],
+                  "pymupdf": [_work("5", "10.1000/x99")]}
+    stamp_seen_in(chosen, candidates)
+    assert chosen[0].seen_in == ["parsed"]

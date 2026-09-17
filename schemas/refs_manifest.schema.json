@@ -288,6 +288,13 @@
       "items": {
         "type": "string"
       }
+    },
+    "reflist_numbering_findings": {
+      "type": "array",
+      "description": "Findings about the model reading's own labels rather than its values: a numeral it proposed twice, or a gap in 1..max. Kept apart from `reflist_fields_discarded` because nothing went missing — folding the two would report a count of discarded values that includes things no value ever lost. Empty means none were found, which on a reading that produced no entries is not the same as none being present.",
+      "items": {
+        "type": "string"
+      }
     }
   }
 }

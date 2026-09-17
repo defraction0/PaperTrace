@@ -59,6 +59,11 @@ LABELS_DISPUTED_TOKEN = "labels where the reference list readings disagree"
 # ANCHOR_NOT_LOCATED_TOKEN / ANCHOR_UNKNOWN_TOKEN are one Disclosure key with
 # one token per state actually reached. Only this state's token exists yet.
 CLAIM_PAIRING_WITHHELD_TOKEN = "verdict withheld — the reference list readings disagree"
+# no apostrophe, `&`, `<` or `>` in either — same HTML-autoescape rule as
+# LABELS_DISPUTED_TOKEN above, since both are asserted verbatim in two formats
+# that escape and two that do not
+REFLIST_TOKEN = "the reference list was also read by a model"
+NUMBERING_CORROBORATION_TOKEN = "two readings of the reference list agree on every cited label"
 # The keys `claim_disclosures()` can emit. Declared here, where the producers
 # live, because three of the four report formats filter claim disclosures by
 # explicit key and so drop an unlisted one without erroring. The viewer is
@@ -542,6 +547,106 @@ def _labels_disputed(manifest) -> Disclosure | None:
     )
 
 
+def _reflist(manifest) -> Disclosure | None:
+    """The required disclosure for the model reading, in all three of its outcomes.
+
+    Fires on a reading used, a reading discarded, and a reading asked for and not
+    obtained — never only on success, because silence about an attempt reads as
+    no news. The token is phrased AROUND in every branch, the way
+    `SUPPLEMENT_IDENTITY_TOKEN` is: it is asserted verbatim in all four formats,
+    so a branch where it is not literally true would make one format lie.
+    """
+    model = getattr(manifest, "reflist_model", "") or ""
+    notes = list(getattr(manifest, "reflist_fields_discarded", []) or [])
+    # a different kind of finding, and it must reach the reader too: a reading
+    # whose own labels do not add up is worth knowing about even when every
+    # value it proposed was printed
+    numbering = list(getattr(manifest, "reflist_numbering_findings", []) or [])
+    if not model and not notes:
+        return None  # no model reading was asked for
+    ceiling = (
+        "A model agreeing with a parse is a second reading, not confirmation: it read "
+        "the same document, so a reference the layout destroyed is one it may also "
+        "have missed."
+    )
+    if not model:
+        head = (
+            f"This run asked that {REFLIST_TOKEN}, and no reading was obtained: "
+            f"{notes[0]}. The reference numbering therefore rests on the readings above "
+            f"it and nothing else."
+        )
+        short = f"{REFLIST_TOKEN}: asked for, not obtained — {notes[0]}"
+    elif any(n.startswith("reading discarded") for n in notes):
+        why = next(n for n in notes if n.startswith("reading discarded"))
+        head = (
+            f"Here {REFLIST_TOKEN} ({model}), and its reading was discarded rather than "
+            f"used: {why}. Nothing it proposed contributed to the list below."
+        )
+        short = f"{REFLIST_TOKEN} ({model}) — discarded as unusable"
+    else:
+        dropped = (
+            f"{len(notes)} value{'' if len(notes) == 1 else 's'} it proposed "
+            f"{'was' if len(notes) == 1 else 'were'} not found in the printed text and "
+            f"{'was' if len(notes) == 1 else 'were'} discarded"
+            if notes else "every value it proposed was found in the printed text"
+        )
+        head = (
+            f"Here {REFLIST_TOKEN} ({model}), shown two extractions of the same printed "
+            f"bibliography and asked what numbered list it carries; {dropped}."
+        )
+        short = f"{REFLIST_TOKEN} ({model}) — {len(notes)} discarded"
+    if numbering:
+        # appended rather than folded into `dropped`: "3 values discarded" and
+        # "it numbered one entry twice" are different facts, and a reader who
+        # sees them as one number cannot tell which happened
+        head += (
+            " Its own numbering did not add up either — "
+            + "; ".join(numbering)
+            + "."
+        )
+    return Disclosure(
+        key="reflist",
+        level="info",
+        token=REFLIST_TOKEN,
+        text=f"{head} {ceiling}",
+        short=short,
+        # both kinds, numbering first: it describes the reading as a whole, and
+        # a truncated list should not lose the structural finding to six field
+        # names
+        rows=tuple((numbering + notes)[:6]),
+    )
+
+
+def _numbering_corroboration(manifest) -> Disclosure | None:
+    """Fires on agreement, and deliberately NOT gated on `numbering_verified`.
+
+    The unconfirmed-numbering warning is right to fire whenever nothing checked
+    the numbering, and on a paper whose readings all agree it is also the whole
+    of what the report says about the reference list — which is how it came to
+    read as an alarm about the 22-vs-19 case on papers where nothing was wrong.
+    This is the other half of that sentence, and it is careful not to become the
+    claim the warning is about: agreement between readings is not a checked
+    numbering.
+    """
+    if not getattr(manifest, "numbering_corroborated", False):
+        return None
+    readings = list(getattr(manifest, "corroborating_readings", []) or [])
+    named = ", ".join(readings) if readings else "the readings taken"
+    return Disclosure(
+        key="numbering_corroboration",
+        level="info",
+        token=NUMBERING_CORROBORATION_TOKEN,
+        text=(
+            f"On this run {NUMBERING_CORROBORATION_TOKEN} ({named}). That is corroboration, "
+            "not confirmation, and it does not make the numbering verified: these are "
+            "readings of one printed page, so a reference its layout destroyed is one they "
+            "can all have missed in the same way. Any label they disagreed about is listed "
+            "separately, and no verdict was printed for it."
+        ),
+        short=f"{NUMBERING_CORROBORATION_TOKEN} ({named})",
+    )
+
+
 def _claim_numbering(claim, manifest) -> Disclosure:
     """The run-level warning, said again where the verdict is read.
 
@@ -780,6 +885,10 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
         if d := _numbering_contested(manifest):
             out.append(d)
         if d := _labels_disputed(manifest):
+            out.append(d)
+        if d := _numbering_corroboration(manifest):
+            out.append(d)
+        if d := _reflist(manifest):
             out.append(d)
     return out
 
