@@ -3363,7 +3363,8 @@ subject follows the house pattern rather than inventing a catch-all.
   and `_llm_reference_reading(...) -> tuple[list[RefEntry], ReflistProvenance | None]`.
 - Produces in `models.RefManifest`: `numbering_corroborated: bool = False`,
   `corroborating_readings: list[str]`, `labels_disputed: list[str]`,
-  `reflist_model: str = ""`, `reflist_fields_discarded: list[str]`.
+  `reflist_model: str = ""`, `reflist_fields_discarded: list[str]`,
+  `reflist_numbering_findings: list[str]`.
 - **Left to Task 7, deliberately:** `labels_resolved`, `numbering_choice`,
   `numbering_chosen_by`. Nothing in this task can set them — they record an
   interactive choice — and a field written only as `""` by the task that added
@@ -3815,7 +3816,24 @@ Expected: `TypeError: _refs_pipeline() got an unexpected keyword argument
 'llm_refs'` and `AttributeError: module 'papertrace.cli' has no attribute
 '_reference_readings'`. Paste it.
 
-- [ ] **Step 4: `RefManifest` gains five fields, and the schema says what absent means**
+- [ ] **Step 4: `RefManifest` gains ONE field, and the schema says what absent means**
+
+**Read this before editing.** An earlier draft of this step added six fields
+here. **Five of them already landed in Task 3** — verify with:
+
+```bash
+~/anaconda3/bin/python -c "import sys,dataclasses; sys.path.insert(0,'src'); from papertrace.models import RefManifest; print([f.name for f in dataclasses.fields(RefManifest)])"
+```
+
+Expected to be present already: `numbering_corroborated`,
+`corroborating_readings`, `labels_disputed`, `labels_resolved`,
+`reflist_model`, `reflist_fields_discarded`. **The only field this task adds is
+`reflist_numbering_findings`.** The five declarations below are reproduced so
+you can confirm the ones on disk match — if any differs, report it rather than
+rewriting it; Task 3 is reviewed and closed. Add only the last one, and only its
+`to_json` / `from_json` / schema entries.
+
+(`numbering_choice` and `numbering_chosen_by` belong to Task 7. Do not add them.)
 
 In `src/papertrace/models.py`, in `RefManifest`, after `numbering_ledger`:
 
@@ -3842,6 +3860,13 @@ In `src/papertrace/models.py`, in `RefManifest`, after `numbering_ledger`:
     # What that reading cost in dropped values, and — when there was no reading —
     # why there was none. Empty means no model reading was asked for.
     reflist_fields_discarded: list[str] = field(default_factory=list)
+    # A different kind of finding, kept in its own field for that reason: the
+    # model reading's own labels did not add up — a numeral proposed twice, or a
+    # gap in 1..max. Not a value that went missing, so counting it among the
+    # discarded fields would report a number of dropped values that never
+    # dropped. Empty means none found, which on a reading that produced no
+    # entries is not the same as none present.
+    reflist_numbering_findings: list[str] = field(default_factory=list)
 ```
 
 In `to_json`'s payload, beside `numbering_ledger`:
@@ -3852,6 +3877,7 @@ In `to_json`'s payload, beside `numbering_ledger`:
             "labels_disputed": self.labels_disputed,
             "reflist_model": self.reflist_model,
             "reflist_fields_discarded": self.reflist_fields_discarded,
+            "reflist_numbering_findings": self.reflist_numbering_findings,
 ```
 
 In `from_json`, `.get(...)` for each so an older file still loads:
@@ -3862,6 +3888,7 @@ In `from_json`, `.get(...)` for each so an older file still loads:
             labels_disputed=data.get("labels_disputed", []),
             reflist_model=data.get("reflist_model", ""),
             reflist_fields_discarded=data.get("reflist_fields_discarded", []),
+            reflist_numbering_findings=data.get("reflist_numbering_findings", []),
 ```
 
 In `schemas/refs_manifest.schema.json`, additive in `properties`, nothing added
@@ -3890,8 +3917,50 @@ to `required` (`["manuscript", "entries"]`):
       "type": "array",
       "items": { "type": "string" },
       "description": "Values a model proposed for the reference list that were not found verbatim in either extraction of the printed page, and so were discarded — plus, when no reading was obtained at all, the reason. Empty means no model reading was asked for."
+    },
+    "reflist_numbering_findings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Findings about the model reading's own labels rather than its values: a numeral it proposed twice, or a gap in 1..max. Kept apart from `reflist_fields_discarded` because nothing went missing — folding the two would report a count of discarded values that includes things no value ever lost. Empty means none were found, which on a reading that produced no entries is not the same as none being present."
     }
 ```
+
+Add the round-trip assertions for it beside the existing `reflist_*` ones, and
+one behavioural test that a duplicate numeral actually reaches the manifest —
+the whole point of this field is that `reflist.propose` reports it and an
+earlier draft of this plan dropped it on the floor:
+
+```python
+def test_a_numbering_finding_from_the_model_reading_reaches_the_manifest(
+    tmp_path, monkeypatch
+):
+    """`reflist.propose` reports a duplicated or missing numeral separately from
+    a discarded field, because the two mean different things. An earlier draft
+    of this step read only `fields_discarded`, so every duplicate and gap the
+    model reading found was silently dropped before any reader saw it."""
+    proposed = (
+        [_work("2", "10.1000/x2"), _work("2", "10.1000/x22")],
+        reflist_mod.ReflistProvenance(
+            model="claude-opus-5",
+            entries_proposed=2,
+            numbering_findings=["numerals proposed twice: 2"],
+            readings=["pymupdf", "docling"],
+        ),
+    )
+    monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: proposed)
+
+    manifest = _run_refs(tmp_path, monkeypatch, llm_refs=True)
+
+    assert manifest.reflist_numbering_findings == ["numerals proposed twice: 2"]
+    assert not any(
+        "twice" in f for f in manifest.reflist_fields_discarded
+    ), manifest.reflist_fields_discarded
+```
+
+Use whatever fixture helper the tests in Step 2 established for driving
+`_refs_pipeline` and reading the manifest back; `_run_refs` above is a
+placeholder for that helper's real name, which Step 2 fixes — **do not add a
+second way to run the stage.**
 
 - [ ] **Step 5: `cli._reference_readings` — the voter dict, and nothing impure**
 
@@ -3953,24 +4022,34 @@ def _llm_reference_reading(
     label_a: str,
     label_b: str,
     enabled: bool,
-) -> tuple[list["RefEntry"], list[str], str]:
+) -> tuple[list["RefEntry"], "ReflistProvenance"]:
     """A model's reading of the bibliography, or a stated reason there is none.
 
-    Returns `(entries, notes, model)`. `notes` is never empty when `enabled`:
+    Returns `(entries, provenance)` — the provenance object itself, **always**,
+    never `None` and never a tuple of loose pieces. `reflist.propose` reports
+    two distinct kinds of finding (`fields_discarded`, a value that was not
+    printed; `numbering_findings`, a reading whose labels do not add up) and a
+    3-tuple of `(entries, notes, model)` could only carry one of them. An
+    earlier draft of this plan did exactly that and would have dropped every
+    duplicate and gap on the floor, unreported.
+
+    `provenance.fields_discarded` is never empty when `enabled`:
     an attempt that produced nothing has to leave the reason where the manifest
     and the report can read it, because silence here would be read as "no news"
     about a reading that was asked for and did not happen.
     """
     from . import ask
-    from .reflist import propose
+    from .reflist import ReflistProvenance, propose
 
     if not enabled:
-        return [], [], ""
+        return [], ReflistProvenance()
     if not ask.claude_available():
         # the ordinary case for someone who installed papertrace and not Claude
         # Code. The run proceeds on the deterministic readings and says so —
         # never that a model agreed with them.
-        return [], ["not attempted — claude is not on PATH, so no model read the list"], ""
+        return [], ReflistProvenance(
+            fields_discarded=["not attempted — claude is not on PATH, so no model read the list"]
+        )
     try:
         entries, prov = propose(reading_a, reading_b, label_a=label_a, label_b=label_b)
     except Exception as e:  # noqa: BLE001 — a failed corroboration is not a failed refs stage
@@ -3982,12 +4061,14 @@ def _llm_reference_reading(
         # closed on the next one. The failure is recorded, not swallowed:
         # `reflist_fields_discarded` carries it into the manifest and a console
         # line says it at the time. Same shape as `check.py:996`.
-        return [], [f"not obtained — {type(e).__name__}: {str(e)[:200]}"], ""
-    notes = list(prov.fields_discarded)
+        return [], ReflistProvenance(
+            fields_discarded=[f"not obtained — {type(e).__name__}: {str(e)[:200]}"]
+        )
     if prov.discarded_whole:
-        # the entries are already `[]` in this branch; the reason is what travels
-        notes.insert(0, f"reading discarded — {prov.discarded_whole}")
-    return entries, notes, prov.model
+        # the entries are already `[]` in this branch; the reason is what travels,
+        # and it goes FIRST so the console line quotes it rather than a field name
+        prov.fields_discarded.insert(0, f"reading discarded — {prov.discarded_whole}")
+    return entries, prov
 ```
 
 Add `RefEntry` to `cli.py`'s type-checking imports if it is not already
@@ -4033,7 +4114,7 @@ Immediately **before** the `reconcile` call at `:638`:
     if _needs_flat_reading(smap):
         flat_text, _ = references_span_flat(manuscript)
         flat_entries = parse_references(flat_text)
-    llm_entries, reflist_notes, reflist_model = _llm_reference_reading(
+    llm_entries, reflist_prov = _llm_reference_reading(
         refs_text,
         flat_text,
         label_a=smap.converter,
@@ -4047,14 +4128,22 @@ Immediately **before** the `reconcile` call at `:638`:
         smap=smap, crossref=crossref_entries, parsed=parsed,
         flat=flat_entries, llm=llm_entries,
     )
-    if reflist_model:
+    if reflist_prov.model:
+        dropped = len(reflist_prov.fields_discarded)
         console.print(
-            f"the reference list was also read by [bold]{reflist_model}[/bold] · "
-            f"{len(reflist_notes)} field{'' if len(reflist_notes) == 1 else 's'} discarded as "
+            f"the reference list was also read by [bold]{reflist_prov.model}[/bold] · "
+            f"{dropped} field{'' if dropped == 1 else 's'} discarded as "
             f"not printed [dim]— a second reading, not confirmation[/dim]"
         )
-    elif reflist_notes:
-        console.print(f"[yellow]⚠ no model reading of the reference list[/yellow] — {reflist_notes[0]}")
+        # reported separately, because it is a different kind of finding: not a
+        # value that was missing, but a reading whose own labels do not add up
+        for finding in reflist_prov.numbering_findings:
+            console.print(f"  [yellow]⚠ the model reading's {finding}[/yellow]")
+    elif reflist_prov.fields_discarded:
+        console.print(
+            "[yellow]⚠ no model reading of the reference list[/yellow] — "
+            f"{reflist_prov.fields_discarded[0]}"
+        )
 ```
 
 Add `references_span_flat` to the lazy `from .ingest import ...` at `:534` and
@@ -4100,7 +4189,8 @@ And in `RefManifest(...)` at `:702-714`:
         corroborating_readings=rec.corroborating_readings,
         labels_disputed=rec.labels_disputed,
         reflist_model=reflist_model,
-        reflist_fields_discarded=reflist_notes,
+        reflist_fields_discarded=reflist_prov.fields_discarded,
+        reflist_numbering_findings=reflist_prov.numbering_findings,
 ```
 
 **Note the ordering constraint:** the agreement block must sit above the
@@ -4231,6 +4321,10 @@ def _reflist(manifest) -> Disclosure | None:
     """
     model = getattr(manifest, "reflist_model", "") or ""
     notes = list(getattr(manifest, "reflist_fields_discarded", []) or [])
+    # a different kind of finding, and it must reach the reader too: a reading
+    # whose own labels do not add up is worth knowing about even when every
+    # value it proposed was printed
+    numbering = list(getattr(manifest, "reflist_numbering_findings", []) or [])
     if not model and not notes:
         return None  # no model reading was asked for
     ceiling = (
@@ -4264,13 +4358,25 @@ def _reflist(manifest) -> Disclosure | None:
             f"bibliography and asked what numbered list it carries; {dropped}."
         )
         short = f"{REFLIST_TOKEN} ({model}) — {len(notes)} discarded"
+    if numbering:
+        # appended rather than folded into `dropped`: "3 values discarded" and
+        # "it numbered one entry twice" are different facts, and a reader who
+        # sees them as one number cannot tell which happened
+        head += (
+            " Its own numbering did not add up either — "
+            + "; ".join(numbering)
+            + "."
+        )
     return Disclosure(
         key="reflist",
         level="info",
         token=REFLIST_TOKEN,
         text=f"{head} {ceiling}",
         short=short,
-        rows=tuple(notes[:6]),
+        # both kinds, numbering first: it describes the reading as a whole, and
+        # a truncated list should not lose the structural finding to six field
+        # names
+        rows=tuple((numbering + notes)[:6]),
     )
 
 
