@@ -746,6 +746,34 @@ def _first_divergence(a: list[RefEntry], b: list[RefEntry]) -> int | None:
 LABEL_AGREEMENT = ("agreed", "single", "disputed", "absent")
 
 
+def _comparably_same(x: RefEntry, y: RefEntry) -> bool:
+    """`_same_work` without its benefit of the doubt — agreement needs evidence.
+
+    The two functions answer opposite questions and so must break ties in
+    opposite directions. `_same_work` asks *"is there evidence these differ?"*,
+    which is right for `_first_divergence`: nothing comparable must not
+    manufacture a divergence, so it returns True. A per-label vote asks *"is
+    there evidence these agree?"*, and nothing comparable must not manufacture
+    agreement either.
+
+    Measured before this existed: `_same_work` gives the benefit of the doubt
+    when **either** side yields no title tokens, so a garbled DOI-less entry
+    paired with `Fujita S (2023) Characterization of brain volume changes…`
+    came back True, and the label was reported `agreed`. Two readings naming
+    demonstrably unrelated papers corroborating each other is the laundering of
+    ignorance this codebase exists to refuse — and `agreed` is the one state
+    that lets a verdict through.
+
+    `_same_work` itself is deliberately untouched: `reconcile` computes
+    `contested` from it and needs the old direction.
+    """
+    if x.doi and y.doi:
+        return x.doi.lower() == y.doi.lower()
+    if not _title_tokens(x.raw) or not _title_tokens(y.raw):
+        return False  # nothing to compare is not agreement
+    return _same_work(x, y)
+
+
 def label_agreement(
     candidates: dict[str, list[RefEntry]],
     body: set[str],
@@ -795,7 +823,7 @@ def label_agreement(
         elif len(voters) == 1:
             result[label] = "single"
         else:
-            agree = all(_same_work(x, y) for x, y in itertools.combinations(voters, 2))
+            agree = all(_comparably_same(x, y) for x, y in itertools.combinations(voters, 2))
             result[label] = "agreed" if agree else "disputed"
     return result
 

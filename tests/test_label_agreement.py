@@ -30,7 +30,13 @@ from papertrace.models import (  # noqa: E402
     RefEntry,
     RefManifest,
 )
-from papertrace.refs import LABEL_AGREEMENT, _entry, label_agreement  # noqa: E402
+from papertrace.refs import (  # noqa: E402
+    LABEL_AGREEMENT,
+    _comparably_same,
+    _entry,
+    _same_work,
+    label_agreement,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -313,3 +319,57 @@ def test_seen_in_round_trips_on_an_entry_and_defaults_empty_on_an_older_one(tmp_
     old = {"manuscript": "m.pdf", "entries": [{"num": "1", "raw": "x", "status": "retrieved"}]}
     p.write_text(json.dumps(old))
     assert RefManifest.from_json(p).entries[0].seen_in == []
+
+
+# --- agreement needs evidence, not the absence of counter-evidence ----------
+
+
+def test_two_uncomparable_entries_are_disputed_rather_than_agreed():
+    """The laundering this feature could otherwise perform.
+
+    `_same_work` answers "is there evidence these differ?" and returns True
+    when there is nothing to compare — correct for `_first_divergence`, which
+    must not manufacture a divergence out of silence. A per-label vote asks the
+    opposite question, so silence must not manufacture agreement either.
+    Measured before `_comparably_same` existed: these two came back `agreed`.
+    """
+    a = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
+    b = RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")
+    assert label_agreement({"parsed": [a], "pymupdf": [b]}, {"7"}) == {"7": "disputed"}
+
+
+def test_one_garbled_reading_cannot_corroborate_a_legible_one():
+    """Broader than it looks: the benefit of the doubt applied when **either**
+    side yielded no tokens, not only when both did. So a real reference paired
+    with an unreadable one was `agreed`, and `agreed` is the single state that
+    lets a verdict through untouched."""
+    good = RefEntry(
+        num="7",
+        raw="Fujita S (2023) Characterization of brain volume changes in aging individuals. "
+            "JAMA Netw Open.",
+    )
+    garbled = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
+    assert label_agreement({"parsed": [good], "llm": [garbled]}, {"7"}) == {"7": "disputed"}
+
+
+def test_two_doi_less_readings_that_do_share_a_title_still_agree():
+    """The tightening must not go so far that a DOI-less bibliography can never
+    corroborate itself. Elsevier prints no DOIs on some reference lists, and
+    title-token overlap is the only evidence available there — refusing it would
+    make every label on such a paper `disputed` and the audit worthless."""
+    a = RefEntry(num="7", raw="Fujita S (2023) Characterization of brain volume changes in aging")
+    b = RefEntry(num="7", raw="Fujita, Mori, Onda. Characterization of brain volume changes, aging")
+    assert label_agreement({"parsed": [a], "pymupdf": [b]}, {"7"}) == {"7": "agreed"}
+
+
+def test_same_work_keeps_its_own_direction_for_its_own_callers():
+    """`_same_work` is NOT changed. `reconcile` derives `contested` from
+    `_first_divergence`, which derives it from `_same_work`, and that path needs
+    "nothing to compare" to mean "no divergence found". Tightening the shared
+    helper would have turned every unreadable entry into a reported divergence
+    and re-tainted whole reports. Two functions, two directions, one test that
+    says so."""
+    a = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
+    b = RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")
+    assert _same_work(a, b) is True
+    assert _comparably_same(a, b) is False

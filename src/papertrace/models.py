@@ -596,7 +596,9 @@ class RefManifest:
     numbering_chosen_by: str = ""  # "" | default | user
     # The model that produced the LLM's structured reading of the
     # bibliography, when --llm-refs ran and produced anything usable. "" means
-    # no such call was made, or nothing it proposed survived verification.
+    # no such call was made, or nothing it proposed survived verbatim
+    # verification against the two texts it was shown — same sentence as the
+    # schema's, on purpose: two accounts of what "" means is one too many.
     reflist_model: str = ""
     # Which fields of the LLM's proposed reading could not be found verbatim
     # in either text it was shown, and were discarded rather than trusted.
