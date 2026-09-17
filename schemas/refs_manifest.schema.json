@@ -278,13 +278,18 @@
       ],
       "description": "Who is responsible for `numbering_choice`: '' when no escalation ran, 'default' when nobody was actually asked, 'user' when a person consented to it. A person consenting to proceed is an input, never evidence that the numbering was verified — `numbering_verified` cannot be set from this."
     },
-    "reflist_attempted": {
-      "type": "boolean",
-      "description": "Whether `refs` actually invoked a model to read the bibliography, regardless of whether the reply named itself. False means the call was never made at all — --llm-refs was off, --parse-only forced it off, the backend left no second reading to compare against, claude was not on PATH, or the subprocess failed before any reply was verified. Distinguishes \"no call happened\" from \"a call happened and voted but reported no name\", which `reflist_model` alone cannot: it is empty in both cases."
+    "reflist_outcome": {
+      "type": "string",
+      "enum": ["", "not_attempted", "failed", "read"],
+      "description": "Which of the three real outcomes this run's model reading of the bibliography reached: 'not_attempted' (no subprocess call was ever made — --llm-refs off, --parse-only, the backend left no second reading to compare against, or claude not on PATH), 'failed' (a call was made and did not return an answer), or 'read' (a reply was obtained, whether or not anything in it survived verification). Absent or '' means NEVER COMPUTED, not 'not_attempted' — a manifest written before this field existed asserts nothing about whether a call was made. A two-valued flag could not tell 'never called' apart from 'called and failed', which is exactly the bug this field replaced: a failed call published as a successful reading."
+    },
+    "reflist_failure": {
+      "type": "string",
+      "description": "Why there is no reading, when `reflist_outcome` is not 'read' — never a value that failed verification (`reflist_fields_discarded`'s job). '' when `reflist_outcome` is 'read', or when neither has ever been computed."
     },
     "reflist_model": {
       "type": "string",
-      "description": "The model that produced the LLM's structured reading of the bibliography, when --llm-refs ran, produced anything usable, AND the reply itself reported a model name. '' means EITHER no such call was made OR one was made, verified and voted but did not report which model answered — see `reflist_attempted` for which; this field alone cannot tell them apart, and never means the reading was rejected."
+      "description": "The model that produced the LLM's structured reading of the bibliography, when --llm-refs ran, produced anything usable, AND the reply itself reported a model name. '' means EITHER no such call was made OR one was made, verified and voted but did not report which model answered — see `reflist_outcome` for which; this field alone cannot tell them apart, and never means the reading was rejected."
     },
     "reflist_fields_discarded": {
       "type": "array",
@@ -299,6 +304,10 @@
       "items": {
         "type": "string"
       }
+    },
+    "reflist_entries_proposed": {
+      "type": "integer",
+      "description": "How many entries the model's reply proposed, before verification, whenever `reflist_outcome` is 'read' — including 0. Absent or 0 on a manifest where `reflist_outcome` is not 'read' means never computed, not 'proposed nothing'. Without this a reader cannot tell a model that proposed no entries at all from one that proposed several and had none discarded — both otherwise print '0 fields discarded'."
     }
   }
 }

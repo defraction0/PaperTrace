@@ -188,7 +188,7 @@ def test_a_model_naming_different_papers_changes_no_resolved_entry(tmp_path, off
          RefEntry(num="2", raw="Eta E. Another different paper. 1998.",
                   title="Another different paper", year="1998", seen_in=["pymupdf"])],
         reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2,
-                                      readings=["docling", "pymupdf"], attempted=True),
+                                      readings=["docling", "pymupdf"], outcome="read"),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: fabricated)
 
@@ -268,12 +268,25 @@ def test_no_llm_refs_makes_zero_model_calls(tmp_path, offline, monkeypatch):
     calls = []
     monkeypatch.setattr(ask_mod, "_ask", lambda prompt, model=None: calls.append(1) or "[]")
     pdf = _paper(tmp_path / "paper.pdf")
+    case = tmp_path / "case"
 
-    cli._refs_pipeline(manuscript=pdf, case=tmp_path / "case", provided=None,
+    cli._refs_pipeline(manuscript=pdf, case=case, provided=None,
                        email="test@example.org", parse_only=False, backend="pymupdf",
                        llm_refs=False)
 
     assert calls == []
+
+    # a plain disable is silent, not "asked for and never obtained" — caught
+    # in this round's own verification (see the outcome/`_reflist` guard fix)
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RefManifest, RunResults
+
+    manifest = RefManifest.from_json(case / "refs_manifest.json")
+    assert manifest.reflist_outcome == "not_attempted"
+    assert manifest.reflist_failure == ""
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert fired == [], "a run that never asked for a model reading must disclose nothing about it"
 
 
 def test_parse_only_makes_no_model_call_even_with_llm_refs_on(tmp_path, offline, monkeypatch):
@@ -317,14 +330,12 @@ def test_a_pymupdf_backend_run_never_asks_the_model(tmp_path, monkeypatch):
     manifest = _run_refs(tmp_path, monkeypatch, needs_flat=False, llm_refs=True)
 
     assert calls == [], "propose must never be reached on a pymupdf-backend run"
-    assert manifest.reflist_attempted is False
+    assert manifest.reflist_outcome == "not_attempted"
     assert manifest.reflist_model == ""
-    assert any(
-        "this run's backend is pymupdf" in f for f in manifest.reflist_fields_discarded
-    ), manifest.reflist_fields_discarded
-    assert not any(
-        "only one of the two extractions" in f for f in manifest.reflist_fields_discarded
-    ), "the published reason must name the deliberate skip, not blame the PDF's extraction"
+    assert "this run's backend is pymupdf" in manifest.reflist_failure, manifest.reflist_failure
+    assert "only one of the two extractions" not in manifest.reflist_failure, (
+        "the published reason must name the deliberate skip, not blame the PDF's extraction"
+    )
 
 
 def test_an_unavailable_claude_degrades_to_a_stated_absence(tmp_path, monkeypatch):
@@ -335,17 +346,21 @@ def test_an_unavailable_claude_degrades_to_a_stated_absence(tmp_path, monkeypatc
     readings, the manifest records the reason, and no format anywhere says a
     model corroborated anything.
 
-    `needs_flat=False` (not the shared fixture's default): with the flat
-    reading also forced on, "parsed" and the real flat-text reading of this
-    same pymupdf-backend PDF are identical and genuinely corroborate each
-    other with no model involved at all, which would make
-    `numbering_corroborated` legitimately `True` for a reason this test is not
-    about. Keeping the fixture single-voter here is what isolates "claude was
-    unavailable" as the one fact under test.
+    N2 of the Task 6 re-review: the round-1 version of this test drove
+    `needs_flat=False`, which makes `enabled` (`llm_wanted and needs_flat`)
+    `False` — so `_llm_reference_reading` returns at its FIRST guard and
+    `ask.claude_available` is never consulted at all. All five of that
+    version's assertions passed with `claude` PRESENT too, because the
+    `"not attempted"` substring it matched was the backend-skip reason, not
+    the missing-CLI one — the very thing this test claims to cover was
+    untested. `needs_flat=True` here is what actually reaches the
+    availability check, and the assertions read the CONTENT of the reason
+    (`"claude is not on PATH"`) rather than a prefix both reasons used to
+    share.
     """
     import papertrace.ask as ask_mod
 
-    _wire_offline(monkeypatch, needs_flat=False)
+    _wire_offline(monkeypatch, needs_flat=True)
     monkeypatch.setattr(ask_mod, "claude_available", lambda: False)
     monkeypatch.setattr(ask_mod, "_ask",
                         lambda prompt, model=None: pytest.fail("claude was absent and asked anyway"))
@@ -357,10 +372,25 @@ def test_an_unavailable_claude_degrades_to_a_stated_absence(tmp_path, monkeypatc
 
     payload = json.loads((case / "refs_manifest.json").read_text())
     assert payload["reflist_model"] == ""
-    assert payload["reflist_attempted"] is False
-    assert any("not attempted" in f for f in payload["reflist_fields_discarded"]), payload
+    assert payload["reflist_outcome"] == "not_attempted"
+    assert "claude is not on PATH" in payload["reflist_failure"], payload["reflist_failure"]
     assert "llm" not in payload["corroborating_readings"]
-    assert payload["numbering_corroborated"] is False
+    # incidental to this test, not the fact under it (N2): with `needs_flat=True`
+    # the real flat-text reading of this same pymupdf PDF genuinely corroborates
+    # "parsed" with no model involved at all, so `numbering_corroborated` being
+    # `True` here says nothing about claude's absence — `"llm" not in
+    # corroborating_readings` above is the assertion that actually matters.
+
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RefManifest, RunResults
+
+    manifest = RefManifest.from_json(case / "refs_manifest.json")
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert len(fired) == 1, fired
+    assert "claude is not on PATH" in fired[0].text
+    assert "agreed" not in fired[0].text
+    assert fired[0].level == "warn"
 
 
 def test_a_failed_model_call_does_not_kill_the_refs_stage(tmp_path, offline, monkeypatch):
@@ -369,6 +399,18 @@ def test_a_failed_model_call_does_not_kill_the_refs_stage(tmp_path, offline, mon
     `refs` has already parsed the list and is about to fetch the sources. A
     RuntimeError out of the seam is a failed corroboration attempt, not a failed
     refs stage — and the reason lands where a reader can see it.
+
+    N1 of the Task 6 re-review, reproduced and now closed: before the fix, a
+    timeout published as `reflist_model: ""`, `reflist_fields_discarded: ["not
+    obtained — RuntimeError: ..."]`, `attempted: True` — and `_reflist` read
+    that shape as a SUCCESSFUL reading, because its note did not start with
+    "reading discarded" and `attempted` alone could not tell "called and
+    failed" apart from "called and voted". The disclosure said "1 value it
+    proposed was not found in the printed text" at `level=info`, for a call
+    that proposed nothing at all. `reflist_outcome == "failed"` is the
+    dedicated third state; `reflist_failure` (never `reflist_fields_discarded`)
+    is where the reason lives, so nothing downstream can miscount it as a
+    discarded value.
     """
     def boom(*a, **kw):
         raise RuntimeError("claude -p timed out after 600s")
@@ -382,8 +424,25 @@ def test_a_failed_model_call_does_not_kill_the_refs_stage(tmp_path, offline, mon
 
     payload = json.loads((case / "refs_manifest.json").read_text())
     assert len(payload["entries"]) == 2
-    assert any("timed out" in f for f in payload["reflist_fields_discarded"]), payload
+    assert payload["reflist_outcome"] == "failed"
+    assert "timed out" in payload["reflist_failure"], payload["reflist_failure"]
+    assert payload["reflist_fields_discarded"] == [], (
+        "the failure reason must not be counted as a discarded value"
+    )
     assert payload["reflist_model"] == ""
+
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RefManifest, RunResults
+
+    manifest = RefManifest.from_json(case / "refs_manifest.json")
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert len(fired) == 1, fired
+    assert "timed out" in fired[0].text
+    assert "was not found in the printed text" not in fired[0].text, (
+        "a call that never returned must not read as a value that failed verification"
+    )
+    assert fired[0].level == "warn", "a call that did not return is not an aside"
 
 
 def test_corroboration_requires_every_cited_label_to_agree(tmp_path, offline, monkeypatch):
@@ -400,7 +459,7 @@ def test_corroboration_requires_every_cited_label_to_agree(tmp_path, offline, mo
                   title="A first paper", year="2020", seen_in=["docling", "pymupdf"]),
          RefEntry(num="2", raw="Gamma G. A wholly unrelated third paper. 2015.",
                   title="A wholly unrelated third paper", year="2015", seen_in=["A"])],
-        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, attempted=True),
+        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, outcome="read"),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: disagrees)
     case = tmp_path / "case"
@@ -443,7 +502,7 @@ def test_no_model_reply_can_set_numbering_verified(tmp_path, offline, monkeypatc
                   title="A first paper", year="2020", seen_in=["docling", "pymupdf"]),
          RefEntry(num="2", raw="Beta B. A second paper. J Fixture. 2021;2:10-19.",
                   title="A second paper", year="2021", seen_in=["docling", "pymupdf"])],
-        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, attempted=True),
+        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, outcome="read"),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: agrees)
     pdf = _paper(tmp_path / "paper.pdf", extra_uncited=True)
@@ -466,7 +525,7 @@ def test_a_successful_reading_that_named_no_model_still_discloses_the_attempt(tm
     one — a case `ask.py` explicitly anticipates ("a reply that names no
     model is not evidence the model changed"). `reflist.propose` mirrors that
     exactly: a real call that verifies cleanly and votes can still leave
-    `prov.model == ""`. Before `reflist_attempted` existed, that state
+    `prov.model == ""`. Before `reflist_outcome` existed, that state
     published as `reflist_model: ""` (the schema's OWN words for "no such
     call was made") with no console line and no `reflist` disclosure, while
     `numbering_corroboration` told the reader `llm` had corroborated the
@@ -479,14 +538,14 @@ def test_a_successful_reading_that_named_no_model_still_discloses_the_attempt(tm
                   title="A second paper", year="2021")],
         # the exact shape a real `propose()` call produces when
         # `ask.model_for(ask.SITE_REFS)` returns `None` — `model=""`,
-        # `attempted=True`, a real vote in hand
-        reflist_mod.ReflistProvenance(model="", entries_proposed=2, attempted=True),
+        # `outcome="read"`, a real vote in hand
+        reflist_mod.ReflistProvenance(model="", entries_proposed=2, outcome="read"),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: unnamed)
 
     manifest = _run_refs(tmp_path, monkeypatch, llm_refs=True)
 
-    assert manifest.reflist_attempted is True, "a call that voted must be recorded as attempted"
+    assert manifest.reflist_outcome == "read", "a call that voted must be recorded as read"
     assert manifest.reflist_model == ""
 
     from papertrace.disclosures import run_disclosures
@@ -509,7 +568,7 @@ def test_corroborating_readings_excludes_a_reading_that_carried_no_cited_label(
     """
     abstains = (
         [_work("3", "10.1000/x3"), _work("4", "10.1000/x4")],
-        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, attempted=True),
+        reflist_mod.ReflistProvenance(model="claude-opus-5", entries_proposed=2, outcome="read"),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: abstains)
     capsys.readouterr()  # discard anything buffered before this run
@@ -573,7 +632,7 @@ def test_the_reflist_disclosure_reaches_every_format_and_carries_the_ceiling(tmp
     from papertrace.disclosures import REFLIST_TOKEN, run_disclosures
     from papertrace.models import RunResults
 
-    manifest = RefManifest(manuscript="p.pdf", reflist_attempted=True,
+    manifest = RefManifest(manuscript="p.pdf", reflist_outcome="read",
                            reflist_model="claude-opus-5",
                            reflist_fields_discarded=["[2] journal"])
     fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
@@ -586,6 +645,64 @@ def test_the_reflist_disclosure_reaches_every_format_and_carries_the_ceiling(tmp
     assert "claude-opus-5" in d.text
 
 
+def test_a_reflist_model_with_no_recorded_outcome_still_settles_as_read(tmp_path):
+    """N4 of the Task 6 re-review. A manifest that carries `reflist_model` but
+    never had `reflist_outcome` computed — only reachable from a case folder
+    written by an earlier commit of this same unmerged branch, since
+    `reflist_model` predates `reflist_outcome` by one round and neither is on
+    `main` — must not lose its required disclosure and ceiling sentence.
+
+    `reflist_model` non-empty is POSITIVE PROOF a call happened and answered
+    with a name; settling `outcome` as `"read"` from that is not the forbidden
+    derivation. Only the inverse — "no name and no reason recorded, so no call
+    happened" — would be, and that is exactly the shape that returns `None`
+    below it.
+    """
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = RefManifest(manuscript="p.pdf", reflist_model="claude-opus-5")
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert len(fired) == 1, fired
+    assert "claude-opus-5" in fired[0].text
+    assert "second reading, not confirmation" in fired[0].text
+
+
+def test_neither_model_nor_outcome_nor_failure_discloses_nothing(tmp_path):
+    """The one shape that must still return `None`: nothing was ever asked
+    for and nothing was ever obtained. `reflist_model` empty is not positive
+    proof of anything by itself — only its PRESENCE licenses an inference,
+    never its absence."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = RefManifest(manuscript="p.pdf")
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert fired == []
+
+
+def test_a_plain_disable_with_a_recorded_outcome_still_discloses_nothing(tmp_path):
+    """Caught in verification, not in the review: once `reflist_outcome` is
+    always a real value once computed, `not outcome` alone can no longer tell
+    "nothing to report" apart from "asked for and never obtained" — both
+    leave `outcome == "not_attempted"`. `--no-llm-refs` and `--parse-only`
+    record that outcome too (`_llm_reference_reading`'s `not enabled` branch),
+    with an empty `failure` — a plain `not outcome` guard read that as
+    something to report and produced 'This run asked that the reference list
+    was also read by a model, and no reading was obtained: . …', a broken
+    sentence with an empty reason, for a run that never asked at all."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = RefManifest(manuscript="p.pdf", reflist_outcome="not_attempted",
+                           reflist_failure="")
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert fired == []
+
+
 def test_a_model_reading_that_was_not_obtained_still_discloses_that(tmp_path):
     """Silence would be read as "no news". The attempt and its failure are news.
 
@@ -595,12 +712,13 @@ def test_a_model_reading_that_was_not_obtained_still_discloses_that(tmp_path):
     from papertrace.disclosures import run_disclosures
     from papertrace.models import RunResults
 
-    manifest = RefManifest(manuscript="p.pdf", reflist_model="",
-                           reflist_fields_discarded=["not attempted — claude is not on PATH"])
+    manifest = RefManifest(manuscript="p.pdf", reflist_outcome="not_attempted", reflist_model="",
+                           reflist_failure="claude is not on PATH, so no model read the reference list")
     fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
              if d.key == "reflist"]
     assert len(fired) == 1, fired
-    assert "not attempted" in fired[0].text
+    assert "no reading was obtained" in fired[0].text
+    assert "claude is not on PATH" in fired[0].text
     assert "agreed" not in fired[0].text
     assert fired[0].level == "warn", "a failed attempt is a warning, not routine information"
 
@@ -614,7 +732,7 @@ def test_an_attempted_reading_that_named_no_model_is_worded_as_a_gap_in_reportin
     from papertrace.disclosures import run_disclosures
     from papertrace.models import RunResults
 
-    manifest = RefManifest(manuscript="p.pdf", reflist_attempted=True, reflist_model="",
+    manifest = RefManifest(manuscript="p.pdf", reflist_outcome="read", reflist_model="",
                            reflist_fields_discarded=[])
     fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
              if d.key == "reflist"]
@@ -622,6 +740,55 @@ def test_an_attempted_reading_that_named_no_model_is_worded_as_a_gap_in_reportin
     text = fired[0].text
     assert "not obtained" not in text
     assert "did not report which model answered" in text
+    assert fired[0].level == "info", "a reading that ran and voted is routine information"
+
+
+def test_a_reply_proposing_no_entries_is_not_worded_as_a_clean_corroboration(tmp_path):
+    """N3b of the Task 6 re-review. A reply of `[]` used to be described as
+    "every value it proposed was found in the printed text" — vacuously true,
+    and it reads as a clean second opinion. A model that proposed no entries
+    at all corroborated nothing, and the sentence must say so, not describe an
+    empty set as a value-by-value success.
+    """
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = RefManifest(manuscript="p.pdf", reflist_outcome="read",
+                           reflist_model="claude-opus-5", reflist_entries_proposed=0)
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert len(fired) == 1, fired
+    text = fired[0].text
+    assert "it proposed no entries" in text
+    assert "every value it proposed was found" not in text
+
+
+def test_a_reading_discarded_whole_is_not_worded_as_a_second_reading_on_the_console(
+    tmp_path, monkeypatch, capsys
+):
+    """Caught in this round's own verification, walking the outcome table: a
+    reply that was obtained but not a JSON array at all (or one whose title
+    was never printed) sets `discarded_whole`, and the console used to print
+    the SAME "was also read by X · N fields discarded as not printed" line a
+    genuine success gets — true of nothing, since no field was individually
+    checked and dropped; the whole reading was refused before any field-level
+    check could run.
+    """
+    unusable = ([], reflist_mod.ReflistProvenance(
+        model="claude-opus-5", outcome="read", discarded_whole="the model's reply "
+        "was not a JSON array (no JSON array in model output: not json)",
+        fields_discarded=["reading discarded — the model's reply was not a JSON array "
+                          "(no JSON array in model output: not json)"],
+    ))
+    monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: unusable)
+    capsys.readouterr()
+
+    _run_refs(tmp_path, monkeypatch, llm_refs=True)
+
+    out = capsys.readouterr().out
+    assert "reading was" in out and "discarded" in out
+    assert "0 fields discarded as not printed" not in out
+    assert "· 1 field discarded as not printed" not in out
 
 
 def test_corroboration_is_disclosed_without_claiming_the_numbering_was_verified(tmp_path):
@@ -711,31 +878,95 @@ def test_reflist_numbering_findings_round_trips_and_validates(tmp_path):
     assert old.reflist_numbering_findings == []
 
 
-def test_reflist_attempted_round_trips_and_validates(tmp_path):
-    """Gate 2, for Critical 1's field. Absent means never computed / no call
-    ever made — the same three-state discipline as `numbering_ledger` — never
-    "the model agreed" and never folded into `reflist_model`'s own emptiness,
-    which cannot by itself distinguish "no call" from "a call that named no
-    model" (see `RefManifest.reflist_attempted`'s own docstring).
+def test_reflist_outcome_and_failure_round_trip_and_validate(tmp_path):
+    """Gate 2, for the fields that replaced `reflist_attempted` in this same
+    unmerged task (N1 of the Task 6 re-review) — replacing rather than adding
+    is correct because `reflist_attempted` was never a published contract.
+    Absent `reflist_outcome` means NEVER COMPUTED, not `"not_attempted"` — the
+    same three-state discipline as `numbering_ledger` — and never folded into
+    `reflist_model`'s own emptiness, which cannot by itself distinguish "no
+    call" from "a call that named no model" (see `RefManifest.reflist_outcome`'s
+    own docstring).
     """
     import jsonschema
 
-    m = RefManifest(manuscript="p.pdf", reflist_attempted=True, reflist_model="")
+    m = RefManifest(manuscript="p.pdf", reflist_outcome="read", reflist_model="",
+                    reflist_failure="")
     path = tmp_path / "refs_manifest.json"
     m.to_json(path)
     payload = json.loads(path.read_text())
     schema = json.loads(SCHEMA_PATH.read_text())
     jsonschema.validate(payload, schema)
-    assert "reflist_attempted" not in schema.get("required", [])
+    assert "reflist_outcome" not in schema.get("required", [])
+    assert "reflist_failure" not in schema.get("required", [])
 
     back = RefManifest.from_json(path)
-    assert back.reflist_attempted is True
+    assert back.reflist_outcome == "read"
     assert back.reflist_model == ""
+    assert back.reflist_failure == ""
 
-    del payload["reflist_attempted"]
+    for key in ("reflist_outcome", "reflist_failure"):
+        del payload[key]
     path.write_text(json.dumps(payload))
     old = RefManifest.from_json(path)
-    assert old.reflist_attempted is False
+    assert old.reflist_outcome == ""  # never computed — NOT "not_attempted"
+    assert old.reflist_failure == ""
+
+
+def test_reflist_failure_round_trips_for_the_failed_outcome(tmp_path):
+    """The other real value `reflist_outcome` takes, with a reason attached."""
+    import jsonschema
+
+    m = RefManifest(manuscript="p.pdf", reflist_outcome="failed",
+                    reflist_failure="RuntimeError: claude -p timed out after 600s")
+    path = tmp_path / "refs_manifest.json"
+    m.to_json(path)
+    payload = json.loads(path.read_text())
+    schema = json.loads(SCHEMA_PATH.read_text())
+    jsonschema.validate(payload, schema)
+
+    back = RefManifest.from_json(path)
+    assert back.reflist_outcome == "failed"
+    assert "timed out" in back.reflist_failure
+
+
+def test_reflist_entries_proposed_round_trips_and_validates(tmp_path):
+    """Gate 2, for the field N3b needed: without it, "0 fields discarded"
+    cannot be told apart from a reply that proposed nothing to discard in the
+    first place."""
+    import jsonschema
+
+    m = RefManifest(manuscript="p.pdf", reflist_outcome="read",
+                    reflist_entries_proposed=3)
+    path = tmp_path / "refs_manifest.json"
+    m.to_json(path)
+    payload = json.loads(path.read_text())
+    schema = json.loads(SCHEMA_PATH.read_text())
+    jsonschema.validate(payload, schema)
+    assert "reflist_entries_proposed" not in schema.get("required", [])
+
+    back = RefManifest.from_json(path)
+    assert back.reflist_entries_proposed == 3
+
+    del payload["reflist_entries_proposed"]
+    path.write_text(json.dumps(payload))
+    old = RefManifest.from_json(path)
+    assert old.reflist_entries_proposed == 0
+
+
+def test_reflist_outcomes_matches_its_own_schema_enum():
+    """The published vocabulary (`REFLIST_OUTCOMES`, the way `LABEL_AGREEMENT`
+    and `REF_STATUSES` are) against the schema's enum for `reflist_outcome` —
+    modelled on `test_ref_statuses_matches_its_own_schema_enum`'s idiom. `""`
+    is the schema's own "never computed" sentinel and is not part of the
+    published vocabulary of REAL outcomes, so it is added on both sides
+    rather than smuggled into `REFLIST_OUTCOMES` itself.
+    """
+    from papertrace.reflist import REFLIST_OUTCOMES
+
+    schema = json.loads(SCHEMA_PATH.read_text())
+    enum = schema["properties"]["reflist_outcome"]["enum"]
+    assert set(REFLIST_OUTCOMES) | {""} == set(enum)
 
 
 def test_a_numbering_finding_from_the_model_reading_reaches_the_manifest(tmp_path, monkeypatch):
@@ -750,7 +981,7 @@ def test_a_numbering_finding_from_the_model_reading_reaches_the_manifest(tmp_pat
             entries_proposed=2,
             numbering_findings=["numerals proposed twice: 2"],
             readings=["pymupdf", "docling"],
-            attempted=True,
+            outcome="read",
         ),
     )
     monkeypatch.setattr(reflist_mod, "propose", lambda *a, **kw: proposed)

@@ -808,14 +808,7 @@ def label_agreement(
     """
     result: dict[str, str] = {}
     for label in body:
-        voters: list[RefEntry] = []
-        duplicated = False
-        for entries in candidates.values():
-            carriers = [e for e in entries if e.num == label and not e.boundary_ambiguous]
-            if len(carriers) == 1:
-                voters.append(carriers[0])
-            elif carriers:
-                duplicated = True  # see the docstring: a duplicate is judgeable
+        voters, duplicated = _label_voters(candidates, label)
         if duplicated:
             result[label] = "disputed"
         elif not voters:
@@ -823,9 +816,63 @@ def label_agreement(
         elif len(voters) == 1:
             result[label] = "single"
         else:
-            agree = all(_comparably_same(x, y) for x, y in itertools.combinations(voters, 2))
+            agree = all(
+                _comparably_same(x, y) for (_, x), (_, y) in itertools.combinations(voters, 2)
+            )
             result[label] = "agreed" if agree else "disputed"
     return result
+
+
+def _label_voters(
+    candidates: dict[str, list[RefEntry]], label: str
+) -> tuple[list[tuple[str, RefEntry]], bool]:
+    """The `(reading name, entry)` pairs entitled to a vote on this one label,
+    and whether any reading carried it more than once.
+
+    Factored out of `label_agreement` so `corroborating_readings` below can
+    name the readings that actually cast a vote, rather than approximating it
+    a third way. Private: the label-by-label state machine belongs to
+    `label_agreement`, and this is only its inner loop.
+    """
+    voters: list[tuple[str, RefEntry]] = []
+    duplicated = False
+    for name, entries in candidates.items():
+        carriers = [e for e in entries if e.num == label and not e.boundary_ambiguous]
+        if len(carriers) == 1:
+            voters.append((name, carriers[0]))
+        elif carriers:
+            duplicated = True  # see label_agreement's docstring: judgeable, not silent
+    return voters, duplicated
+
+
+def corroborating_readings(candidates: dict[str, list[RefEntry]], body: set[str]) -> list[str]:
+    """Which readings actually voted `agreed` on EVERY cited label — named,
+    sorted, or `[]` if any label failed to reach `agreed` on its own.
+
+    Not `sorted(candidates)`: that names every reading TAKEN, whether or not it
+    carried the label at all. Not `any(e.num in body for e in cand)` either: a
+    reading that carries only SOME cited labels — a model reading that skipped
+    an entry — is not one that agreed on all of them, and a reading whose only
+    carrier of a label is `boundary_ambiguous` cast no vote on it at all. Both
+    were measured to overstate `corroborating_readings` in exactly this
+    function's absence. This recomputes each label's voters with
+    `_label_voters` — the same test `label_agreement` uses — and intersects
+    their names across every cited label, so a reading is named only when it
+    voted, and agreed, everywhere it was asked to.
+    """
+    names: set[str] | None = None
+    for label in body:
+        voters, duplicated = _label_voters(candidates, label)
+        if duplicated or len(voters) < 2:
+            return []
+        agree = all(
+            _comparably_same(x, y) for (_, x), (_, y) in itertools.combinations(voters, 2)
+        )
+        if not agree:
+            return []
+        label_names = {name for name, _ in voters}
+        names = label_names if names is None else (names & label_names)
+    return sorted(names) if names else []
 
 
 def stamp_seen_in(chosen: list[RefEntry], candidates: dict[str, list[RefEntry]]) -> None:

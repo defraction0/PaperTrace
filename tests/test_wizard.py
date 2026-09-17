@@ -676,14 +676,16 @@ def test_the_worst_case_call_count_includes_the_retry(tmp_path, monkeypatch):
     shape a previous task already moved `model_calls_max` to, rather than
     reverting it back to a flat `ASK_ATTEMPTS * cited_source_calls`.
 
-    Pinned with `docling_available` forced `True` rather than left to whatever
-    this machine happens to have installed — `workload()` derives the +1 from
-    it, and a test whose expected numbers depend on the host environment is
-    not really pinning anything.
+    Pinned with `resolve_backend` forced to report docling rather than left to
+    whatever this machine happens to have installed — `workload()` derives the
+    +1 from it (N5 of the Task 6 re-review: not `docling_available()`, which is
+    only a proxy for what `resolve_backend("auto")` actually resolves to), and
+    a test whose expected numbers depend on the host environment is not really
+    pinning anything.
     """
     from papertrace.ask import ASK_ATTEMPTS
 
-    monkeypatch.setattr(wizard, "docling_available", lambda: True)
+    monkeypatch.setattr(wizard, "resolve_backend", lambda backend: "docling")
     pdf = _one_pager(tmp_path / "m.pdf",
                      "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
     w = wizard.workload(pdf)
@@ -704,7 +706,7 @@ def test_the_worst_case_call_count_drops_the_reflist_call_on_a_pymupdf_only_inst
     produce)."""
     from papertrace.ask import ASK_ATTEMPTS
 
-    monkeypatch.setattr(wizard, "docling_available", lambda: False)
+    monkeypatch.setattr(wizard, "resolve_backend", lambda backend: "pymupdf")
     pdf = _one_pager(tmp_path / "m.pdf",
                      "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
     w = wizard.workload(pdf)

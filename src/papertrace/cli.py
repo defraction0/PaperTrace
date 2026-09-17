@@ -570,11 +570,12 @@ def _llm_reference_reading(
     earlier draft of this plan did exactly that and would have dropped every
     duplicate and gap on the floor, unreported.
 
-    `provenance.fields_discarded` is never empty when `enabled` and the model
-    was not asked or the call failed: an attempt that produced nothing has to
-    leave the reason where the manifest and the report can read it, because
-    silence here would be read as "no news" about a reading that was asked for
-    and did not happen.
+    `provenance.outcome` is set to exactly one of `reflist.REFLIST_OUTCOMES` on
+    every return, and `provenance.failure` carries why whenever `outcome` is
+    not `"read"`. A boolean here could not tell "never called" apart from
+    "called and failed" — a failed call used to fall through to the same
+    branch a successful one takes, published as a value that failed
+    verification when nothing was ever proposed at all.
 
     `disabled_reason` names a STRUCTURAL cause when `not enabled` — the run's
     own backend leaves no second reading to compare against — as opposed to a
@@ -585,16 +586,18 @@ def _llm_reference_reading(
     from .reflist import ReflistProvenance, propose
 
     if not enabled:
-        # a caller's own choice is silent (empty `fields_discarded`); a
-        # structural reason the caller had no choice about is disclosed, same
-        # as "claude not on PATH" below
-        return [], ReflistProvenance(fields_discarded=[disabled_reason] if disabled_reason else [])
+        # a caller's own choice is silent (empty `failure`); a structural
+        # reason the caller had no choice about is disclosed, same as "claude
+        # not on PATH" below. `outcome` stays at its "not_attempted" default.
+        return [], ReflistProvenance(failure=disabled_reason)
     if not ask.claude_available():
         # the ordinary case for someone who installed papertrace and not Claude
         # Code. The run proceeds on the deterministic readings and says so —
-        # never that a model agreed with them.
+        # never that a model agreed with them. Worded with no substring in
+        # common with the backend-skip reason above, so a test (or a reader)
+        # asserting on the CONTENT of one can never be satisfied by the other.
         return [], ReflistProvenance(
-            fields_discarded=["not attempted — claude is not on PATH, so no model read the list"]
+            failure="claude is not on PATH, so no model read the reference list"
         )
     try:
         entries, prov = propose(reading_a, reading_b, label_a=label_a, label_b=label_b)
@@ -605,15 +608,17 @@ def _llm_reference_reading(
         # timeout and a non-zero exit and ValueError for unparseable stdout, and
         # a subprocess can surface OSError besides — enumerating them would fail
         # closed on the next one. The failure is recorded, not swallowed:
-        # `reflist_fields_discarded` carries it into the manifest and a console
-        # line says it at the time. Same shape as `check.py:996`.
-        # `attempted=True`: every exception reaching here came out of `propose`
-        # actually invoking the subprocess (its own two early returns for "not
-        # enough text" and "not a JSON array" return normally, not raise) — a
-        # failed call is still a call that happened, not one that never was.
+        # `reflist_failure` carries it into the manifest and a console line
+        # says it at the time. Same shape as `check.py:996`.
+        # `outcome="failed"`, never "not_attempted": every exception reaching
+        # here came out of `propose` actually invoking the subprocess — its own
+        # two early returns for "not enough text" and "not a JSON array" return
+        # normally, they do not raise. A fresh `ReflistProvenance` is built
+        # rather than reusing `propose`'s local one, which never gets returned:
+        # the exception propagates past `propose`'s own `return` statement.
         return [], ReflistProvenance(
-            attempted=True,
-            fields_discarded=[f"not obtained — {type(e).__name__}: {str(e)[:200]}"],
+            outcome="failed",
+            failure=f"{type(e).__name__}: {str(e)[:200]}",
         )
     if prov.discarded_whole:
         # the entries are already `[]` in this branch; the reason is what travels,
@@ -652,6 +657,7 @@ def _refs_pipeline(
     from .reflist import _label_key
     from .refs import (
         _client,
+        corroborating_readings,
         crossref_deposit,
         deposit_corroborates,
         deposit_is_this_paper,
@@ -798,9 +804,12 @@ def _refs_pipeline(
         label_a=smap.converter,
         label_b="pymupdf",
         enabled=llm_wanted and needs_flat,
+        # worded with no substring in common with "claude is not on PATH" —
+        # the two structural reasons must never be mistaken for each other by
+        # anything matching on their text
         disabled_reason=(
-            "not attempted — this run's backend is pymupdf, so a second flat "
-            "reading of the bibliography would be the same text"
+            "this run's backend is pymupdf, so a second flat reading of the "
+            "bibliography would be the same text"
             if llm_wanted and not needs_flat
             else ""
         ),
@@ -809,24 +818,48 @@ def _refs_pipeline(
         smap=smap, crossref=crossref_entries, parsed=parsed,
         flat=flat_entries, llm=llm_entries,
     )
-    if reflist_prov.attempted:
-        # named, even when the reply itself did not — see `ReflistProvenance.attempted`'s
-        # docstring for why `model` alone cannot stand in for "this happened"
-        named_model = reflist_prov.model or "an unnamed model"
-        dropped = len(reflist_prov.fields_discarded)
-        console.print(
-            f"the reference list was also read by [bold]{named_model}[/bold] · "
-            f"{dropped} field{'' if dropped == 1 else 's'} discarded as "
-            f"not printed [dim]— a second reading, not confirmation[/dim]"
+    # Three states, printed three different ways — never fewer, or a call
+    # that failed prints as one that succeeded (the regression this replaced):
+    # see `reflist.ReflistProvenance.outcome`'s docstring.
+    if reflist_prov.outcome == "read":
+        # named, even when the reply itself did not — same wording
+        # `disclosures._reflist` uses for this state, so the console and the
+        # written report never describe one call two different ways
+        named_model = reflist_prov.model or "a model that did not report its own name"
+        whole = next(
+            (n.removeprefix("reading discarded — ")
+             for n in reflist_prov.fields_discarded if n.startswith("reading discarded")),
+            "",
         )
+        if whole:
+            # a reply was obtained and the WHOLE reading was refused — never
+            # the same line as a success with fields dropped, which read as
+            # "N fields discarded as not printed" for a reply that was not a
+            # JSON array at all, or named a paper the page does not print
+            console.print(
+                f"the reference list was also read by [bold]{named_model}[/bold], "
+                f"and its reading was [yellow]discarded[/yellow] — {whole}"
+            )
+        else:
+            dropped = len(reflist_prov.fields_discarded)
+            console.print(
+                f"the reference list was also read by [bold]{named_model}[/bold] · "
+                f"{dropped} field{'' if dropped == 1 else 's'} discarded as "
+                f"not printed [dim]— a second reading, not confirmation[/dim]"
+            )
         # reported separately, because it is a different kind of finding: not a
         # value that was missing, but a reading whose own labels do not add up
         for finding in reflist_prov.numbering_findings:
             console.print(f"  [yellow]⚠ the model reading's {finding}[/yellow]")
-    elif reflist_prov.fields_discarded:
+    elif reflist_prov.outcome == "failed":
+        console.print(
+            "[yellow]⚠ the reference list could not be read by a model — "
+            f"the call did not return: {reflist_prov.failure}[/yellow]"
+        )
+    elif reflist_prov.failure:
         console.print(
             "[yellow]⚠ no model reading of the reference list[/yellow] — "
-            f"{reflist_prov.fields_discarded[0]}"
+            f"{reflist_prov.failure}"
         )
 
     entries, rec = reconcile(body_labels, crossref_entries, entries, crossref_absent=absent)
@@ -849,16 +882,14 @@ def _refs_pipeline(
         agreement.get(label) == "agreed" for label in body_labels
     )
     # Named only when corroboration holds, and only the readings that actually
-    # voted on a cited label — never every reading `others` happened to carry.
-    # `sorted(others)` names a reading that carried none of the cited labels
-    # (it proposed only entries for labels the body never cites) as having
-    # corroborated them, which `stamp_seen_in`'s own `_same_work` test would
-    # never do for that same reading. Since `rec.corroborated` already requires
-    # every cited label to be `agreed`, a reading that carries any cited label
-    # at all necessarily agreed on it — filtering to "carries one" is enough.
+    # voted `agreed` on EVERY cited label — `refs.corroborating_readings`
+    # recomputes each label's voters with `label_agreement`'s own rule and
+    # intersects their names, rather than approximating "carried a cited
+    # label" (which named a reading that skipped an entry, or whose only
+    # carrier of one was `boundary_ambiguous` and so cast no vote at all —
+    # both measured; see the Task 6 re-review's N3).
     rec.corroborating_readings = (
-        sorted(name for name, cand in others.items() if any(e.num in body_labels for e in cand))
-        if rec.corroborated else []
+        corroborating_readings(others, body_labels) if rec.corroborated else []
     )
     if rec.corroborated:
         console.print(
@@ -948,10 +979,12 @@ def _refs_pipeline(
         numbering_corroborated=rec.corroborated,
         corroborating_readings=rec.corroborating_readings,
         labels_disputed=rec.labels_disputed,
-        reflist_attempted=reflist_prov.attempted,
+        reflist_outcome=reflist_prov.outcome,
+        reflist_failure=reflist_prov.failure,
         reflist_model=reflist_prov.model,
         reflist_fields_discarded=reflist_prov.fields_discarded,
         reflist_numbering_findings=reflist_prov.numbering_findings,
+        reflist_entries_proposed=reflist_prov.entries_proposed,
     )
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)

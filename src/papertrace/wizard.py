@@ -28,6 +28,7 @@ from . import config
 from .ask import ASK_ATTEMPTS, claude_available
 from .brand import BANNER
 from .ingest import _docling_available as docling_available
+from .ingest import resolve_backend
 from .models import _LABEL_GROUP, _expand_label_group, is_references_heading
 from .refs import DOI_RE
 
@@ -212,14 +213,13 @@ def workload(pdf: Path) -> dict:
     # one extraction call, then one per cited source. Sources are judged in
     # groups, so this is an upper bound on the judging calls, not a promise.
     cited_source_calls = sum(len(g) for g in groups)
-    # `run_wizard` always requests `backend="auto"`, which resolves to docling
-    # when it is importable and to pymupdf otherwise (`ingest.resolve_backend`).
-    # On a pymupdf run the flat second reading is skipped as identical to the
-    # first — `cli._needs_flat_reading`'s own predicate, mirrored here rather
-    # than imported, since importing `.ingest`'s `resolve_backend` would do —
-    # so the reference-list call is never attempted either, and the estimate
-    # must not promise a call this run's own backend will not produce.
-    llm_call = 1 if docling_available() else 0
+    # `run_wizard` always requests `backend="auto"`, which `resolve_backend`
+    # turns into docling when it is importable and pymupdf otherwise. On a
+    # pymupdf run the flat second reading is skipped as identical to the first
+    # (`cli._needs_flat_reading`'s own predicate) — so the reference-list call
+    # is never attempted either, and the estimate must not promise a call this
+    # run's own backend will not produce.
+    llm_call = 1 if resolve_backend("auto") != "pymupdf" else 0
     return {
         "pages": pages,
         "places": len(groups),

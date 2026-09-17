@@ -35,6 +35,7 @@ from papertrace.refs import (  # noqa: E402
     _comparably_same,
     _entry,
     _same_work,
+    corroborating_readings,
     label_agreement,
     stamp_seen_in,
 )
@@ -417,3 +418,57 @@ def test_a_reading_naming_a_different_paper_under_the_same_label_is_not_provenan
                   "pymupdf": [_work("5", "10.1000/x99")]}
     stamp_seen_in(chosen, candidates)
     assert chosen[0].seen_in == ["parsed"]
+
+
+# --- corroborating_readings: named only where a reading actually voted -----
+# (N3 of the Task 6 re-review: `any(e.num in body for e in cand)` — the filter
+# that shipped in round 1 — named a reading that carried only SOME cited
+# labels, or whose only carrier of one was `boundary_ambiguous`, as having
+# corroborated ALL of them.)
+
+
+def test_corroborating_readings_excludes_a_reading_that_voted_on_only_some_labels():
+    """A reading that skipped an entry corroborated the ones it carried, not
+    the ones it did not. `llm` here votes on [1] and never mentions [2] at
+    all — both cited labels still come back `agreed` (crossref and parsed
+    carry [2] between them), so the round-1 filter named `llm` as one of the
+    readings that agreed on `every cited label`, which it never spoke to."""
+    body = {"1", "2"}
+    candidates = {
+        "parsed": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
+        "crossref": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
+        "llm": [_work("1", "10.1000/x1")],
+    }
+    assert label_agreement(candidates, body) == {"1": "agreed", "2": "agreed"}
+    assert corroborating_readings(candidates, body) == ["crossref", "parsed"]
+
+
+def test_corroborating_readings_excludes_a_reading_whose_only_carrier_is_boundary_ambiguous():
+    """A `boundary_ambiguous` carrier casts no vote at all (invariant 5 of
+    `label_agreement`) — sharing that fact with `corroborating_readings` is
+    the point of factoring `_label_voters` out, rather than a coincidence two
+    unrelated filters happen to agree on."""
+    ambiguous_1 = _work("1", "10.1000/x1")
+    ambiguous_1.boundary_ambiguous = True
+    ambiguous_2 = _work("2", "10.1000/x2")
+    ambiguous_2.boundary_ambiguous = True
+    body = {"1", "2"}
+    candidates = {
+        "parsed": [ambiguous_1, ambiguous_2],
+        "crossref": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
+        "llm": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
+    }
+    assert label_agreement(candidates, body) == {"1": "agreed", "2": "agreed"}
+    assert corroborating_readings(candidates, body) == ["crossref", "llm"]
+
+
+def test_corroborating_readings_is_empty_unless_every_cited_label_agreed():
+    """The caller (`cli._refs_pipeline`) also gates on `all(... == "agreed"
+    ...)`, but this function must not rely on that: naming any reading at all
+    when one cited label is disputed would still be the overstatement."""
+    body = {"1", "2"}
+    candidates = {
+        "parsed": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
+        "llm": [_work("1", "10.1000/x1"), _work("2", "10.1000/x9")],
+    }
+    assert corroborating_readings(candidates, body) == []

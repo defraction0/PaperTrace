@@ -548,47 +548,85 @@ def _labels_disputed(manifest) -> Disclosure | None:
 
 
 def _reflist(manifest) -> Disclosure | None:
-    """The required disclosure for the model reading, in all three of its outcomes.
+    """The required disclosure for the model reading, across every real outcome.
 
-    Fires on a reading used, a reading discarded, and a reading asked for and not
-    obtained — never only on success, because silence about an attempt reads as
-    no news. The token is phrased AROUND in every branch, the way
-    `SUPPLEMENT_IDENTITY_TOKEN` is: it is asserted verbatim in all four formats,
-    so a branch where it is not literally true would make one format lie.
+    Fires on a reading used, a reading discarded, a reading asked for and not
+    obtained, and a reading asked for whose call did not return — never only
+    on success, because silence about an attempt reads as no news. The token
+    is phrased AROUND in every branch, the way `SUPPLEMENT_IDENTITY_TOKEN` is:
+    it is asserted verbatim in all four formats, so a branch where it is not
+    literally true would make one format lie.
 
-    Branches on `reflist_attempted`, never on whether `reflist_model` is set.
-    `claude -p` only reports a model name when its own JSON does — a reply
-    naming none is not evidence nothing was asked — so a call that happened,
-    verified cleanly and voted can still leave `reflist_model == ""`. Reading
-    that emptiness as "no reading was obtained" is precisely the state a real
-    run reached before `reflist_attempted` existed: one real call, nothing on
-    the console, the manifest asserting no such call was made.
+    Branches on `reflist_outcome` — one of `reflist.REFLIST_OUTCOMES`, never on
+    whether `reflist_model` is set and never on a single boolean. A boolean
+    cannot tell "never called" apart from "called and failed": that shape of
+    field once sent a failed call (`outcome` would have been `True` either
+    way) down the SAME prose as a successful one, because the failure's own
+    note did not happen to start with the one prefix that branch checked for —
+    a plausible-looking "N values … discarded" in place of an admission that
+    the call never returned at all. `claude -p` also only reports a model name
+    when its own JSON does — a reply naming none is not evidence nothing was
+    asked — so a call that happened, verified cleanly and voted can still
+    leave `reflist_model == ""`; that is a SEPARATE fact from `outcome` and is
+    handled by `named` below, never by conflating the two.
     """
+    outcome = getattr(manifest, "reflist_outcome", "") or ""
     model = getattr(manifest, "reflist_model", "") or ""
-    attempted = bool(getattr(manifest, "reflist_attempted", False))
+    failure = getattr(manifest, "reflist_failure", "") or ""
     notes = list(getattr(manifest, "reflist_fields_discarded", []) or [])
     # a different kind of finding, and it must reach the reader too: a reading
     # whose own labels do not add up is worth knowing about even when every
     # value it proposed was printed
     numbering = list(getattr(manifest, "reflist_numbering_findings", []) or [])
-    if not attempted and not notes:
-        return None  # no model reading was asked for
+    entries_proposed = int(getattr(manifest, "reflist_entries_proposed", 0) or 0)
+    if not outcome:
+        # An older manifest from before `reflist_outcome` existed. A reported
+        # model name is positive proof a call happened and answered — settle
+        # as "read". Absent that, a `failure` reason alone is enough to say
+        # SOMETHING was asked for even though which state it reached was never
+        # recorded; treat it as "not_attempted" rather than manufacture a
+        # third guess. Only the inverse ("no name and no reason -> no call")
+        # would be the forbidden derivation, and that is exactly the case
+        # below that returns `None`.
+        outcome = "read" if model else ("not_attempted" if failure else "")
+    if not outcome or (outcome == "not_attempted" and not failure):
+        # the second clause is the caller's own silent choice (`--no-llm-refs`,
+        # `--parse-only`): `outcome` is recorded as `"not_attempted"` either
+        # way, so `not outcome` alone cannot tell "nothing to report" apart
+        # from "asked for, and never happened" — only the absence of a reason
+        # can, the same distinction `_llm_reference_reading`'s `disabled_reason`
+        # makes when it decides whether to fill `failure` at all
+        return None  # no model reading was asked for, and nothing to report
     ceiling = (
         "A model agreeing with a parse is a second reading, not confirmation: it read "
         "the same document, so a reference the layout destroyed is one it may also "
         "have missed."
     )
     # named even when the reply itself did not — see this function's own
-    # docstring for why `model` alone cannot stand in for "this happened"
+    # docstring for why `model` alone cannot stand in for "this happened".
+    # Identical wording to `cli._refs_pipeline`'s console line for the same
+    # state, so the two surfaces never describe one call two different ways.
     named = model or "a model that did not report its own name"
-    if not attempted:
+    if outcome == "not_attempted":
         head = (
             f"This run asked that {REFLIST_TOKEN}, and no reading was obtained: "
-            f"{notes[0]}. The reference numbering therefore rests on the readings above "
+            f"{failure}. The reference numbering therefore rests on the readings above "
             f"it and nothing else."
         )
-        short = f"{REFLIST_TOKEN}: asked for, not obtained — {notes[0]}"
-        level = "warn"  # a failed attempt, not routine information
+        short = f"{REFLIST_TOKEN}: asked for, not obtained — {failure}"
+        level = "warn"  # a structural gap, not routine information
+    elif outcome == "failed":
+        # textually distinct from the branch above on purpose: this is a call
+        # that WAS made and did not return, never "no reading was obtained" —
+        # the two must not read as the same fact
+        head = (
+            f"This run asked that {REFLIST_TOKEN}, and the call did not return an "
+            f"answer: {failure}. Nothing it might have proposed reached the list "
+            f"below, and the reference numbering rests on the readings above this "
+            f"and nothing else."
+        )
+        short = f"{REFLIST_TOKEN}: the call failed — {failure}"
+        level = "warn"  # a call that did not return is not an aside
     elif any(n.startswith("reading discarded") for n in notes):
         why = next(n for n in notes if n.startswith("reading discarded"))
         head = (
@@ -598,12 +636,20 @@ def _reflist(manifest) -> Disclosure | None:
         short = f"{REFLIST_TOKEN} ({named}) — discarded as unusable"
         level = "info"
     else:
-        dropped = (
-            f"{len(notes)} value{'' if len(notes) == 1 else 's'} it proposed "
-            f"{'was' if len(notes) == 1 else 'were'} not found in the printed text and "
-            f"{'was' if len(notes) == 1 else 'were'} discarded"
-            if notes else "every value it proposed was found in the printed text"
-        )
+        if entries_proposed == 0:
+            # distinct from "every value it proposed was found" below: THAT
+            # sentence describes a reading that proposed something and none of
+            # it was dropped, which reads as a clean corroboration — a reply
+            # that proposed nothing at all corroborated nothing
+            dropped = "it proposed no entries at all"
+        elif notes:
+            dropped = (
+                f"{len(notes)} value{'' if len(notes) == 1 else 's'} it proposed "
+                f"{'was' if len(notes) == 1 else 'were'} not found in the printed text and "
+                f"{'was' if len(notes) == 1 else 'were'} discarded"
+            )
+        else:
+            dropped = "every value it proposed was found in the printed text"
         head = (
             f"Here {REFLIST_TOKEN} ({named}), shown two extractions of the same printed "
             f"bibliography and asked what numbered list it carries; {dropped}."

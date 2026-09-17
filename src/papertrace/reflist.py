@@ -146,17 +146,36 @@ class ReflistProvenance:
     numbering_findings: list[str] = field(default_factory=list)
     # non-empty means the whole reading was refused, and says why. It is never
     # "the model agreed": a reading that could not be checked is not a reading.
+    # ALWAYS set after a reply was actually obtained (`outcome == "read"`) —
+    # never before the call, and never for a call that did not return one.
     discarded_whole: str = ""
     readings: list[str] = field(default_factory=list)
-    # Whether `claude -p` was actually invoked — set the instant `propose`
-    # commits to the call, never derived from `model`. `ask._ask` records a
-    # model name only when the subprocess's own JSON reports one ("a reply
-    # that names no model is not evidence the model changed", `ask.py`), so a
-    # call that succeeded, verified cleanly and voted can still leave `model`
-    # `""`. A caller that read `model` as the proxy for "did this happen at
-    # all" would publish that vote as "no such call was made" — the exact
-    # state a real run reached before this field existed.
-    attempted: bool = False
+    # Three states, not a boolean paired with a string — a boolean asked to
+    # discriminate three outcomes (never called; called and failed; called and
+    # answered) sends a failed call down the same branch as a successful one
+    # whenever the failure happens to leave no name attached, which is exactly
+    # the regression a two-valued `attempted` produced. Set by `propose` to
+    # `"read"` only once a reply was actually obtained (never derived from
+    # `model`: `ask._ask` records a name only when the subprocess's own JSON
+    # reports one, so a call that answered and verified cleanly can still
+    # leave `model == ""`). Set by `_llm_reference_reading` to `"failed"` in
+    # its `except` branch. Left at the default for every case where no
+    # subprocess call was ever made — disabled, `--parse-only`, the backend
+    # leaving no second reading, or `claude` not on PATH.
+    outcome: str = "not_attempted"
+    # Why there is no reading, when `outcome` is not `"read"` — never a value
+    # that failed verification (that is `fields_discarded`'s job) and never a
+    # reading that was checked and refused (that is `discarded_whole`'s job,
+    # and requires a reply to have been checked at all). This is the one slot
+    # for "why is there nothing to show", whether nothing was ever attempted
+    # or an attempt was made and did not return.
+    failure: str = ""
+
+
+# published so a consumer has something to check membership against, and so a
+# future fifth branch of "why there is no reading" cannot be added as a bare
+# string nobody enumerated — the same discipline as `LABEL_AGREEMENT`
+REFLIST_OUTCOMES = ("not_attempted", "failed", "read")
 
 
 # order matters only for `raw` below, which is re-assembled in printed order
@@ -190,15 +209,16 @@ def propose(
     if len(readings) < 2:
         # one text is half the verification at full price, and no way to say so
         # in the report — a value found in the only reading available has been
-        # checked against nothing but itself
-        prov.discarded_whole = (
+        # checked against nothing but itself. `outcome` stays "not_attempted":
+        # no subprocess call happens on this path at all, so nothing was
+        # "checked and refused" (`discarded_whole`'s meaning) — the reason
+        # belongs in `failure`, the same slot a disabled or claude-absent call
+        # uses for "why there is no reading"
+        prov.failure = (
             "only one of the two extractions of the bibliography had any text, so "
             "nothing the model proposed could have been checked against a second reading"
         )
         return [], prov
-    # committed to the call from here on — everything past this point is a real
-    # attempt, whatever it returns
-    prov.attempted = True
 
     # labels before texts: a label is a short fixed string ("pymupdf",
     # "docling 2.8.0") and cannot contain a placeholder, while page text
@@ -215,6 +235,12 @@ def propose(
     # `ask._ask`, which only a qualified call sees.
     with ask.for_site(ask.SITE_REFS):
         raw = ask._ask(prompt, model)
+    # a reply was obtained — everything from here on describes what came back,
+    # never whether anything came back at all. If `ask._ask` raised instead,
+    # this line is never reached and `prov` (with `outcome` still at its
+    # "not_attempted" default) is never returned — `_llm_reference_reading`'s
+    # `except` builds a fresh one with `outcome="failed"` instead.
+    prov.outcome = "read"
     prov.model = ask.model_for(ask.SITE_REFS) or ""
 
     try:

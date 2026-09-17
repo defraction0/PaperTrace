@@ -594,21 +594,26 @@ class RefManifest:
     # never ran. Never set from a model's own say-so alone.
     numbering_choice: str = ""  # "" | withheld | llm_resolved | parsed | pymupdf
     numbering_chosen_by: str = ""  # "" | default | user
-    # Whether `refs` actually invoked a model to read the bibliography — set
-    # regardless of whether the reply named itself. False means the call was
-    # never made at all: --llm-refs was off, --parse-only forced it off, the
-    # backend left no second reading to compare against, claude was not on
-    # PATH, or the subprocess itself failed before any reply was verified.
-    # This is the field that distinguishes "no call happened" from "a call
-    # happened and voted, but the CLI did not learn its name" — `reflist_model`
-    # alone cannot, because `claude -p` only reports a model name when its own
-    # JSON does, and a reply naming none is not evidence nothing was asked.
-    reflist_attempted: bool = False
+    # Which of `reflist.REFLIST_OUTCOMES` this run's model reading reached.
+    # "" means NEVER COMPUTED — not "not_attempted" — the same three-state
+    # discipline as `numbering_ledger`; a manifest written before this field
+    # existed asserts nothing about whether a call was made. Once computed it
+    # is always one of the three real values: a boolean could not tell "never
+    # called" apart from "called and failed", which is exactly the shape of
+    # bug that produced a failed call published as a successful reading.
+    reflist_outcome: str = ""
+    # Why there is no reading, when `reflist_outcome` is not `"read"` — never
+    # a value that failed verification (`reflist_fields_discarded`'s job) and
+    # never a reading that was checked and refused whole
+    # (`reflist_fields_discarded`'s "reading discarded —" entries, which
+    # require a reply to have been obtained at all). "" when `reflist_outcome`
+    # is `"read"`, or when neither has ever been computed.
+    reflist_failure: str = ""
     # The model that produced the LLM's structured reading of the
     # bibliography, when --llm-refs ran, produced anything usable, AND the
     # subprocess's own reply reported a name. "" means EITHER no such call was
     # made OR one was made and answered but did not report which model —
-    # `reflist_attempted` is what tells those two apart; this field alone
+    # `reflist_outcome` is what tells those two apart; this field alone
     # cannot.
     reflist_model: str = ""
     # Which fields of the LLM's proposed reading could not be found verbatim
@@ -621,6 +626,12 @@ class RefManifest:
     # dropped. Empty means none found, which on a reading that produced no
     # entries is not the same as none present.
     reflist_numbering_findings: list[str] = field(default_factory=list)
+    # How many entries the model's reply proposed, before verification —
+    # ALWAYS recorded when `reflist_outcome == "read"`, including 0. Without
+    # this, "0 fields discarded" reads identically whether the model proposed
+    # nothing at all or proposed several entries that all verified cleanly,
+    # and the report cannot tell a reader which happened.
+    reflist_entries_proposed: int = 0
 
     def document(self, slug: str) -> Document | None:
         """The judgeable file this slug names, article or supplement, or None."""
@@ -704,10 +715,12 @@ class RefManifest:
             "labels_resolved": self.labels_resolved,
             "numbering_choice": self.numbering_choice,
             "numbering_chosen_by": self.numbering_chosen_by,
-            "reflist_attempted": self.reflist_attempted,
+            "reflist_outcome": self.reflist_outcome,
+            "reflist_failure": self.reflist_failure,
             "reflist_model": self.reflist_model,
             "reflist_fields_discarded": self.reflist_fields_discarded,
             "reflist_numbering_findings": self.reflist_numbering_findings,
+            "reflist_entries_proposed": self.reflist_entries_proposed,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -747,10 +760,12 @@ class RefManifest:
             labels_resolved=data.get("labels_resolved", []),
             numbering_choice=data.get("numbering_choice", ""),
             numbering_chosen_by=data.get("numbering_chosen_by", ""),
-            reflist_attempted=bool(data.get("reflist_attempted", False)),
+            reflist_outcome=data.get("reflist_outcome", ""),
+            reflist_failure=data.get("reflist_failure", ""),
             reflist_model=data.get("reflist_model", ""),
             reflist_fields_discarded=data.get("reflist_fields_discarded", []),
             reflist_numbering_findings=data.get("reflist_numbering_findings", []),
+            reflist_entries_proposed=data.get("reflist_entries_proposed", 0),
         )
 
 

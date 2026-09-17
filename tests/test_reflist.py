@@ -293,7 +293,10 @@ def test_an_empty_reading_makes_no_model_call_at_all(monkeypatch):
 
     assert calls == []
     assert entries == []
-    assert prov.discarded_whole
+    # not `discarded_whole`: no reply was ever obtained to check and refuse —
+    # the call never happened, which `failure` says and `outcome` confirms
+    assert prov.failure
+    assert prov.outcome == "not_attempted"
 
 
 def test_the_entry_level_seen_in_round_trips_through_the_manifest(tmp_path):
