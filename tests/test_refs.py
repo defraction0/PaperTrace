@@ -8,6 +8,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from papertrace import models  # noqa: E402
 from papertrace.models import RefEntry  # noqa: E402
 
 
@@ -546,6 +547,34 @@ def test_a_scanned_provided_pdf_is_not_reported_as_matched(tmp_path):
     assert "title check failed" in detail
 
 
+def test_a_reference_with_diacritics_verifies_against_its_own_first_page():
+    """The two sides of `found` have to be folded the same way.
+
+    `_title_tokens` folds (`Küstner` → `kustner`) and `found` is a substring
+    test, so a page that is only lowercased matches none of them. The old broken
+    tokeniser hid this by accident: it produced `stner`, and `"stner" in
+    "küstner"` is True. Measured on a page carrying the reference's own title
+    verbatim, folding the tokens alone turned `7/7 verified` into `2/9 mismatch`
+    — and `_accept` answers a mismatch by unlinking the downloaded PDF and
+    telling the reader the reference has a wrong or mistyped DOI. A correct
+    retrieval destroyed and the manuscript blamed for it, on every German,
+    Scandinavian, Polish, Turkish, Spanish and Portuguese reference.
+    """
+    from papertrace.refs import TITLE_VERIFIED, _title_check_text
+
+    raw = (
+        "Küstner T, Späth C, Bjørnsson B. Röntgenbefunde und Ösophagusmotilität "
+        "bei Achalasie. Radiologische Übersicht 2020;1:1-9."
+    )
+    page = (
+        "Röntgenbefunde und Ösophagusmotilität bei Achalasie\n"
+        "T. Küstner, C. Späth, B. Bjørnsson\n"
+        "Radiologische Übersicht 2020;1:1-9"
+    )
+    state, detail = _title_check_text(raw, page)
+    assert state == TITLE_VERIFIED, detail
+
+
 def test_the_provided_reason_says_which_of_the_three_happened(tmp_path):
     """The manifest reason is what a reader sees. It must distinguish verified
     from unverified-because-unreadable from an outright mismatch."""
@@ -934,3 +963,48 @@ def test_a_truncated_but_real_reference_is_still_searched(tmp_path):
 
     assert any("crossref" in u for u in asked), "a real reference was never looked up"
     assert e.doi == "10.1177/0363546512452714"
+
+
+def test_a_surname_with_an_umlaut_still_contributes_tokens():
+    """`_title_tokens` is `[a-z]{5,}`, so a diacritic splits a word or deletes
+    it. `Späth` and `Müller` contributed NOTHING, and this set is what
+    `titles_match`, `_same_work` and `_title_check_text` all compare — a
+    surname that vanished cannot agree with its own paper.
+
+    `_fold` existed in `refs.py` and was not used here. NFKD alone is not
+    enough: it leaves ß, ø, æ, đ, ł undecomposed.
+    """
+    assert "spath" in models._title_tokens("Späth C, Makowski MR")
+    assert "muller" in models._title_tokens("Müller H")
+    assert "cristobal" in models._title_tokens("Romero-Cristóbal M")
+    assert "kustner" in models._title_tokens("Küstner T")
+    assert "bjornsson" in models._title_tokens("Bjørnsson B")
+
+
+def test_folding_lowercases_before_it_transliterates():
+    """`_TRANSLITERATE` is keyed on lowercase letters only, so the order of the
+    two steps in `_fold` is load-bearing and was neither commented nor tested:
+    translating first leaves `Ø`, `Æ` and `Ł` to NFKD, which cannot decompose
+    them — they are distinct letters, not a base plus a mark — and the surname
+    loses them entirely. An uppercase initial letter is where a surname is most
+    likely to carry one."""
+    assert models._fold("Ø") == "o"
+    assert models._fold("Ærø") == "aero"
+    assert models._fold("Łukasiewicz") == "lukasiewicz"
+    assert models._fold("İNCE") == "ince"
+
+
+def test_folding_does_not_invent_or_merge_tokens():
+    """Gate 4, the other direction: an ASCII title must tokenise exactly as
+    before, and the stopword list must still bite after folding.
+
+    Note the stopword list holds `commun`, not `communications` — so
+    "Nature Communications" keeps a token. These four are all in the list.
+    """
+    assert models._title_tokens("Nature Science volume press") == set()
+    assert models._title_tokens("Robust segmentation of anatomic structures") == {
+        "robust",
+        "segmentation",
+        "anatomic",
+        "structures",
+    }

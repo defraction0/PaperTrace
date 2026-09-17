@@ -499,9 +499,28 @@ it is not "fixed" later.** `EXTRACT_PROMPT` asks for claims in reading order,
 which makes zipping claim *n* to occurrence *n* tempting. The order is
 unverified, and it degrades silently: one skipped claim shifts every later
 pairing by one and the audit emits confident, wrong attributions that are
-indistinguishable from correct ones. The tool matches text instead, with a
-margin, and refuses to answer when the margin is not met — `uncertain`, which
-is never counted as covered.
+indistinguishable from correct ones.
+
+Attribution is a **lookup, not a match**. `citation_occurrences()` builds the
+inventory *before* the model call, `_render_inventory()` renders it into
+`EXTRACT_PROMPT` as `ctx_NNNN`, and each claim comes back naming the ids it was
+taken from, resolved through the map built in that same pass. A `ctx` absent
+from the inventory is **dropped**, never repaired into "the first occurrence of
+that label". Since `coverage/3`, `uncertain` has exactly one cause — a claim
+cites a label and names none of that label's contexts, so a claim reached one of
+them and nothing can say which — and it is never counted as covered.
+
+The ids are not a licence to zip after all. The labels are *assigned* in reading
+order, but they are resolved through the mapping built with them, never by
+re-deriving position later; a consumer that pairs the *n*th ctx with the *n*th
+occurrence of a freshly recomputed list has rebuilt the bug.
+
+This section described a text-similarity mechanism until `coverage/3` deleted
+it — `_attribute_label`, `_normalize_for_match`, `_ratio`, `_location_matches`,
+`OCCURRENCE_MIN_RATIO`, `OCCURRENCE_MIN_MARGIN`, none of which survives in
+`src/`. Do not reintroduce a similarity fallback for an unresolvable `ctx`:
+that is the confident-wrong-pointer failure the redesign removed, and
+`uncertain` is the honest answer instead.
 
 **The occurrence figures are not `Rate`s.** Every `Rate` in an eval record
 names a population declared in the record's `populations` block, and that block

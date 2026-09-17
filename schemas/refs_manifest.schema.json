@@ -144,7 +144,7 @@
     },
     "numbering_verified": {
       "type": "boolean",
-      "description": "True when the chosen list accounts for exactly the labels the manuscript's body cites. The label is the join key between a claim and its source, so an unverified numbering means a verdict may be about a different paper than the label names. Absent on older manifests, which never checked."
+      "description": "True when the chosen list accounts for exactly the labels the manuscript's body cites AND no entry in it refuses its own label. The second condition is not redundant: a refused entry keeps a positional label, so the extent check is satisfied by exactly the labels in doubt. The label is the join key between a claim and its source, so an unverified numbering means a verdict may be about a different paper than the label names. Absent on older manifests, which never checked."
     },
     "numbering_note": {
       "type": "string",
@@ -157,6 +157,53 @@
       ],
       "minimum": 1,
       "description": "The first citation label from which the numbering is in doubt, or null when it is not in doubt. 1 means 'from the very start', which is what a single unchecked reading warrants: one candidate gives no evidence about where it went wrong."
+    },
+    "numbering_contested": {
+      "type": "boolean",
+      "description": "The two readings of the bibliography stop describing the same paper at or below a label the body cites, even though the chosen reading matched the body's labels — so the other reading either names a different work at an entry some verdict rests on, or ends before reaching it. NOT 'the other reading failed the extent check': a deposit identical for every cited label and longer by two references nobody cites fails that. Absent on manifests written before 0.7."
+    },
+    "numbering_ledger": {
+      "type": "object",
+      "description": "The labels the PARSED list carries, against the labels the body cites: which are duplicated, and which are carried by no entry. Always about the parsed list, even on a `reference_source: \"crossref\"` run where `entries` holds the deposit instead — which is exactly the case a reader inspects this for. Absent means never computed, not that nothing was dropped. Nothing is required: a reader must treat any key as possibly missing.",
+      "properties": {
+        "labels_detected": {
+          "type": "integer",
+          "description": "How many distinct bracketed numeric labels the body cites. Only that style can be read, so 0 means 'none readable', not 'none cited'."
+        },
+        "labels_max": {
+          "type": "integer",
+          "description": "The highest label the body cites. Under citation-order numbering the list should be exactly this long."
+        },
+        "labels_absent": {
+          "type": "array",
+          "description": "Labels from 1 to `labels_max` that the body never cites — a hole in the body's own citing, not in the parse.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "entries_parsed": {
+          "type": "integer",
+          "description": "How many entries the PDF parse produced."
+        },
+        "numerals_distinct": {
+          "type": "integer",
+          "description": "How many distinct labels those parsed entries carry. Lower than `entries_parsed` means at least one label is duplicated."
+        },
+        "numerals_duplicated": {
+          "type": "array",
+          "description": "Labels carried by more than one parsed entry. A difference of two totals cannot reveal a duplicate at all.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "numerals_absent": {
+          "type": "array",
+          "description": "Labels from 1 to `labels_max` carried by no parsed entry. Only visible where the printed numerals survived the converter: three of the four parse paths label by position, and a positional run has no gaps by construction.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "manuscript_supplements": {
       "type": "array",

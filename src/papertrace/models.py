@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -74,6 +75,47 @@ _TITLE_STOPWORDS = frozenset(
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
 
 
+# What NFKD cannot decompose, because these are distinct letters rather than a
+# base plus a combining mark. Without them `Weiß` folds to `wei` and `Bjørnsson`
+# to `bjrnsson` — a surname that changed, not one that normalised.
+_TRANSLITERATE = str.maketrans(
+    {
+        "ß": "ss",
+        "ø": "o",
+        "æ": "ae",
+        "œ": "oe",
+        "đ": "d",
+        "ð": "d",
+        "þ": "th",
+        "ł": "l",
+        "ı": "i",
+        "ħ": "h",
+        "ŧ": "t",
+    }
+)
+
+
+def _fold(text: str) -> str:
+    """Lowercase, transliterated, diacritics decomposed away — `İnce` → `ince`.
+
+    Lives here because five call sites across `models` and `refs` need it and
+    neither module may import the other — the same reason the shared title rules
+    below it live here. `_slug` deletes non-ASCII instead (`[^A-Za-z\\-]`), which
+    is why `İnce O` slugs `nce-2023` and `Müller` slugs `mller`. Folding is what
+    a name comparison needs.
+
+    **Both sides of any comparison must be folded.** `_title_tokens` folds, so a
+    haystack that is merely lowercased matches none of the folded tokens —
+    `kustner` is not in `küstner`, which deleted correct downloads and blamed
+    the manuscript for a mistyped DOI.
+    """
+    # lowercase BEFORE translate: `_TRANSLITERATE` is keyed on lowercase letters
+    # only, so reordering these two silently stops `Ø`, `Æ` and `Ł` folding
+    lowered = (text or "").lower().translate(_TRANSLITERATE)
+    decomposed = unicodedata.normalize("NFKD", lowered)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
 def _title_tokens(raw: str) -> set[str]:
     """The reference's own distinctive words — URLs removed first.
 
@@ -85,7 +127,9 @@ def _title_tokens(raw: str) -> set[str]:
     `publications` — words no first page will carry, so they dilute the ratio
     the check is measured on.
     """
-    return set(re.findall(r"[a-z]{5,}", _URL_RE.sub(" ", raw).lower())) - _TITLE_STOPWORDS
+    # folded, not merely lowercased: `[a-z]{5,}` over raw text drops `Späth`
+    # entirely and truncates `Cristóbal` to `crist`
+    return set(re.findall(r"[a-z]{5,}", _fold(_URL_RE.sub(" ", raw)))) - _TITLE_STOPWORDS
 
 
 # Four distinct words, not three. The observed false positive cleared the 0.35
@@ -519,6 +563,13 @@ class RefManifest:
     # candidate, because a single unchecked reading gives no evidence about
     # *where* it went wrong
     unverified_from: int | None = None
+    # A second reading stopped naming the same paper at or below a label the body
+    # cites, even though the chosen reading matched the body's labels. `_covers`
+    # tests extent, not content, so this is worth the reader's eye even when the
+    # count checks out — and a deposit that is merely longer is not it.
+    numbering_contested: bool = False
+    # Absent means never computed, NOT "nothing was dropped".
+    numbering_ledger: dict = field(default_factory=dict)
     # the AUDITED paper's own supplementary material. Not a RefEntry: it answers
     # for no citation label, and putting it in `entries` would inflate
     # `refs_total` and let `_slug_for_ref` hand it to a claim citing a number.
@@ -598,6 +649,8 @@ class RefManifest:
             "numbering_verified": self.numbering_verified,
             "numbering_note": self.numbering_note,
             "unverified_from": self.unverified_from,
+            "numbering_contested": self.numbering_contested,
+            "numbering_ledger": self.numbering_ledger,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -628,6 +681,8 @@ class RefManifest:
             numbering_verified=bool(data.get("numbering_verified", False)),
             numbering_note=data.get("numbering_note", ""),
             unverified_from=data.get("unverified_from"),
+            numbering_contested=bool(data.get("numbering_contested", False)),
+            numbering_ledger=data.get("numbering_ledger", {}),
         )
 
 
