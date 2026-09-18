@@ -670,6 +670,7 @@ def _reflist(manifest) -> Disclosure | None:
         # the alternative (falling through to the success branch below) would
         # assert the token as a reading that was taken and used, which is the
         # one claim an unrecognised state can least afford to make.
+        unknown = _resolution_clause(manifest)
         return Disclosure(
             key="reflist",
             level="warn",
@@ -677,8 +678,13 @@ def _reflist(manifest) -> Disclosure | None:
             text=(
                 f"This run recorded that {REFLIST_TOKEN}, with an outcome "
                 f"({outcome!r}) this build of papertrace does not recognise. "
-                "Treat the reference numbering as resting on the readings above this "
-                "and nothing else, the same as an outcome that was never obtained."
+                "Treat the reference numbering as resting on the readings above this"
+                + (
+                    ", the same as an outcome that was never obtained."
+                    if unknown else
+                    " and nothing else, the same as an outcome that was never obtained."
+                )
+                + unknown
             ),
             short=f"{REFLIST_TOKEN}: unrecognised outcome {outcome!r}",
         )
@@ -717,6 +723,12 @@ def _reflist(manifest) -> Disclosure | None:
     # Identical wording to `cli._refs_pipeline`'s console line for the same
     # state, so the two surfaces never describe one call two different ways.
     named = model or "a model that did not report its own name"
+    # "and nothing else" is a claim about what the numbering rests on, and it
+    # is FALSE on a run that also made the resolution call: that call
+    # substitutes an entry. Dropped where one happened, kept where none did —
+    # it is load-bearing there, and the sentence would otherwise contradict
+    # the clause appended two lines later, inside one paragraph.
+    only = "" if resolution else " and nothing else"
     if outcome == "not_attempted" and inferred:
         # `outcome` here is a GUESS (see the `elif failure:` branch above), so
         # the sentence says what is recorded and no more. "no reading was
@@ -725,8 +737,7 @@ def _reflist(manifest) -> Disclosure | None:
         head = (
             f"This run asked that {REFLIST_TOKEN}, and this manifest does not record "
             f"what came of it: {failure}. Nothing from such a reading reached the list "
-            "below, so the reference numbering rests on the readings above this and "
-            "nothing else."
+            f"below, so the reference numbering rests on the readings above this{only}."
         )
         short = f"{REFLIST_TOKEN}: asked for, outcome never recorded — {failure}"
         level = "warn"
@@ -734,7 +745,7 @@ def _reflist(manifest) -> Disclosure | None:
         head = (
             f"This run asked that {REFLIST_TOKEN}, and no reading was obtained: "
             f"{failure}. The reference numbering therefore rests on the readings above "
-            f"it and nothing else."
+            f"it{only}."
         )
         short = f"{REFLIST_TOKEN}: asked for, not obtained — {failure}"
         level = "warn"  # a structural gap, not routine information
@@ -745,8 +756,7 @@ def _reflist(manifest) -> Disclosure | None:
         head = (
             f"This run asked that {REFLIST_TOKEN}, and the call did not return an "
             f"answer: {failure}. Nothing it might have proposed reached the list "
-            f"below, and the reference numbering rests on the readings above this "
-            f"and nothing else."
+            f"below, and the reference numbering rests on the readings above this{only}."
         )
         short = f"{REFLIST_TOKEN}: the call failed — {failure}"
         level = "warn"  # a call that did not return is not an aside
@@ -1355,6 +1365,26 @@ def _was_obtained(manifest, label: str) -> bool:
     return bool(e and e.status in ("retrieved", "provided") and e.slug)
 
 
+def _also_resolved(resolved: list[str]) -> str:
+    """The sentence a claim owes about a label that WAS settled, or "".
+
+    A claim can cite a label still in dispute and one a resolution was
+    accepted for. The dispute keeps the token and the level — it is the more
+    urgent finding — but a reader who stops there must not be left thinking
+    every citation on this claim shares the same fate (m6 of the Task 7
+    review): the other label's verdict rests on a resolution, which is a
+    different caveat and still a live one. One producer, because BOTH dispute
+    states owe it and the second one was added later.
+    """
+    if not resolved:
+        return ""
+    return (
+        f" This claim also cites {_label_group(resolved)}, where the readings did not "
+        "agree either but a resolution was accepted for it — see that label's own "
+        "reason in the retrieval manifest."
+    )
+
+
 def _claim_pairing(claim, manifest=None) -> Disclosure | None:
     """Which pairing state this claim's cited labels are in, if not a clean one.
 
@@ -1410,18 +1440,7 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
                 "not agree either and the source was never retrieved, so nothing was "
                 "judged under that label at all."
             )
-        if resolved:
-            # This claim cites BOTH a still-disputed label and one that WAS
-            # resolved — the withheld state is the more urgent finding and
-            # keeps the token/level, but a reader who stops here must not be
-            # left thinking every citation on this claim shares the same fate
-            # (m6 of the Task 7 review): the other label's verdict rests on a
-            # resolution, not a withholding, and that is a different caveat.
-            text += (
-                f" This claim also cites {_label_group(resolved)}, where the readings "
-                "disagreed too but a resolution was accepted for it — see that label's "
-                "own reason in the retrieval manifest."
-            )
+        text += _also_resolved(resolved)
         return Disclosure(
             key="claim_pairing",
             level="warn",
@@ -1448,6 +1467,7 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
                 "retrieved either, so nothing was judged under "
                 f"{'that label' if one else 'those labels'} in either direction. The "
                 "disagreement is recorded, not resolved."
+                + _also_resolved(resolved)
             ),
             short=f"{labels} {CLAIM_PAIRING_UNRETRIEVED_TOKEN}",
         )

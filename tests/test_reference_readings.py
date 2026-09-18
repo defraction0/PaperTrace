@@ -1599,3 +1599,41 @@ def test_a_mid_branch_manifest_with_a_model_name_still_settles_as_read(tmp_path)
     assert len(fired) == 1, fired
     assert "claude-opus-5" in fired[0].text
     assert "does not record what came of it" not in fired[0].text
+
+
+def test_a_run_with_a_resolution_never_says_the_numbering_rests_on_nothing_else():
+    """Found by enumerating the states rather than the branches: the
+    not-obtained and failed heads end "the reference numbering rests on the
+    readings above it and nothing else", which the appended resolution
+    sentence then contradicts in the same paragraph — a resolution
+    substitutes an entry, so it is precisely something else the numbering
+    rests on."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    for reflist_state in (
+        dict(reflist_outcome="not_attempted", reflist_failure="backend is pymupdf"),
+        dict(reflist_outcome="failed", reflist_failure="RuntimeError: timed out"),
+        dict(reflist_outcome="wat"),
+    ):
+        manifest = _resolved_manifest(**reflist_state)
+        fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+                 if d.key == "reflist"]
+        assert len(fired) == 1, (reflist_state, fired)
+        assert "nothing else" not in fired[0].text, reflist_state
+        assert "claude-opus-5" in fired[0].text, reflist_state
+
+
+def test_a_run_with_no_resolution_keeps_the_nothing_else_claim():
+    """The other side: without a resolution the claim is true and load-bearing
+    — it is what tells a reader the numbering rests on the deterministic
+    readings alone."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = RefManifest(manuscript="p.pdf", reflist_outcome="failed",
+                           reflist_failure="RuntimeError: timed out")
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+    assert len(fired) == 1, fired
+    assert "nothing else" in fired[0].text

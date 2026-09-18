@@ -348,3 +348,22 @@ def test_any_iterable_of_labels_withholds_every_claim_not_just_the_first(tmp_pat
 
     assert [c.verdict for c in claims] == ["unchecked", "unchecked"]
     assert [c.withheld_refs for c in claims] == [["6"], ["6"]]
+
+
+def test_a_claim_citing_an_unretrieved_disputed_label_and_a_resolved_one_names_both():
+    """The new fifth state must not swallow the resolved caveat the withheld
+    state already carries: a verdict resting on an accepted resolution is a
+    different, and still live, caveat."""
+    from papertrace.disclosures import _claim_pairing
+
+    manifest = _manifest(_entry("6", "six-2019", status="paywalled"))
+    manifest.labels_disputed = ["6"]
+    manifest.labels_resolved = ["7"]
+    manifest.numbering_choice = "llm_resolved"
+    claim = ClaimResult(id=1, claim="x", location="Results", refs=["6", "7"])
+
+    d = _claim_pairing(claim, manifest)
+
+    assert d is not None
+    assert "never retrieved" in d.text
+    assert "[7]" in d.text
