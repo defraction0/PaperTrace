@@ -234,12 +234,12 @@
       }
     },
     "numbering_corroborated": {
-      "type": "boolean",
-      "description": "True when every label the manuscript cites was agreed by two or more independent readings of the bibliography. A second, independent axis from `numbering_verified`, which is about matching the body's labels, not about readings agreeing with each other — a manifest can be verified and uncorroborated, or corroborated and unverified. Absent means never computed, not 'not corroborated'."
+      "type": ["boolean", "null"],
+      "description": "True when every label the manuscript cites was agreed by two or more independent readings of the bibliography, false when that was measured and did not hold. A second, independent axis from `numbering_verified`, which is about matching the body's labels, not about readings agreeing with each other — a manifest can be verified and uncorroborated, or corroborated and unverified. `null` or absent means NEVER COMPUTED, and is not the same as `false`: as a plain boolean this field could not express the third state its own description claimed, so every consumer had to stay silent on `false` to avoid asserting a measurement nobody made."
     },
     "corroborating_readings": {
       "type": "array",
-      "description": "Which named readings (e.g. 'parsed', 'pymupdf', 'llm') fed `numbering_corroborated`, named rather than merely counted. Absent means never computed.",
+      "description": "Which named readings (e.g. 'parsed', 'pymupdf', 'crossref') fed `numbering_corroborated`, named rather than merely counted. Never includes a DERIVED reading: the model reading copies its values out of the extractions that vote here in their own right, so naming it would print two agreeing readings over one text read twice. Absent means never computed.",
       "items": {
         "type": "string"
       }
@@ -308,6 +308,30 @@
     "reflist_entries_proposed": {
       "type": ["integer", "null"],
       "description": "How many entries the model's reply proposed, before verification, whenever `reflist_outcome` is 'read' — including 0. `null` (or absent) means NEVER RECORDED — either no reading happened, or this manifest was written before this field existed — and is NOT the same as `0`, which means a reading happened and measured zero proposed entries. A manifest that recorded `reflist_model` or `reflist_fields_discarded` without this field is exactly the case `null` exists for: without the distinction, a model that proposed nothing was told apart from one whose count was simply never recorded, which this field alone can settle."
+    },
+    "resolution_outcome": {
+      "type": "string",
+      "description": "Which of `reflist.REFLIST_OUTCOMES` the RESOLUTION call reached — the second model call this feature can make, asked by a person to settle the labels in `labels_disputed`. A separate fact from `reflist_outcome`, which describes the call that reads the whole list: a run can make either, both or neither, and on a pymupdf-backend run the first is never attempted while the second still can be. Absent or '' means NEVER COMPUTED — not 'not_attempted'."
+    },
+    "resolution_failure": {
+      "type": "string",
+      "description": "Why the resolution call produced nothing, when `resolution_outcome` is 'failed'. '' when it answered, or when no such call was ever made — `resolution_outcome` is what tells those apart. Absent means never computed."
+    },
+    "resolution_model": {
+      "type": "string",
+      "description": "The model that answered the resolution call, when the subprocess's own reply reported a name. '' means EITHER no such call was made OR one was made and answered without naming a model; `resolution_outcome` is what distinguishes them. Absent means never computed."
+    },
+    "resolution_fields_discarded": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Which fields of the resolution reply were not found verbatim in the printed text(s) the call was shown, and were discarded rather than trusted. Absent, or an empty array on a manifest whose `resolution_outcome` is '', means never computed — NOT 'nothing was discarded'.",
+      "default": []
+    },
+    "resolution_readings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Which printed extractions of the bibliography the resolution call was actually SHOWN, by reading name — not which readings disagreed. The report names these instead of asserting the call saw 'both texts', which is false on any run with one printed extraction. Absent or empty means never recorded.",
+      "default": []
     }
   }
 }

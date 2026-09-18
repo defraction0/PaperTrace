@@ -581,3 +581,97 @@ def test_no_labels_makes_no_model_call_at_all(monkeypatch):
     assert calls == []
     assert res.resolved == {}
     assert res.still_disputed == []
+
+
+# --- whole-branch review, Critical 2 and minor 7 ---------------------------
+
+
+def test_the_resolution_prompt_shows_what_each_reading_says_at_the_label(monkeypatch):
+    """Critical 2. The disagreement being adjudicated has to be IN the prompt,
+    including the readings with no printed span of their own — the deposit and
+    the model's reading, which are exactly the ones a dispute is often with."""
+    from papertrace.models import RefEntry
+
+    calls = _resolve_reply(monkeypatch, json.dumps([{"num": "6", "cannot_tell": True}]))
+    reflist.resolve_disputed(
+        ["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B),
+        disputing={"crossref": [RefEntry(num="6", raw="Deposited: a third paper entirely")]},
+    )
+
+    prompt = calls[0]["prompt"]
+    assert "Deposited: a third paper entirely" in prompt
+    assert "crossref" in prompt
+
+
+def test_a_value_printed_only_in_the_disputing_entry_is_still_discarded(monkeypatch):
+    """The context block is context. Widening verification to it would let a
+    title the deposit carries and the page does not be believed — which is the
+    whole permission structure of this module inverted."""
+    from papertrace.models import RefEntry
+
+    _resolve_reply(monkeypatch, json.dumps([{"num": "6", "title": "A third paper entirely"}]))
+    res = reflist.resolve_disputed(
+        ["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B),
+        disputing={"crossref": [RefEntry(num="6", raw="Deposited: A third paper entirely")]},
+    )
+
+    assert res.resolved == {}
+    assert res.still_disputed == ["6"]
+    assert "[6].title" in res.provenance.fields_discarded
+
+
+def test_one_printed_extraction_renders_one_block_not_an_empty_second(monkeypatch):
+    calls = _resolve_reply(monkeypatch, json.dumps([{"num": "6", "cannot_tell": True}]))
+    reflist.resolve_disputed(["6"], ("pymupdf",), (_RESOLVE_A,))
+
+    prompt = calls[0]["prompt"]
+    assert "READING A (pymupdf)" in prompt
+    assert "READING B" not in prompt
+
+
+def test_a_reply_repeating_a_numeral_is_counted_once_per_object(monkeypatch):
+    """Minor 5. `entries_proposed` was measured after de-duplication, so a
+    reply with two objects for [6] — the malformed shape a reader most needs
+    to know about — was recorded as one proposed entry. `propose` counts
+    before de-duplication; so does this now."""
+    _resolve_reply(monkeypatch, json.dumps([
+        {"num": "6", "cannot_tell": True},
+        {"num": "6", "cannot_tell": True},
+    ]))
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+
+    assert res.provenance.entries_proposed == 2
+
+
+def test_an_oversized_bibliography_is_refused_before_the_call_not_after(monkeypatch):
+    """Minor 7. Both extractions were interpolated whole, with no limit and no
+    truncation record — the one model input in this codebase that could
+    plausibly exceed a context window. Refused rather than clipped: a clipped
+    reading proposes a list missing the entries past the cut, and nothing in
+    the provenance could say which. A refusal costs nothing and states itself.
+    """
+    calls = _reply(monkeypatch, "[]")
+    big = "6. A reference. 2020.\n" * (reflist.REFLIST_CHAR_LIMIT // 10)
+
+    entries, prov = reflist.propose(big, big, label_a="docling 2.8.0", label_b="pymupdf")
+
+    assert calls == []
+    assert entries == []
+    assert prov.outcome == "not_attempted"
+    assert "too long" in prov.failure
+
+
+def test_an_oversized_resolution_input_leaves_every_label_disputed(monkeypatch):
+    """The same guard on the other call, and the state it must leave behind:
+    every label exactly where it was, with a reason that is not "the model
+    could not tell" — nothing was asked."""
+    calls = _resolve_reply(monkeypatch, "[]")
+    big = "6. A reference. 2020.\n" * (reflist.REFLIST_CHAR_LIMIT // 10)
+
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (big, big))
+
+    assert calls == []
+    assert res.resolved == {}
+    assert res.still_disputed == ["6"]
+    assert res.provenance.outcome == "not_attempted"
+    assert "too long" in res.provenance.failure

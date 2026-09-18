@@ -171,7 +171,7 @@ def test_the_default_answer_asks_the_model_and_records_the_user_as_choosing(
     resolved_entry = _entry("2", "Beta B. Second paper. 2021. doi:10.1000/beta")
     monkeypatch.setattr(
         reflist_mod, "resolve_disputed",
-        lambda labels, cands, texts, model=None: reflist_mod.Resolution(
+        lambda labels, cands, texts, disputing=None, model=None: reflist_mod.Resolution(
             resolved={"2": resolved_entry}, still_disputed=[],
             provenance=reflist_mod.ReflistProvenance(model="claude-opus-5", outcome="read"),
         ),
@@ -380,9 +380,9 @@ def test_a_resolved_label_judges_against_the_resolved_entry(tmp_path, monkeypatc
                             "https://doi.org/10.1148/x13")
     monkeypatch.setattr(
         reflist_mod, "resolve_disputed",
-        lambda labels, cands, texts, model=None: reflist_mod.Resolution(
+        lambda labels, cands, texts, disputing=None, model=None: reflist_mod.Resolution(
             resolved={"13": resolved}, still_disputed=[],
-            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5"),
+            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5", outcome="read"),
         ),
     )
 
@@ -500,8 +500,12 @@ def test_option_3_is_never_offered_when_nothing_qualifies(tmp_path, monkeypatch)
     monkeypatch.setattr(cli.Prompt, "ask", staticmethod(ask))
     monkeypatch.setattr(
         reflist_mod, "resolve_disputed",
-        lambda labels, names, texts, model=None: reflist_mod.Resolution(
-            still_disputed=list(labels), provenance=reflist_mod.ReflistProvenance(),
+        lambda labels, names, texts, disputing=None, model=None: reflist_mod.Resolution(
+            still_disputed=list(labels),
+            # a double must satisfy the SHAPE its consumer reads: a Resolution
+            # that came back from a real call records `outcome="read"`, and
+            # `_escalate_disputed` now branches on it
+            provenance=reflist_mod.ReflistProvenance(outcome="read"),
         ),
     )
     dup_a = _entry("2", "Alpha A. First. 2020.")
@@ -533,9 +537,9 @@ def test_a_resolved_label_absent_from_entries_stays_disputed(tmp_path, monkeypat
     real = _entry("2", "Beta B. The real one resolved. 2021.")
     monkeypatch.setattr(
         reflist_mod, "resolve_disputed",
-        lambda labels, names, texts, model=None: reflist_mod.Resolution(
+        lambda labels, names, texts, disputing=None, model=None: reflist_mod.Resolution(
             resolved={"2": real, "99": orphan}, still_disputed=[],
-            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5"),
+            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5", outcome="read"),
         ),
     )
     chosen = _entry("2", "Beta B. Original. 2021.")
@@ -556,11 +560,11 @@ def test_the_console_names_the_real_reason_a_label_stayed_disputed(tmp_path, mon
     three is a plausible-looking cause standing in for the honest one."""
     monkeypatch.setattr(cli, "_interactive", lambda: True)
     monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
-    prov = reflist_mod.ReflistProvenance(model="claude-opus-5")
+    prov = reflist_mod.ReflistProvenance(model="claude-opus-5", outcome="read")
     prov.fields_discarded.append("[9].title")
     monkeypatch.setattr(
         reflist_mod, "resolve_disputed",
-        lambda labels, names, texts, model=None: reflist_mod.Resolution(
+        lambda labels, names, texts, disputing=None, model=None: reflist_mod.Resolution(
             still_disputed=["9"], provenance=prov,
         ),
     )
@@ -612,9 +616,9 @@ def test_a_resolved_entrys_slug_collision_is_disambiguated(tmp_path, monkeypatch
     resolved_same_slug = _entry("2", "Smith J. The resolved paper. 2020.")
     monkeypatch.setattr(
         reflist_mod, "resolve_disputed",
-        lambda labels, names, texts, model=None: reflist_mod.Resolution(
+        lambda labels, names, texts, disputing=None, model=None: reflist_mod.Resolution(
             resolved={"2": resolved_same_slug}, still_disputed=[],
-            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5"),
+            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5", outcome="read"),
         ),
     )
     rec = _rec(labels_disputed=["2"])
@@ -624,3 +628,233 @@ def test_a_resolved_entrys_slug_collision_is_disambiguated(tmp_path, monkeypatch
     )
     slugs = [e.slug for e in out]
     assert len(slugs) == len(set(slugs)), f"colliding slugs would share a download path: {slugs}"
+
+
+# --- whole-branch review, Critical 2: the call sees what the report says it saw
+
+
+REFS_TEXT = (
+    "References\n"
+    "[1] Alpha A. First paper. 2020.\n"
+    "[2] Beta B. Second paper. 2021.\n"
+)
+
+
+def _capture_ask(monkeypatch, reply: str) -> dict:
+    """Intercept the one seam `resolve_disputed` calls, and keep the prompt."""
+    import papertrace.ask as ask_mod
+
+    seen: dict = {}
+
+    def fake_ask(prompt, model=None):
+        seen["prompt"] = prompt
+        return reply
+
+    monkeypatch.setattr(ask_mod, "_ask", fake_ask)
+    monkeypatch.setattr(ask_mod, "model_for", lambda site: "claude-opus-5")
+    return seen
+
+
+def test_the_resolution_call_is_shown_the_reading_it_is_ruling_against(tmp_path, monkeypatch):
+    """Critical 2. `reading_texts` holds only the readings with a printed
+    span, so a dispute between the parse and the DEPOSIT — the case this
+    whole feature was built for — was handed to a model that had never seen
+    the deposit's entry, while `rec.note` and the per-claim disclosure both
+    said it was shown both.
+
+    The disputing entries travel as CONTEXT, not as a text to copy from:
+    `_found` still verifies every returned value against the printed
+    extraction alone, so a title the deposit carries and the page does not
+    still cannot be believed."""
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
+    seen = _capture_ask(monkeypatch, json.dumps([{"num": "2", "title": "Second paper"}]))
+    parsed = [_entry("1", "Alpha A. First paper. 2020."),
+              _entry("2", "Beta B. Second paper. 2021.")]
+    deposit = [_entry("2", "Gamma G. A wholly different paper. 2019.")]
+    rec = _rec(labels_disputed=["2"])
+
+    cli._escalate_disputed(
+        tmp_path, rec, parsed,
+        {"parsed": parsed, "crossref": deposit},
+        {"parsed": REFS_TEXT},
+    )
+
+    assert "Gamma G. A wholly different paper" in seen["prompt"], seen["prompt"]
+    assert "crossref" in seen["prompt"]
+
+
+def test_one_printed_extraction_is_never_rendered_as_an_empty_second_reading(
+    tmp_path, monkeypatch
+):
+    """`--backend pymupdf` leaves exactly one printed span, and the prompt
+    rendered `--- READING B ---` followed by nothing — telling the model an
+    extraction existed and was empty. `propose` refuses outright on fewer
+    than two texts; this call cannot, because the printed page is still the
+    only authority it needs, so it says how many it has instead."""
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
+    seen = _capture_ask(monkeypatch, json.dumps([{"num": "2", "title": "Second paper"}]))
+    parsed = [_entry("2", "Beta B. Second paper. 2021.")]
+    rec = _rec(labels_disputed=["2"])
+
+    cli._escalate_disputed(
+        tmp_path, rec, parsed, {"parsed": parsed}, {"parsed": REFS_TEXT},
+    )
+
+    prompt = seen["prompt"]
+    assert "READING B" not in prompt, prompt
+    assert "one extraction" in prompt
+
+
+def test_the_note_names_the_readings_the_model_was_actually_shown(tmp_path, monkeypatch):
+    """The other half of Critical 2: the report said "a model reading of both
+    texts" on a run where the model saw one. It names them now."""
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
+    _capture_ask(monkeypatch, json.dumps([{"num": "2", "title": "Second paper"}]))
+    parsed = [_entry("2", "Beta B. Second paper. 2021.")]
+    rec = _rec(labels_disputed=["2"])
+
+    cli._escalate_disputed(
+        tmp_path, rec, parsed, {"parsed": parsed}, {"parsed": REFS_TEXT},
+    )
+
+    assert "both texts" not in rec.note
+    assert "the parsed extraction" in rec.note
+
+
+# --- whole-branch review, Major 4: the resolution call's own provenance
+
+
+def test_the_resolution_calls_provenance_reaches_the_manifest(disputed, monkeypatch):
+    """Major 4. A model call was made, paid for, verified field by field and
+    allowed to change which papers are judged — and its model name, outcome
+    and discarded fields existed nowhere structured, only inside a prose
+    note. Meanwhile the `reflist_*` fields, which describe a DIFFERENT call,
+    recorded that no model read the reference list at all."""
+    import jsonschema
+
+    pdf, case, answers = disputed
+    answers.append("1")
+    _capture_ask(monkeypatch, json.dumps([{"num": "2", "title": "Second paper"}]))
+
+    manifest = _run_refs(pdf, case)
+
+    assert manifest.resolution_outcome == "read"
+    assert manifest.resolution_model == "claude-opus-5"
+    assert manifest.resolution_readings == ["parsed", "pymupdf"]
+    assert manifest.resolution_failure == ""
+    # and it is a published field, not a local convenience
+    schema = json.loads(
+        (Path(__file__).resolve().parent.parent / "schemas" / "refs_manifest.schema.json")
+        .read_text()
+    )
+    payload = json.loads((case / "refs_manifest.json").read_text())
+    jsonschema.Draft202012Validator(schema).validate(payload)
+    assert payload["resolution_outcome"] == "read"
+
+
+def test_a_resolution_call_that_did_not_return_is_recorded_as_one_that_happened(
+    disputed, monkeypatch
+):
+    """The third state, which a boolean could not hold: the call was made and
+    raised. `resolution_outcome` says `failed` and carries why, so the run is
+    never described as one where no model was asked."""
+    pdf, case, answers = disputed
+    answers.append("1")
+
+    def boom(*a, **k):
+        raise RuntimeError("claude -p timed out after 600s")
+
+    monkeypatch.setattr(reflist_mod, "resolve_disputed", boom)
+
+    manifest = _run_refs(pdf, case)
+
+    assert manifest.resolution_outcome == "failed"
+    assert "timed out" in manifest.resolution_failure
+    assert manifest.resolution_model == ""
+
+
+def test_a_manifest_with_no_resolution_call_says_nothing_about_one(disputed):
+    """"" everywhere, and `[]` for the readings — never computed, which is
+    what a run that never escalated actually knows."""
+    pdf, case, answers = disputed
+    answers.append("2")
+
+    manifest = _run_refs(pdf, case)
+
+    assert manifest.resolution_outcome == ""
+    assert manifest.resolution_model == ""
+    assert manifest.resolution_readings == []
+    assert manifest.resolution_fields_discarded == []
+
+
+# --- whole-branch review, minors 2 and 3
+
+
+def test_seen_in_survives_a_whole_reading_substitution(disputed):
+    """Minor 2. `stamp_seen_in` ran before the escalation, and option 3
+    replaces every entry with one from a reading that was never stamped — so
+    the manifest published `seen_in: []`, which the schema reads as "no
+    reading was established as carrying this", for a run that established
+    it."""
+    pdf, case, answers = disputed
+    answers += ["3", "pymupdf"]
+
+    manifest = _run_refs(pdf, case)
+
+    assert manifest.numbering_choice == "pymupdf"
+    assert all(e.seen_in for e in manifest.entries), [e.seen_in for e in manifest.entries]
+
+
+def test_adopting_a_reading_whole_is_described_as_adopting_it_whole(disputed):
+    """Minor 3. Option 3 returns `list(candidates[pick])` — every entry, not
+    only the disputed ones — while the note said "you chose X for the 1 label
+    in dispute"."""
+    pdf, case, answers = disputed
+    answers += ["3", "pymupdf"]
+
+    manifest = _run_refs(pdf, case)
+
+    assert "whole" in manifest.numbering_note
+    assert manifest.numbering_note.startswith("you chose")
+
+
+def test_a_resolution_call_that_was_never_made_is_not_a_model_that_could_not_tell(
+    tmp_path, monkeypatch, capsys
+):
+    """`resolve_disputed` can decline before spending anything — the two
+    extractions are too long to send. Every label stays disputed, and the
+    console must not print `_disputed_reason`'s "the model could not tell
+    which paper it names" over a call nobody made: that is a plausible-looking
+    cause standing in for the honest one, which is the failure this codebase
+    exists to refuse."""
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
+    monkeypatch.setattr(
+        reflist_mod, "resolve_disputed",
+        lambda labels, names, texts, disputing=None, model=None: reflist_mod.Resolution(
+            still_disputed=list(labels),
+            provenance=reflist_mod.ReflistProvenance(
+                readings=list(names),
+                failure="the extractions of the bibliography are too long to send",
+            ),
+        ),
+    )
+    two = _entry("2", "Beta B. Second paper. 2021.")
+    rec = _rec(labels_disputed=["2"], note="a note")
+    capsys.readouterr()
+
+    cli._escalate_disputed(tmp_path, rec, [two], {"parsed": [two]}, {"parsed": REFS_TEXT})
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert "could not tell" not in out
+    assert "too long to send" in out
+    assert rec.labels_disputed == ["2"]
+    assert rec.labels_resolved == []
+    assert rec.choice == "withheld"
+    assert rec.resolution_outcome == "not_attempted"
+    assert "too long to send" in rec.resolution_failure
+    # and the note must not claim a reading that never happened
+    assert "verified verbatim" not in rec.note

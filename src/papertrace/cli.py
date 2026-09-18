@@ -788,6 +788,7 @@ def _escalate_disputed(
     under a report line saying a person accepted it: the original wrong-paper
     bug, reached through the one path a human authorised.
     """
+    from .disclosures import _readings_phrase  # one wording for the report and the note
     from .refs import _label_list, _unique_slugs  # top-level in `refs.py`; not visible from
     # `_refs_pipeline`'s own local import, since this is a different function's frame
 
@@ -877,10 +878,15 @@ def _escalate_disputed(
         rec.unverified_from = None
         rec.ledger = {}
         rec.source = pick
+        # says what actually happened: `list(candidates[pick])` replaces EVERY
+        # entry, not only the disputed ones, so "you chose X for the 1 label in
+        # dispute" understated the change — `verified`, `contested` and
+        # `ledger` are cleared above for exactly that reason
         rec.note = (
-            f"you chose {_READING_LABEL.get(pick, pick)} for the {n} label"
-            f"{'' if n == 1 else 's'} in dispute. That is your reading, not a check of "
-            "it — neither its content nor its extent has been confirmed"
+            f"you chose {_READING_LABEL.get(pick, pick)} and it was adopted whole — "
+            f"every entry, not only the {n} label{'' if n == 1 else 's'} in dispute. "
+            "That is your reading, not a check of it — neither its content nor its "
+            "extent has been confirmed"
         )
         return list(candidates[pick])
 
@@ -891,7 +897,20 @@ def _escalate_disputed(
     # which can hold readings (crossref, llm) never shown to this call at all.
     names = tuple(sorted(texts))
     try:
-        res = resolve_disputed(labels, names, tuple(texts[k] for k in names), model=model)
+        res = resolve_disputed(
+            labels, names, tuple(texts[k] for k in names),
+            # what the dispute is BETWEEN, including the readings with no
+            # printed span of their own. Without it the call adjudicated a
+            # parse-versus-deposit disagreement having seen only the parse,
+            # while the note and the per-claim disclosure both said it was
+            # shown both. Context only — `reflist._found` still verifies
+            # every returned value against the printed text alone.
+            disputing={
+                name: [e for e in cand if e.num in set(labels)]
+                for name, cand in candidates.items()
+            },
+            model=model,
+        )
     except Exception as e:
         # The broad except IS the point: the refs stage has already done
         # useful work and must not go down with a failed subprocess call.
@@ -908,9 +927,39 @@ def _escalate_disputed(
             f"{type(e).__name__}: {str(e)[:200]}[/yellow]"
         )
         rec.choice, rec.chosen_by = "withheld", "user"
+        # a call that was made and did not return is the third outcome, and it
+        # is persisted: without it the manifest's only record of this call is
+        # free prose, and the `reflist_*` fields — which describe a different
+        # call entirely — say no model was asked to read the list at all
+        rec.resolution_outcome = "failed"
+        rec.resolution_failure = f"{type(e).__name__}: {str(e)[:200]}"
+        rec.resolution_readings = list(names)
         rec.note += (
             f"; asked a model to resolve the {n} disputed label{'' if n == 1 else 's'} and "
             "the call failed, so they remain withheld"
+        )
+        return entries
+
+    if res.provenance.outcome != "read":
+        # `resolve_disputed` declined before spending anything — the two
+        # extractions are too long to send in one call. No reply exists, so
+        # none of the reporting below applies: `_disputed_reason` would print
+        # "the model could not tell which paper it names" over a model that
+        # was never asked, and the note would credit a reading verified
+        # verbatim against a text nobody sent. Same shape as the `except`
+        # above, and recorded the same way.
+        console.print(
+            f"[yellow]⚠ the model was not asked to resolve the disputed label"
+            f"{'' if n == 1 else 's'} — {res.provenance.failure}[/yellow]"
+        )
+        rec.choice, rec.chosen_by = "withheld", "user"
+        rec.resolution_outcome = res.provenance.outcome or "not_attempted"
+        rec.resolution_failure = res.provenance.failure
+        rec.resolution_readings = list(res.provenance.readings)
+        rec.note += (
+            f"; asked a model to resolve the {n} disputed label{'' if n == 1 else 's'} "
+            f"and the call was not made — {res.provenance.failure} — so they remain "
+            "withheld"
         )
         return entries
 
@@ -939,16 +988,25 @@ def _escalate_disputed(
         parts = [f"[{lbl}] {_disputed_reason(lbl, res.provenance)}" for lbl in rec.labels_disputed]
         console.print(f"  [dim]{'; '.join(parts)} — verdicts on these stay withheld.[/dim]")
     named_model = res.provenance.model or "a model that did not report its own name"
+    rec.resolution_outcome = res.provenance.outcome
+    rec.resolution_model = res.provenance.model
+    rec.resolution_fields_discarded = list(res.provenance.fields_discarded)
+    rec.resolution_readings = list(res.provenance.readings)
+    # Names the extractions the call was SHOWN, never "both texts": on a
+    # pymupdf-backend run there is one printed span, and on any backend the
+    # dispute can be with a reading (the deposit, the model's) that has no
+    # span at all. "both" was false on the first and misleading on the second.
+    shown = _readings_phrase(res.provenance.readings)
     rec.note += (
         f"; {done} of the {n} disputed label{'' if n == 1 else 's'} were resolved by "
-        f"{named_model} reading of both texts, with every field verified verbatim, and "
-        "you accepted that. It is a reading, not a confirmation — the numbering is "
-        "still unconfirmed"
+        f"{named_model} reading {shown}, with every field verified verbatim against "
+        "it, and you accepted that. It is a reading, not a confirmation — the "
+        "numbering is still unconfirmed"
     )
     if res.provenance.fields_discarded:
         rec.note += (
             f"; {len(res.provenance.fields_discarded)} field(s) of the resolution reply "
-            "were not printed in either text and were discarded"
+            "were not printed there and were discarded"
         )
     # The resolved entry REPLACES the one in the chosen list, in place, same
     # order, same length. Returning `entries` unchanged here takes the label
@@ -1267,8 +1325,6 @@ def _refs_pipeline(
             "papers there or nothing in them could be compared; verdicts on claims citing "
             "those labels are withheld unless resolved below"
         )
-    stamp_seen_in(entries, others)
-
     if rec.verified and rec.labels_disputed:
         # `numbering_verified` means EXTENT — the chosen list accounts for
         # exactly the labels the body cites — and a disputed label is a question
@@ -1307,6 +1363,13 @@ def _refs_pipeline(
     if needs_flat:
         reading_texts["pymupdf"] = flat_text
     entries = _escalate_disputed(case, rec, entries, others, reading_texts, model=None)
+    # AFTER the escalation, never before it: menu option 3 replaces the whole
+    # list with one nothing stamped, so a run that computed `seen_in`
+    # published `[]` for every entry — which the schema reads as "no reading
+    # was established as carrying this". `stamp_seen_in` merges rather than
+    # overwrites, so an entry the resolution substituted keeps the printed
+    # text its values were copied from.
+    stamp_seen_in(entries, others)
 
     if provided is not None and provided.is_file():
         console.print(
@@ -1379,6 +1442,15 @@ def _refs_pipeline(
         reflist_entries_proposed=(
             reflist_prov.entries_proposed if reflist_prov.outcome == "read" else None
         ),
+        # the SECOND model call, kept apart from the five fields above: a run
+        # can make either, both or neither, and folding them made a manifest
+        # say no model read the reference list on a run where one was asked,
+        # verified and allowed to change which papers are judged
+        resolution_outcome=rec.resolution_outcome,
+        resolution_failure=rec.resolution_failure,
+        resolution_model=rec.resolution_model,
+        resolution_fields_discarded=rec.resolution_fields_discarded,
+        resolution_readings=rec.resolution_readings,
     )
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)

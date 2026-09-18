@@ -580,10 +580,13 @@ class RefManifest:
     # `refs_total` and let `_slug_for_ref` hand it to a claim citing a number.
     manuscript_supplements: list[Supplement] = field(default_factory=list)
     # A second, independent axis from `numbering_verified` above: whether
-    # EVERY label the body cites was agreed by >= 2 readings. Absent means
-    # never computed — not "not corroborated", the same three-state
-    # discipline as `numbering_ledger`.
-    numbering_corroborated: bool = False
+    # EVERY label the body cites was agreed by >= 2 readings. `None` means
+    # never computed — not "not corroborated" — the same three-state
+    # discipline as `reflist_entries_proposed`, and the reason this is not a
+    # plain `bool`: the docstring claimed three states for a type that holds
+    # two, so "absent" and "measured false" were the same value and every
+    # consumer had to be silent on both to stay honest.
+    numbering_corroborated: bool | None = None
     corroborating_readings: list[str] = field(default_factory=list)
     # Absent means never computed, NOT "none disputed" — a manifest written
     # before this feature says nothing about disputes, it does not assert
@@ -637,6 +640,30 @@ class RefManifest:
     # manifest's `reflist_outcome` as `"read"` from `reflist_model` alone
     # would otherwise make EVERY such manifest read as "proposed nothing".
     reflist_entries_proposed: int | None = None
+    # The SECOND model call this feature can make: the one that settles
+    # labels the readings did not agree on, after a person asked for it.
+    # Kept in its own five fields rather than folded into the `reflist_*` set
+    # above, which describes the call that reads the whole list: a run can
+    # make either, both or neither, and on a `--backend pymupdf` run the
+    # first is never attempted while the second still happens. Folding them
+    # made the report say no model read the reference list on a run where one
+    # was asked, verified and allowed to change which papers are judged.
+    #
+    # Same vocabulary and the same three-state discipline as their
+    # counterparts: `""` means NEVER COMPUTED, not `"not_attempted"`.
+    resolution_outcome: str = ""  # "" | one of reflist.REFLIST_OUTCOMES
+    # why the call produced nothing, when `resolution_outcome` is "failed".
+    # "" when it succeeded, or when no such call was ever made.
+    resolution_failure: str = ""
+    # "" means EITHER no such call OR one that answered without naming its
+    # model — `resolution_outcome` is what tells those apart.
+    resolution_model: str = ""
+    resolution_fields_discarded: list[str] = field(default_factory=list)
+    # Which printed extractions the call was actually SHOWN — the readings
+    # whose text went into the prompt, not the readings that disagreed. The
+    # report names these rather than asserting "both texts", which was false
+    # on every run with one printed extraction. `[]` means never recorded.
+    resolution_readings: list[str] = field(default_factory=list)
 
     def document(self, slug: str) -> Document | None:
         """The judgeable file this slug names, article or supplement, or None."""
@@ -726,6 +753,11 @@ class RefManifest:
             "reflist_fields_discarded": self.reflist_fields_discarded,
             "reflist_numbering_findings": self.reflist_numbering_findings,
             "reflist_entries_proposed": self.reflist_entries_proposed,
+            "resolution_outcome": self.resolution_outcome,
+            "resolution_failure": self.resolution_failure,
+            "resolution_model": self.resolution_model,
+            "resolution_fields_discarded": self.resolution_fields_discarded,
+            "resolution_readings": self.resolution_readings,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -758,7 +790,12 @@ class RefManifest:
             unverified_from=data.get("unverified_from"),
             numbering_contested=bool(data.get("numbering_contested", False)),
             numbering_ledger=data.get("numbering_ledger", {}),
-            numbering_corroborated=bool(data.get("numbering_corroborated", False)),
+            # no `bool(...)` and no default: absent and explicit `null` both
+            # read as `None` — never computed — and are never coerced to False
+            numbering_corroborated=(
+                None if data.get("numbering_corroborated") is None
+                else bool(data["numbering_corroborated"])
+            ),
             corroborating_readings=data.get("corroborating_readings", []),
             # absent means never computed, not "none disputed" or "none resolved"
             labels_disputed=data.get("labels_disputed", []),
@@ -766,13 +803,34 @@ class RefManifest:
             numbering_choice=data.get("numbering_choice", ""),
             numbering_chosen_by=data.get("numbering_chosen_by", ""),
             reflist_outcome=data.get("reflist_outcome", ""),
-            reflist_failure=data.get("reflist_failure", ""),
             reflist_model=data.get("reflist_model", ""),
             reflist_fields_discarded=data.get("reflist_fields_discarded", []),
             reflist_numbering_findings=data.get("reflist_numbering_findings", []),
+            # A case folder written mid-branch, before `reflist_outcome`
+            # replaced the boolean it carries: the key is dropped here (no
+            # field owns it), and `_reflist` then had nothing to fire on, so
+            # the required disclosure vanished for a reading that happened.
+            # Neither "read" nor "failed" is provable from a flag that was
+            # set on both paths, so neither is claimed — the reason goes in
+            # `reflist_failure`, where `_reflist`'s weakest inference picks
+            # it up and says the outcome was never recorded.
+            reflist_failure=data.get("reflist_failure", "") or (
+                "a model reading was attempted; this manifest predates "
+                "`reflist_outcome` and does not record whether the call returned"
+                if data.get("reflist_attempted") and not data.get("reflist_outcome")
+                else ""
+            ),
             # `.get` with no default: absent AND explicit `null` both read as
             # `None` — "never recorded" — never coerced to `0`
             reflist_entries_proposed=data.get("reflist_entries_proposed"),
+            # absent means never computed for all five: a manifest written
+            # before the escalation existed asserts nothing about whether a
+            # resolution call was made
+            resolution_outcome=data.get("resolution_outcome", ""),
+            resolution_failure=data.get("resolution_failure", ""),
+            resolution_model=data.get("resolution_model", ""),
+            resolution_fields_discarded=data.get("resolution_fields_discarded", []),
+            resolution_readings=data.get("resolution_readings", []),
         )
 
 

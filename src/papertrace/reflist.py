@@ -177,6 +177,31 @@ class ReflistProvenance:
 # string nobody enumerated — the same discipline as `LABEL_AGREEMENT`
 REFLIST_OUTCOMES = ("not_attempted", "failed", "read")
 
+# Total characters of bibliography either call may be handed. A REFUSAL, not
+# a `_clip`: every other model input here is clipped and the cut disclosed
+# (`check.Truncations`), but a clipped bibliography produces a reading that
+# is simply missing the entries past the cut, and nothing in the provenance
+# could distinguish that from a page that never printed them — a reading
+# quietly short is the one failure this module's verification cannot catch.
+# A refusal costs nothing, happens before the subprocess, and says so. Two
+# ~250-reference extractions fit inside it with room to spare; anything past
+# it is a text no context window was going to hold either.
+REFLIST_CHAR_LIMIT = 400_000
+
+
+def _too_long(texts: tuple[str, ...]) -> str:
+    """Why this call was not made, or "" — measured before any money is spent."""
+    total = sum(len(t) for t in texts)
+    if total <= REFLIST_CHAR_LIMIT:
+        return ""
+    return (
+        f"the extractions of the bibliography are too long to send in one call "
+        f"({total:,} characters against a {REFLIST_CHAR_LIMIT:,} limit), so no model "
+        "was asked — they are refused whole rather than cut, because a reading "
+        "missing whatever fell past the cut cannot be told from a page that never "
+        "printed it"
+    )
+
 
 # order matters only for `raw` below, which is re-assembled in printed order
 _VERIFIED_FIELDS = ("authors", "year", "title", "journal", "doi")
@@ -222,6 +247,11 @@ def propose(
             "only one of the two extractions of the bibliography had any text, so a "
             "model reading was not attempted — there was no second reading to check it against"
         )
+        return [], prov
+    if why := _too_long(readings):
+        # same slot and same `outcome` as the guard above, for the same
+        # reason: no subprocess call happens on this path either
+        prov.failure = why
         return [], prov
 
     # labels before texts: a label is a short fixed string ("pymupdf",
@@ -408,12 +438,13 @@ def _numeral_gaps(nums: list[str]) -> list[str]:
 # (`cli._write_disagreement`) and asked for a model's opinion on it
 # ---------------------------------------------------------------------------
 
-RESOLVE_PROMPT = """You are shown two readings of one printed bibliography, and a list of
-citation labels the two readings disagree about — they name different papers at
-that label.
+RESOLVE_PROMPT = """You are shown <<HOW_MANY>> of one printed bibliography, a list of
+citation labels whose readings did not agree — they either name different
+papers at that label, or one of them says nothing that can be compared — and
+what each reading says at those labels.
 
-For each label, decide which paper the label actually names, using ONLY the two
-texts below. Reply with a JSON array, one object per label you can answer:
+For each label, decide which paper the label actually names, using ONLY the
+printed text below. Reply with a JSON array, one object per label you can answer:
 
 [{"num": "6",
   "title": "the paper's title, copied character for character from one of the texts",
@@ -429,18 +460,28 @@ over a guess: these are exactly the labels where two readings contradict each
 other, so a guess here is the error this tool exists to prevent. Answering some
 labels and abstaining on others is expected.
 
-Every value you give is checked against the two texts verbatim. A value that is
-not printed in one of them is discarded, and a title that is not printed leaves
-the label unresolved — so do not correct, expand, complete or tidy anything.
+Every value you give is checked against the printed text verbatim. A value that
+is not printed there is discarded, and a title that is not printed leaves the
+label unresolved — so do not correct, expand, complete or tidy anything.
 
 LABELS IN DISPUTE: <<LABELS>>
 
---- READING A ---
-<<A>>
-
---- READING B ---
-<<B>>
+WHAT EACH READING SAYS AT THOSE LABELS — this is the disagreement you are being
+asked to settle. It is CONTEXT ONLY: nothing here counts as printed text, and a
+value copied from this list rather than from the extraction(s) below is
+discarded.
+<<DISPUTING>>
+<<TEXTS>>
 """
+
+# How the printed extractions are laid out in the prompt. One block per text,
+# lettered, and the letters are what a reply's `seen_in` names — so a run with
+# ONE extraction renders one block rather than an empty `--- READING B ---`,
+# which told the model a second extraction existed and was empty. `propose`
+# refuses outright below two texts; this call cannot, because the printed page
+# is the only authority it needs and one extraction of it is still that page.
+_READING_BLOCK = "--- READING {letter} ({name}) ---\n{text}\n"
+_READING_LETTER_BY_INDEX = ("A", "B")
 
 
 @dataclass
@@ -486,11 +527,35 @@ def _parse_array(raw: str) -> list[dict] | None:
 _RESOLVE_FIELDS = ("authors", "year", "journal")
 
 
+def _render_disputing(
+    labels: list[str], disputing: dict[str, list[RefEntry]] | None
+) -> str:
+    """Each reading's entry for each disputed label, as prompt context.
+
+    Named readings, not letters: `crossref` and `llm` have no printed span of
+    the page at all, so they can never be one of the lettered extractions
+    below — and they are exactly the readings a dispute is most often
+    between. A reading carrying nothing for a label says so, because "this
+    reading has no entry here" is itself half of many disagreements.
+    """
+    if not disputing:
+        return "  (the readings' own entries were not supplied to this call)\n"
+    out: list[str] = []
+    for label in labels:
+        out.append(f"  [{label}]")
+        for name in sorted(disputing):
+            hits = [e.raw for e in disputing[name] if e.num == label]
+            shown = " || ".join(hits) if hits else "— no entry for this label —"
+            out.append(f"    {name}: {shown}")
+    return "\n".join(out) + "\n"
+
+
 def resolve_disputed(
     labels: list[str],
     names: tuple[str, ...],
     texts: tuple[str, ...],
     *,
+    disputing: dict[str, list[RefEntry]] | None = None,
     model: str | None = None,
 ) -> Resolution:
     """Ask the model which paper each disputed label names, and believe none of it on its word.
@@ -512,6 +577,16 @@ def resolve_disputed(
     3. Partial resolution is the normal outcome, not a degraded one. Nothing
        downstream may require all-or-nothing.
 
+    `disputing` is what each READING says at each disputed label, including
+    the readings that have no printed span of their own (`crossref`, `llm`).
+    Without it this call adjudicated a disagreement it had never been shown:
+    a parse-versus-deposit dispute — the case the whole feature exists for —
+    reached a model that had seen only the parse, and it answered with the
+    parse's own entry, which then verified verbatim and was substituted as a
+    settled label. It is context and nothing more: `_found` still checks every
+    returned value against `texts` alone, so a title only the deposit carries
+    cannot be believed.
+
     `names[i]` MUST be the reading `texts[i]` actually came from — passed in
     explicitly, the way `propose`'s `label_a`/`label_b` are, rather than derived
     from a separate dict of candidates. A caller's candidates dict can hold more
@@ -526,11 +601,26 @@ def resolve_disputed(
     prov = ReflistProvenance(readings=list(names))
     if not labels:
         return Resolution(provenance=prov)
+    if why := _too_long(texts):
+        # every label stays exactly where it was, and the reason says the
+        # call never happened — `cli._disputed_reason` must not print "the
+        # model could not tell" over a model that was never asked
+        prov.failure = why
+        return Resolution(still_disputed=list(labels), provenance=prov)
 
+    blocks = "\n".join(
+        _READING_BLOCK.format(letter=letter, name=name, text=text)
+        for letter, name, text in zip(_READING_LETTER_BY_INDEX, names, texts, strict=False)
+    )
+    how_many = (
+        "one extraction" if len(texts) < 2
+        else f"{len(texts)} extractions"
+    )
     prompt = (
         RESOLVE_PROMPT.replace("<<LABELS>>", ", ".join(f"[{n}]" for n in labels))
-        .replace("<<A>>", texts[0] if texts else "")
-        .replace("<<B>>", texts[1] if len(texts) > 1 else "")
+        .replace("<<HOW_MANY>>", how_many)
+        .replace("<<DISPUTING>>", _render_disputing(labels, disputing))
+        .replace("<<TEXTS>>", blocks)
     )
     with ask.for_site(ask.SITE_REFS):
         raw = ask._ask(prompt, model)
@@ -550,8 +640,12 @@ def resolve_disputed(
         )
         return Resolution(still_disputed=list(labels), provenance=prov)
 
+    # counted from `items`, before the de-duplication below — the same point
+    # `propose` counts at. A reply carrying two objects for "6" proposed two
+    # entries, and recording one would under-report exactly the reply a
+    # reader most needs to know was malformed.
+    prov.entries_proposed = len(items)
     by_num = {str(o.get("num", "")).strip(): o for o in items}
-    prov.entries_proposed = len(by_num)
     resolved: dict[str, RefEntry] = {}
     unresolved: list[str] = []
     for label in labels:
@@ -614,7 +708,7 @@ def resolve_disputed(
         e.title = kept.get("title")
         e.year = kept.get("year")
         e.reason = (
-            "a disputed label, resolved by a model reading of both texts and "
+            "a disputed label, resolved by a model reading of the printed list and "
             "accepted by a person — a reading, not a confirmed numbering"
         )
         e.seen_in = seen_in

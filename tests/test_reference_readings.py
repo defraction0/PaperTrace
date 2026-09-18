@@ -1241,7 +1241,9 @@ def test_the_new_manifest_fields_round_trip_and_validate(tmp_path):
         del payload[key]
     path.write_text(json.dumps(payload))
     old = RefManifest.from_json(path)
-    assert old.numbering_corroborated is False
+    # `None` — never computed — which is what "absent means never computed"
+    # requires a field to be able to say, and a plain boolean could not
+    assert old.numbering_corroborated is None
     assert old.labels_disputed == []
 
 
@@ -1393,3 +1395,207 @@ def test_a_numbering_finding_from_the_model_reading_reaches_the_manifest(tmp_pat
     assert not any(
         "twice" in f for f in manifest.reflist_fields_discarded
     ), manifest.reflist_fields_discarded
+
+
+# --- whole-branch review, Major 4: the SECOND model call has provenance too
+
+
+def _resolved_manifest(**kw) -> RefManifest:
+    """A manifest from a run that escalated: a disputed label was settled by
+    the resolution call, which is a different call from the reflist reading."""
+    base = dict(
+        manuscript="p.pdf",
+        labels_resolved=["2"],
+        numbering_choice="llm_resolved",
+        numbering_chosen_by="user",
+        resolution_outcome="read",
+        resolution_model="claude-opus-5",
+        resolution_readings=["parsed"],
+    )
+    base.update(kw)
+    return RefManifest(**base)
+
+
+def test_a_run_whose_only_model_call_was_the_resolution_does_not_deny_it():
+    """Major 4. On `--backend pymupdf` the reflist reading is deliberately
+    skipped, so the `reflist` disclosure said "This run asked that the
+    reference list was also read by a model, and no reading was obtained" —
+    directly beside a numbering resolution saying a model settled two labels
+    and the user accepted it. A model call was made, paid for, verified and
+    allowed to change which papers are judged."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = _resolved_manifest(
+        reflist_outcome="not_attempted",
+        reflist_failure="this run's backend is pymupdf, so a second flat reading of the "
+                        "bibliography would be the same text",
+    )
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+
+    assert len(fired) == 1, fired
+    assert "claude-opus-5" in fired[0].text
+    assert "settle the labels" in fired[0].text
+
+
+def test_a_silent_disable_still_discloses_a_resolution_call_that_happened():
+    """`--no-llm-refs` records `not_attempted` with no reason and the
+    disclosure stays silent — correctly, for the reading. But the escalation
+    is a separate, user-consented call that runs anyway, and silence about it
+    is the same false negative one rung down."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = _resolved_manifest(reflist_outcome="not_attempted", reflist_failure="")
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+
+    assert len(fired) == 1, fired
+    assert "claude-opus-5" in fired[0].text
+    assert "the parsed extraction" in fired[0].text
+
+
+def test_a_resolution_call_that_failed_is_disclosed_though_it_settled_nothing():
+    """`_numbering_resolution` needs a resolved label to fire, so a
+    resolution call that raised would otherwise reach no structured surface
+    at all — the manifest would record a run in which no model was asked."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = RefManifest(
+        manuscript="p.pdf",
+        labels_disputed=["2"],
+        numbering_choice="withheld",
+        resolution_outcome="failed",
+        resolution_failure="RuntimeError: claude -p timed out after 600s",
+        resolution_readings=["parsed", "pymupdf"],
+    )
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+
+    assert len(fired) == 1, fired
+    assert "did not return" in fired[0].text
+    assert "timed out" in fired[0].text
+
+
+def test_a_manifest_with_no_resolution_call_gains_no_sentence_about_one():
+    """`""` is never computed, and an absent call says nothing."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    manifest = RefManifest(manuscript="p.pdf", reflist_model="claude-opus-5")
+    fired = [d for d in run_disclosures(RunResults(manuscript="p.pdf"), manifest)
+             if d.key == "reflist"]
+
+    assert len(fired) == 1, fired
+    assert "settle the labels" not in fired[0].text
+
+
+def test_the_numbering_resolution_names_the_model_and_what_it_was_shown():
+    """Critical 2's report half: "a model reading of both texts" was printed
+    on runs where the model saw one text, and on runs where the reading it
+    ruled against had no text at all."""
+    from papertrace.disclosures import _numbering_resolution
+
+    d = _numbering_resolution(_resolved_manifest())
+
+    assert d is not None
+    assert "both texts" not in d.text
+    assert "claude-opus-5" in d.text
+    assert "the parsed extraction" in d.text
+
+
+def test_the_resolved_claim_disclosure_does_not_claim_the_model_saw_both():
+    """The per-claim counterpart of the sentence above."""
+    from papertrace.disclosures import _claim_pairing
+    from papertrace.models import ClaimResult
+
+    claim = ClaimResult(id=1, claim="x", location="Results", refs=["2"])
+    d = _claim_pairing(claim, _resolved_manifest())
+
+    assert d is not None
+    assert "shown both" not in d.text
+    assert "the parsed extraction" in d.text
+
+
+def test_a_resolution_whose_manifest_recorded_no_readings_says_so():
+    """`[]` is never recorded, not "it was shown nothing" — and the sentence
+    must not silently read as the latter."""
+    from papertrace.disclosures import _numbering_resolution
+
+    d = _numbering_resolution(_resolved_manifest(resolution_readings=[]))
+
+    assert d is not None
+    assert "does not name" in d.text
+
+
+# --- whole-branch review, minors 1 and 6
+
+
+def test_numbering_corroborated_keeps_never_computed_apart_from_measured_false(tmp_path):
+    """Minor 1. The dataclass and the schema both documented three states in
+    a `bool` that can hold two, so "absent means never computed" was
+    unexpressible. `None` is what the branch's own standard
+    (`reflist_entries_proposed`) already uses for exactly this."""
+    import jsonschema
+
+    old = {"manuscript": "m.pdf", "entries": []}
+    p = tmp_path / "old.json"
+    p.write_text(json.dumps(old))
+    assert RefManifest.from_json(p).numbering_corroborated is None
+
+    measured = tmp_path / "new.json"
+    RefManifest(manuscript="m.pdf", numbering_corroborated=False).to_json(measured)
+    assert RefManifest.from_json(measured).numbering_corroborated is False
+
+    schema = json.loads(SCHEMA_PATH.read_text())
+    for path in (measured,):
+        jsonschema.Draft202012Validator(schema).validate(json.loads(path.read_text()))
+    RefManifest(manuscript="m.pdf", numbering_corroborated=None).to_json(measured)
+    jsonschema.Draft202012Validator(schema).validate(json.loads(measured.read_text()))
+
+
+def test_a_mid_branch_manifest_recording_only_that_a_reading_was_attempted(tmp_path):
+    """Minor 6. A case folder written between `b74ba01` and `67ab473` carries
+    `reflist_attempted: true` and none of the fields that replaced it. The
+    key is dropped at load, so `_reflist` fell through every normalisation
+    branch and returned `None` — the required disclosure vanished for a
+    reading that actually happened, the exact false negative `67ab473` was
+    written to fix.
+
+    Neither `read` nor `failed` is provable from that flag, so neither is
+    claimed: the outcome is recorded as never computed and the report says
+    what it knows."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    p = tmp_path / "old.json"
+    p.write_text(json.dumps({"manuscript": "m.pdf", "entries": [], "reflist_attempted": True}))
+    manifest = RefManifest.from_json(p)
+
+    fired = [d for d in run_disclosures(RunResults(manuscript="m.pdf"), manifest)
+             if d.key == "reflist"]
+    assert len(fired) == 1, fired
+    assert "does not record what came of it" in fired[0].text
+
+
+def test_a_mid_branch_manifest_with_a_model_name_still_settles_as_read(tmp_path):
+    """The stronger inference still wins: a recorded model name is positive
+    proof a reply was obtained, so the legacy flag adds nothing and must not
+    downgrade it."""
+    from papertrace.disclosures import run_disclosures
+    from papertrace.models import RunResults
+
+    p = tmp_path / "old.json"
+    p.write_text(json.dumps({
+        "manuscript": "m.pdf", "entries": [],
+        "reflist_attempted": True, "reflist_model": "claude-opus-5",
+    }))
+    manifest = RefManifest.from_json(p)
+
+    fired = [d for d in run_disclosures(RunResults(manuscript="m.pdf"), manifest)
+             if d.key == "reflist"]
+    assert len(fired) == 1, fired
+    assert "claude-opus-5" in fired[0].text
+    assert "does not record what came of it" not in fired[0].text

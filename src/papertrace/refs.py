@@ -625,6 +625,18 @@ class Reconciliation:
     # honest: a person consenting to proceed is an input, never evidence that
     # the numbering was verified.
     chosen_by: str = ""  # "" | default | user
+    # What the RESOLUTION call — `reflist.resolve_disputed`, made only when a
+    # person asked for it — cost and produced. Carried here so
+    # `_refs_pipeline` can persist it beside the reflist call's own
+    # provenance: a model call that was made, paid for, verified field by
+    # field and allowed to change which papers are judged existed nowhere
+    # structured, while the `reflist_*` fields said no model read the list.
+    # "" / [] mean never computed, never "it produced nothing".
+    resolution_outcome: str = ""
+    resolution_failure: str = ""
+    resolution_model: str = ""
+    resolution_fields_discarded: list[str] = field(default_factory=list)
+    resolution_readings: list[str] = field(default_factory=list)
 
 
 def _covers(body: set[str], entries: list[RefEntry]) -> bool:

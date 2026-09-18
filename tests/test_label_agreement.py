@@ -294,7 +294,10 @@ def test_the_six_new_reconciliation_fields_round_trip_through_a_manifest(tmp_pat
     old = {"manuscript": "m.pdf", "entries": [{"num": "1", "raw": "x", "status": "paywalled"}]}
     p.write_text(json.dumps(old))
     older = RefManifest.from_json(p)
-    assert older.numbering_corroborated is False
+    # `None`, not `False`: the field's own description has always said absent
+    # means never computed, and as a plain boolean it could not say so — the
+    # same three-state discipline `reflist_entries_proposed` is written under
+    assert older.numbering_corroborated is None
     assert older.corroborating_readings == []
     assert older.labels_disputed == []
     assert older.labels_resolved == []

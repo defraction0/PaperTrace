@@ -470,6 +470,52 @@ def test_a_corroborated_claim_pairing_disclosure_appears_in_every_format(tmp_pat
         assert d.token in body, f"claim_pairing (corroborated) token missing from {name}"
 
 
+def test_a_disputed_but_unretrieved_claim_pairing_appears_in_every_format(tmp_path):
+    """The fifth `claim_pairing` state (whole-branch review, Major 5): the
+    readings did not agree AND nothing was ever fetched under the label, so
+    the withheld token's "the source retrieved under that label" is the one
+    thing that did not happen. New token, same key — the allow-lists already
+    carry it, and this is what makes the new state's parity provable."""
+    from papertrace.models import RefEntry, RefManifest
+
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num="6", raw="ref 6", status="paywalled")],
+        labels_disputed=["6"],
+    )
+    claim = _claim(refs=["6"], verdict="not_retrieved")
+    results = RunResults(manuscript="m.pdf", converter="pymupdf", claims=[claim])
+    write_reports(results, manifest, tmp_path, png=False)
+    rendered = {name: (tmp_path / name).read_text() for name in FORMATS}
+
+    d = next(x for x in claim_disclosures(claim, manifest) if x.key == "claim_pairing")
+    for name, body in rendered.items():
+        assert d.token in body, f"claim_pairing (unretrieved) token missing from {name}"
+
+
+def test_a_resolution_only_reflist_disclosure_appears_in_every_format(tmp_path):
+    """Major 4's new shape: no reading of the whole list was taken, but a
+    model was asked to settle a disagreement. The `reflist` key already has a
+    block in every format; this is the state that had no fixture."""
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(
+        manuscript="m.pdf",
+        labels_resolved=["7"],
+        numbering_choice="llm_resolved",
+        resolution_outcome="read",
+        resolution_model="claude-opus-5",
+        resolution_readings=["parsed"],
+    )
+    results = RunResults(manuscript="m.pdf", converter="pymupdf", claims=[_claim(refs=["7"])])
+    write_reports(results, manifest, tmp_path, png=False)
+
+    d = next(x for x in run_disclosures(results, manifest) if x.key == "reflist")
+    for name in FORMATS:
+        body = (tmp_path / name).read_text()
+        assert d.token in body, f"reflist (resolution only) token missing from {name}"
+
+
 # --- the HTML reports actually escape what they interpolate ------------------
 
 
