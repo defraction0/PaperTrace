@@ -7,6 +7,7 @@ was shown. These tests are the rules, one per test, because each of them is a
 way this module could otherwise name a paper the page never printed.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -400,3 +401,183 @@ def test_a_reading_letter_of_the_wrong_type_is_reported_as_a_wrong_shape(monkeyp
     assert any("reading: not a string" in f for f in prov.fields_discarded), (
         prov.fields_discarded
     )
+
+
+# --- resolving a disputed label: three rules on the reply, and a slug -------
+#
+# `resolve_disputed` is the only place a model reading changes what `check`
+# judges — a person has already seen the disagreement and asked for this. Zero
+# of these tests existed before this round (M2 of the Task 7 review): every
+# test that reached menu option 1 replaced this function with a stub built
+# through `refs._entry`, which sets the one field the real function forgot
+# (C1 — a slug-less entry is silently dropped from judgement by `check.py` and
+# downloads to `sources_resolved/None.pdf`, overwriting itself label after
+# label). These are direct, so that mistake cannot repeat.
+
+_RESOLVE_A = "6. Fujita S, Mori S. Characterization of Brain Volume Changes. 2023. doi:10.1001/jamanetworkopen.2023.18153\n"
+_RESOLVE_B = "6. Wachinger C. Something else entirely. 2019. doi:10.1000/wach\n"
+_RESOLVE_NAMES = ("docling 2.8.0", "pymupdf")
+
+
+def _resolve_reply(monkeypatch, payload: str, *, model: str = "claude-opus-5"):
+    """Same seam, same qualification rule as `_reply` above: `reflist` calls
+    `ask._ask` by qualified name, so the fake is installed on `ask_mod`."""
+    calls = []
+
+    def fake(prompt, model_arg=None):
+        calls.append({"prompt": prompt})
+        return payload
+
+    monkeypatch.setattr(ask_mod, "_ask", fake)
+    monkeypatch.setattr(ask_mod, "_MODELS", {ask_mod.SITE_REFS: model})
+    return calls
+
+
+def test_a_resolved_label_names_a_title_printed_in_one_of_the_readings(monkeypatch):
+    """The whole permission structure of this call. Nothing invented may name a
+    paper, so the title comes back only if it can be grepped out of the text the
+    model was shown."""
+    reply = json.dumps([{
+        "num": "6",
+        "title": "Characterization of Brain Volume Changes",
+        "doi": "10.1001/jamanetworkopen.2023.18153",
+        "year": "2023",
+    }])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert list(res.resolved) == ["6"]
+    assert res.still_disputed == []
+    assert res.resolved["6"].doi == "10.1001/jamanetworkopen.2023.18153"
+
+
+def test_a_resolved_entry_carries_a_slug(monkeypatch):
+    """C1. `resolve_all` never re-slugs and `check.py` refuses to judge a
+    slug-less entry — a bare `RefEntry(...)` here is what let a resolved label
+    reach the manifest as "resolved" while `check` silently dropped it. Built
+    through `refs._entry`, the one place that knows what a complete entry
+    needs, so this cannot regress to a hand-rolled constructor again."""
+    reply = json.dumps([{
+        "num": "6",
+        "title": "Characterization of Brain Volume Changes",
+        "doi": "10.1001/jamanetworkopen.2023.18153",
+        "year": "2023",
+    }])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.resolved["6"].slug, "a resolved entry with no slug is dropped by check.py"
+    assert res.resolved["6"].slug != "ref"
+
+
+def test_a_title_printed_in_neither_reading_leaves_the_label_disputed(monkeypatch):
+    """An unverifiable *field* is discarded; an unverifiable *title* is the label
+    staying disputed. The title is the only field that identifies a paper, so a
+    reply whose title cannot be found has answered nothing."""
+    reply = json.dumps([{"num": "6", "title": "A Paper Nobody Printed", "year": "2023"}])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.resolved == {}
+    assert res.still_disputed == ["6"]
+
+
+def test_an_unverifiable_doi_is_discarded_without_costing_the_label(monkeypatch):
+    """A truncated DOI is extraction damage, not a different paper. The field
+    goes; the resolution stands and the entry carries a recorded gap."""
+    reply = json.dumps([{
+        "num": "6",
+        "title": "Characterization of Brain Volume Changes",
+        "doi": "10.1038/s41591-",
+    }])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.resolved["6"].doi is None
+    assert "doi" in res.provenance.fields_discarded
+
+
+def test_cannot_tell_is_an_answer_and_keeps_the_label_disputed(monkeypatch):
+    """Abstention is first-class. A call that must always answer will
+    confabulate on exactly the labels two readings disagree about."""
+    reply = json.dumps([{"num": "6", "cannot_tell": True}])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.resolved == {}
+    assert res.still_disputed == ["6"]
+
+
+def test_partial_resolution_is_representable(monkeypatch):
+    """11 of 14 resolved and 3 still disputed is a real outcome, not an error.
+    No code path may require all-or-nothing."""
+    text_a = _RESOLVE_A + "7. Weston AD. Automated abdominal segmentation. 2019.\n"
+    text_b = _RESOLVE_B + "7. Someone Else. A different paper. 2015.\n"
+    reply = json.dumps([
+        {"num": "6", "title": "Characterization of Brain Volume Changes"},
+        {"num": "7", "cannot_tell": True},
+    ])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6", "7"], _RESOLVE_NAMES, (text_a, text_b))
+    assert list(res.resolved) == ["6"]
+    assert res.still_disputed == ["7"]
+
+
+def test_a_label_the_reply_never_mentions_stays_disputed(monkeypatch):
+    """Silence is not consent. A reply that answers 1 of 2 questions has
+    answered 1, and the unanswered label is not repaired into agreement."""
+    reply = json.dumps([{"num": "6", "title": "Characterization of Brain Volume Changes"}])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6", "9"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.still_disputed == ["9"]
+
+
+def test_a_malformed_reply_resolves_nothing_rather_than_raising(monkeypatch):
+    """`refs` has already done useful work by this point. A model that returns
+    prose leaves every label disputed — the state the run was in before it
+    asked — and says so in the provenance. "I think maybe [6]?" is not prose
+    without brackets by accident: `ask._parse_json_array`'s first-`[`-to-last-
+    `]` slice reads it as the syntactically valid one-element list `[6]`, and
+    `_parse_array`'s dict check is what still refuses it."""
+    _resolve_reply(monkeypatch, "I think maybe [6]?")
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.resolved == {}
+    assert res.still_disputed == ["6"]
+    assert res.provenance.discarded_whole
+
+
+def test_seen_in_is_translated_using_the_names_matching_the_texts_order(monkeypatch):
+    """M4. `names[i]` must be the reading `texts[i]` actually came from — never
+    derived from a different dict of candidates that can hold MORE readings
+    (crossref, llm) than were shown to this call. A reply of "B" must land the
+    SECOND name passed here, not the second name of some other collection."""
+    reply = json.dumps([{
+        "num": "6", "title": "Characterization of Brain Volume Changes", "seen_in": "B",
+    }])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.resolved["6"].seen_in == ["pymupdf"]
+
+
+def test_an_unrecognised_seen_in_is_dropped_rather_than_guessed(monkeypatch):
+    reply = json.dumps([{
+        "num": "6", "title": "Characterization of Brain Volume Changes",
+        "seen_in": "whichever one was clearer",
+    }])
+    _resolve_reply(monkeypatch, reply)
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.resolved["6"].seen_in == []
+
+
+def test_outcome_is_read_once_a_reply_is_obtained(monkeypatch):
+    """m8. `propose` sets this the moment a reply comes back, before it is even
+    parsed — `resolve_disputed` must do the same, or a caller that inspects
+    `provenance.outcome` after a malformed reply sees the module's own default
+    ("not_attempted") for a call that plainly happened."""
+    _resolve_reply(monkeypatch, "not json at all")
+    res = reflist.resolve_disputed(["6"], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert res.provenance.outcome == "read"
+
+
+def test_no_labels_makes_no_model_call_at_all(monkeypatch):
+    """Nothing disputed is nothing to ask about — never spend a call for it."""
+    calls = _resolve_reply(monkeypatch, "[]")
+    res = reflist.resolve_disputed([], _RESOLVE_NAMES, (_RESOLVE_A, _RESOLVE_B))
+    assert calls == []
+    assert res.resolved == {}
+    assert res.still_disputed == []

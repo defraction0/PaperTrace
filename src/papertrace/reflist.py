@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from . import ask
 from .models import RefEntry, _fold
-from .refs import DOI_RE
+from .refs import DOI_RE, _entry
 
 REFLIST_PROMPT = """You are the reference-list reading step of a peer-review fact-checker.
 
@@ -488,7 +488,7 @@ _RESOLVE_FIELDS = ("authors", "year", "journal")
 
 def resolve_disputed(
     labels: list[str],
-    entries: dict[str, list[RefEntry]],
+    names: tuple[str, ...],
     texts: tuple[str, ...],
     *,
     model: str | None = None,
@@ -512,19 +512,21 @@ def resolve_disputed(
     3. Partial resolution is the normal outcome, not a degraded one. Nothing
        downstream may require all-or-nothing.
 
-    `entries` names each candidate reading, and its sorted keys are read in the
-    same order the one caller (`cli._escalate_disputed`) builds `texts` in — so
-    a reply's `seen_in: "A"/"B"` is translated into an actual reading NAME
-    before it reaches `RefEntry.seen_in`, never stored as the bare letter.
-    `RefEntry.seen_in`'s published vocabulary is reading names (`propose`
-    enforces the same rule for its own "A"/"B"/"AB"), and a letter leaking
-    through would put two vocabularies in one wire-format key.
+    `names[i]` MUST be the reading `texts[i]` actually came from — passed in
+    explicitly, the way `propose`'s `label_a`/`label_b` are, rather than derived
+    from a separate dict of candidates. A caller's candidates dict can hold more
+    readings (crossref, llm) than were ever shown to this call, and translating
+    a reply's `seen_in: "A"/"B"` through `sorted(that dict)` instead of through
+    the two names actually paired with `texts` can name the wrong reading
+    outright. `RefEntry.seen_in`'s published vocabulary is reading names
+    (`propose` enforces the same rule for its own "A"/"B"/"AB"), and a
+    mistranslated name is exactly the "two vocabularies in one wire-format key"
+    mistake that rule exists to prevent.
     """
-    prov = ReflistProvenance(readings=list(texts))
+    prov = ReflistProvenance(readings=list(names))
     if not labels:
         return Resolution(provenance=prov)
 
-    reading_names = sorted(entries)
     prompt = (
         RESOLVE_PROMPT.replace("<<LABELS>>", ", ".join(f"[{n}]" for n in labels))
         .replace("<<A>>", texts[0] if texts else "")
@@ -532,6 +534,9 @@ def resolve_disputed(
     )
     with ask.for_site(ask.SITE_REFS):
         raw = ask._ask(prompt, model)
+    # a reply was obtained — everything from here on describes what came back,
+    # never whether anything came back at all (same rule `propose` follows).
+    prov.outcome = "read"
     prov.model = ask.model_for(ask.SITE_REFS) or ""
 
     items = _parse_array(raw)
@@ -593,17 +598,25 @@ def resolve_disputed(
         letter = obj.get("seen_in")
         if isinstance(letter, str):
             idx = {"A": 0, "B": 1}.get(letter.strip().upper())
-            if idx is not None and idx < len(reading_names):
-                seen_in = [reading_names[idx]]
+            if idx is not None and idx < len(names):
+                seen_in = [names[idx]]
 
-        resolved[label] = RefEntry(
-            num=label,
-            raw=raw_text,
-            doi=kept.get("doi"),
-            title=kept.get("title"),
-            year=kept.get("year"),
-            reason="a disputed label, resolved by a model reading of both texts and "
-                   "accepted by a person — a reading, not a confirmed numbering",
-            seen_in=seen_in,
+        # Built through `_entry` — the one place that already knows what a
+        # complete entry needs (it parses a doi/year out of `raw` and computes
+        # the slug) — then overlaid with the fields VERIFIED above, never left
+        # to `_entry`'s own regexes for something already checked verbatim. A
+        # bare `RefEntry(...)` here is what let `slug` go missing: `resolve_all`
+        # never re-slugs a substituted entry, and `check.py` refuses to judge
+        # one with none, so a resolved label reached the manifest as settled
+        # while silently receiving no verdict at all.
+        e = _entry(label, raw_text)
+        e.doi = kept.get("doi")
+        e.title = kept.get("title")
+        e.year = kept.get("year")
+        e.reason = (
+            "a disputed label, resolved by a model reading of both texts and "
+            "accepted by a person — a reading, not a confirmed numbering"
         )
+        e.seen_in = seen_in
+        resolved[label] = e
     return Resolution(resolved=resolved, still_disputed=unresolved, provenance=prov)

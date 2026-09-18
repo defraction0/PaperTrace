@@ -106,6 +106,9 @@
 {% for d in disclosures if d.key == "labels_disputed" %}
     <div class="log"><span class="step">▸ check</span><span class="amber">⚠ {{ d.short }}</span></div>
 {% endfor %}
+{% for d in disclosures if d.key == "numbering_resolution" %}
+    <div class="log"><span class="step">▸ resolve</span><span class="amber">⚠ {{ d.short }}</span></div>
+{% endfor %}
 {% for d in disclosures if d.key == "numbering_corroboration" %}
     <div class="log"><span class="step">▸ resolve</span><span class="dim">{{ d.short }}</span></div>
 {% endfor %}

@@ -414,6 +414,62 @@ def test_a_withheld_claim_pairing_disclosure_appears_in_every_format(tmp_path):
         assert pairing.token in body, f"claim_pairing token missing from {name}"
 
 
+# --- Task 7 review, M7: the three remaining `claim_pairing` states, rendered --
+
+
+def test_a_model_resolved_claim_pairing_disclosure_appears_in_every_format(tmp_path):
+    """M7. `withheld` had a fixture; `llm_resolved`, `chosen` and
+    `corroborated` did not, so three new tokens reached four formats
+    unverified — coverage, not breakage (the key is in every allow-list
+    already), but the parity loop is what makes that provable per state."""
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(manuscript="m.pdf", labels_resolved=["7"], numbering_choice="llm_resolved")
+    claim = _claim(refs=["7"])
+    results = RunResults(manuscript="m.pdf", converter="pymupdf", claims=[claim])
+    write_reports(results, manifest, tmp_path, png=False)
+    rendered = {name: (tmp_path / name).read_text() for name in FORMATS}
+
+    d = next(x for x in claim_disclosures(claim, manifest) if x.key == "claim_pairing")
+    for name, body in rendered.items():
+        assert d.token in body, f"claim_pairing (llm_resolved) token missing from {name}"
+
+
+def test_a_user_chosen_claim_pairing_disclosure_appears_in_every_format(tmp_path):
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(manuscript="m.pdf", labels_resolved=["9"], numbering_choice="pymupdf")
+    claim = _claim(refs=["9"])
+    results = RunResults(manuscript="m.pdf", converter="pymupdf", claims=[claim])
+    write_reports(results, manifest, tmp_path, png=False)
+    rendered = {name: (tmp_path / name).read_text() for name in FORMATS}
+
+    d = next(x for x in claim_disclosures(claim, manifest) if x.key == "claim_pairing")
+    for name, body in rendered.items():
+        assert d.token in body, f"claim_pairing (chosen) token missing from {name}"
+
+
+def test_a_corroborated_claim_pairing_disclosure_appears_in_every_format(tmp_path):
+    """`info`-level, and only ever printed beside an existing `warn` — this
+    claim's co-citation is unretrieved (a real, unrelated finding), which is
+    what earns corroboration a place on the same row."""
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(
+        manuscript="m.pdf", numbering_corroborated=True,
+        corroborating_readings=["parsed", "pymupdf"],
+    )
+    claim = _claim(refs=["3", "4"], unjudged_refs=["4"])
+    results = RunResults(manuscript="m.pdf", converter="pymupdf", claims=[claim])
+    write_reports(results, manifest, tmp_path, png=False)
+    rendered = {name: (tmp_path / name).read_text() for name in FORMATS}
+
+    fired = claim_disclosures(claim, manifest)
+    d = next(x for x in fired if x.key == "claim_pairing" and x.level == "info")
+    for name, body in rendered.items():
+        assert d.token in body, f"claim_pairing (corroborated) token missing from {name}"
+
+
 # --- the HTML reports actually escape what they interpolate ------------------
 
 
@@ -499,3 +555,63 @@ def test_every_claim_disclosure_key_is_rendered_by_every_jinja_format():
             f"{name} renders no branch for {sorted(missing)} — it filters claim "
             "disclosures by explicit key, so a new one is dropped, not surfaced"
         )
+
+
+# --- Task 7 review, M6: the escalation's run-level surface ------------------
+
+
+def test_a_resolved_run_gets_a_run_level_disclosure_in_every_format(tmp_path):
+    """M6. Without this, an 11-of-14-resolved run said so only on the claims
+    that cite one of the 11 — a reader who stops at the top of the report
+    never learns that some verdicts below rest on a model reading or a
+    person's choice."""
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(manuscript="m.pdf", labels_resolved=["6", "7"],
+                           numbering_choice="llm_resolved")
+    results = RunResults(manuscript="m.pdf", converter="pymupdf", claims=[_claim()])
+    write_reports(results, manifest, tmp_path, png=False)
+    rendered = {name: (tmp_path / name).read_text() for name in FORMATS}
+
+    d = next(x for x in run_disclosures(results, manifest) if x.key == "numbering_resolution")
+    for name, body in rendered.items():
+        assert d.token in body, f"numbering_resolution token missing from {name}"
+
+
+def test_an_ordinary_run_with_nothing_resolved_adds_no_disclosure(tmp_path):
+    """A run where nothing was ever disputed must not grow a disclosure about
+    a resolution that never happened."""
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(manuscript="m.pdf")
+    fired = run_disclosures(
+        RunResults(manuscript="m.pdf", converter="pymupdf", claims=[_claim()]), manifest
+    )
+    assert not any(d.key == "numbering_resolution" for d in fired)
+
+
+def test_a_withheld_run_adds_no_resolution_disclosure(tmp_path):
+    """`choice == "withheld"` settled nothing — `_labels_disputed` already
+    covers this case, and `_numbering_resolution` must stay silent about it
+    rather than claim a resolution that did not happen."""
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(manuscript="m.pdf", labels_disputed=["9"],
+                           numbering_choice="withheld", numbering_chosen_by="user")
+    fired = run_disclosures(
+        RunResults(manuscript="m.pdf", converter="pymupdf", claims=[_claim()]), manifest
+    )
+    assert not any(d.key == "numbering_resolution" for d in fired)
+
+
+def test_a_claim_citing_both_a_disputed_and_a_resolved_label_mentions_both(tmp_path):
+    """m6. A claim citing one still-disputed label and one resolved label
+    used to get only the withheld text — a reader stopping there would not
+    learn the other citation's verdict rests on a resolution at all."""
+    from papertrace.models import RefManifest
+
+    manifest = RefManifest(manuscript="m.pdf", labels_disputed=["9"], labels_resolved=["7"])
+    claim = _claim(refs=["7", "9"], withheld_refs=["9"])
+    d = next(x for x in claim_disclosures(claim, manifest) if x.key == "claim_pairing")
+    assert "[9]" in d.text
+    assert "[7]" in d.text, "the resolved co-citation must not vanish from the note"

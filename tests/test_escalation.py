@@ -17,6 +17,7 @@ module's own `_wire_offline` uses) and by fabricating the flat-text extraction,
 never by pretending the pure dict-builder returns something it does not.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -138,9 +139,19 @@ def test_the_disagreement_is_written_before_the_question_is_asked(disputed, monk
     assert "First paper" in seen["text"], "the agreed label's text is context, not a finding"
 
 
-def test_the_path_to_the_disagreement_file_is_printed(disputed, capsys):
+def test_the_path_to_the_disagreement_file_is_printed(disputed, monkeypatch, capsys):
     """A file nobody is told about is a file nobody reads, and the menu's first
-    option spends money on a question the reader could answer by looking."""
+    option spends money on a question the reader could answer by looking.
+
+    A wide console is forced (m10 of the Task 7 review): the absolute
+    `tmp_path` printed here is one unbroken "word" to rich's wrapper, and at
+    the ~80-column default it can hard-break mid-filename rather than at a
+    space, which would fail this assertion on any tmp_path long enough — this
+    one happened to pass only by being short.
+    """
+    from rich.console import Console
+
+    monkeypatch.setattr(cli, "console", Console(width=1000))
     pdf, case, answers = disputed
     answers.append("2")
     _run_refs(pdf, case)
@@ -171,10 +182,13 @@ def test_the_default_answer_asks_the_model_and_records_the_user_as_choosing(
     # True, and correctly so: `numbering_verified` means the chosen list
     # accounts for exactly the labels the body cites — a question of EXTENT,
     # which this fixture's parse does answer. A disputed label is a question
-    # of CONTENT. The escalation may not touch this flag in either
-    # direction, and asserting it is unchanged is what pins that;
-    # `tests/test_numbering_invariant.py` proves no model path can set it
-    # where it is legitimately False.
+    # of CONTENT. No branch of `_escalate_disputed` assigns `rec.verified`
+    # (grep it) — option 1 only swaps individual entries within the same
+    # list, never its length or numbering, so the extent claim this fixture
+    # already earned stands. `test_a_resolved_label_judges_against_the_resolved_entry`
+    # below pins the direction actually feared (a resolution must not flip
+    # this from False to True); Task 8 is the one that closes the remaining
+    # menu choices over more fixtures.
     assert manifest.numbering_verified is True
     assert manifest.labels_resolved == ["2"]
     assert manifest.labels_disputed == []
@@ -182,6 +196,39 @@ def test_the_default_answer_asks_the_model_and_records_the_user_as_choosing(
     # against the paper the resolution named, not the one it ruled against
     two = next(e for e in manifest.entries if e.num == "2")
     assert two.doi == "10.1000/beta"
+    assert two.slug, "C1: a slug-less entry is silently dropped by check.py"
+
+
+def test_a_real_resolution_call_produces_a_usable_entry_end_to_end(disputed, monkeypatch):
+    """C1, through the REAL `resolve_disputed` — not a stub.
+
+    Every other option-1 test in this file replaces `resolve_disputed` with a
+    lambda whose entry is built through `refs._entry`, which sets the one
+    field the real function forgot (`slug`). A test double built from a
+    production helper can supply an invariant the code under test omits, and
+    then hide exactly the bug it looks like it is testing — that is how a
+    slug-less resolved entry (silently dropped by `check.py`, downloaded to
+    `sources_resolved/None.pdf`) survived review. This mocks only the seam
+    `resolve_disputed` itself calls (`ask._ask`), so the real field
+    verification and `refs._entry`-based construction actually run.
+    """
+    import papertrace.ask as ask_mod
+
+    pdf, case, answers = disputed
+    answers.append("1")
+    # "Second paper" must be found verbatim in one of the two texts shown to
+    # the call — it is, in `refs_text`, printed as "[2] Beta B. Second paper.
+    # 2021." — so this is a genuine verbatim-verified answer, not a stub.
+    reply = json.dumps([{"num": "2", "title": "Second paper", "year": "2021"}])
+    monkeypatch.setattr(ask_mod, "_ask", lambda prompt, model=None: reply)
+
+    manifest = _run_refs(pdf, case)
+
+    assert manifest.numbering_choice == "llm_resolved"
+    assert manifest.labels_resolved == ["2"]
+    two = next(e for e in manifest.entries if e.num == "2")
+    assert two.title == "Second paper"
+    assert two.slug, "the real resolve_disputed must produce a usable slug (C1)"
 
 
 def test_a_resolver_failure_leaves_every_label_disputed_and_is_reported(disputed, monkeypatch):
@@ -204,13 +251,11 @@ def test_a_resolver_failure_leaves_every_label_disputed_and_is_reported(disputed
     assert manifest.numbering_chosen_by == "user"
     assert manifest.labels_disputed == ["2"]
     assert manifest.labels_resolved == []
-    # True, and correctly so: `numbering_verified` means the chosen list
-    # accounts for exactly the labels the body cites — a question of EXTENT,
-    # which this fixture's parse does answer. A disputed label is a question
-    # of CONTENT. The escalation may not touch this flag in either
-    # direction, and asserting it is unchanged is what pins that;
-    # `tests/test_numbering_invariant.py` proves no model path can set it
-    # where it is legitimately False.
+    # True, and correctly so: `numbering_verified` is an EXTENT claim about
+    # this fixture's parse, unaffected by a resolution attempt that raised
+    # before touching anything. No branch of `_escalate_disputed` assigns
+    # `rec.verified` (grep it); Task 8's job is to close this over every
+    # remaining menu choice with its own fixtures.
     assert manifest.numbering_verified is True
 
 
@@ -233,14 +278,17 @@ def test_choosing_one_reading_whole_records_which_one(disputed):
     manifest = _run_refs(pdf, case)
     assert manifest.numbering_choice == "pymupdf"
     assert manifest.numbering_chosen_by == "user"
-    # True, and correctly so: `numbering_verified` means the chosen list
-    # accounts for exactly the labels the body cites — a question of EXTENT,
-    # which this fixture's parse does answer. A disputed label is a question
-    # of CONTENT. The escalation may not touch this flag in either
-    # direction, and asserting it is unchanged is what pins that;
-    # `tests/test_numbering_invariant.py` proves no model path can set it
-    # where it is legitimately False.
-    assert manifest.numbering_verified is True
+    # False, correctly: `reconcile` measured EXTENT against the "parsed"
+    # reading, not the "pymupdf" one just adopted in its place. Carrying the
+    # old True forward would print "numbering confirmed" about a list nobody
+    # measured (Task 7 review, M1) — cleared here, never widened to a second
+    # meaning, which is why it is False rather than some other value.
+    assert manifest.numbering_verified is False
+    assert manifest.numbering_note.startswith("you chose")
+    # M1's other half: `reference_source` must name the reading actually
+    # adopted, not the one `reconcile` measured before it was discarded
+    assert manifest.reference_source == "pymupdf"
+    assert manifest.numbering_ledger == {}
     # the entries carried forward are that reading's
     assert [e.num for e in manifest.entries] == ["1", "2"]
     gamma = next(e for e in manifest.entries if e.num == "2")
@@ -391,3 +439,185 @@ def test_a_run_never_says_confirmed_beside_a_withheld_label(disputed, capsys):
     assert "readings disagree at [2]" in out
     assert "numbering confirmed" not in out, "confirmed printed beside a withheld label"
     assert "accounts for every cited label" in out
+
+
+# --- Task 7 review, Majors 8 and 9: a reading cannot launder its own coin-flip
+
+
+def test_option_3_excludes_a_reading_that_duplicates_the_disputed_label(tmp_path, monkeypatch):
+    """M8. `label_agreement` marks a label `disputed` outright when a single
+    reading carries it twice — "downgrading that to `single` ... would let a
+    verdict rest on the coin-flip" (`refs.py`). Offering that same reading in
+    option 3's menu would let a person adopt it whole anyway, laundering the
+    coin-flip into `labels_resolved`. It must not be offered at all."""
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    calls = []
+
+    def ask(prompt_text, **kw):
+        calls.append((prompt_text, kw.get("choices")))
+        return {"  choice": "3", "  which reading": "pymupdf"}.get(prompt_text, "3")
+
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(ask))
+
+    dup_a = _entry("2", "Alpha A. First. 2020.")
+    dup_b = _entry("2", "Alpha A. Different. 2021.")
+    single = _entry("2", "Gamma G. A different paper. 2019.")
+    rec = _rec(labels_disputed=["2"])
+    out = cli._escalate_disputed(
+        tmp_path, rec, [dup_a],
+        {"parsed": [dup_a, dup_b], "pymupdf": [single]},
+        {"parsed": "text a", "pymupdf": "text b"},
+    )
+
+    top_menu = next(c for c in calls if c[0] == "  choice")
+    assert "3" in top_menu[1], "pymupdf alone still qualifies, so option 3 must be offered"
+    which_call = next(c for c in calls if c[0] == "  which reading")
+    assert which_call[1] == ["pymupdf"], "the duplicating reading must not be offered"
+    assert rec.choice == "pymupdf"
+    assert out == [single]
+
+
+def test_option_3_is_never_offered_when_nothing_qualifies(tmp_path, monkeypatch):
+    """M9. `offered[0]` used to raise `IndexError` once neither `parsed` nor
+    `pymupdf` qualified — reachable whenever the run's own parse duplicates
+    the disputed label (this fixture) or is simply absent (a crossref+llm-only
+    dispute). The fix is at the menu: option 3 is never offered, so `choices`
+    passed to the real `Prompt.ask` never contains it. This pins the
+    degradation for a caller that ignores `choices` anyway (a misbehaving
+    test double, never a real terminal) — it falls through to the
+    model-resolution path rather than crashing.
+    """
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    calls = []
+
+    def ask(prompt_text, **kw):
+        calls.append((prompt_text, kw.get("choices")))
+        return "3"
+
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(ask))
+    monkeypatch.setattr(
+        reflist_mod, "resolve_disputed",
+        lambda labels, names, texts, model=None: reflist_mod.Resolution(
+            still_disputed=list(labels), provenance=reflist_mod.ReflistProvenance(),
+        ),
+    )
+    dup_a = _entry("2", "Alpha A. First. 2020.")
+    dup_b = _entry("2", "Alpha A. Different. 2021.")
+    rec = _rec(labels_disputed=["2"])
+    out = cli._escalate_disputed(
+        tmp_path, rec, [dup_a], {"parsed": [dup_a, dup_b]}, {"parsed": "text"},
+    )
+
+    top_menu = next(c for c in calls if c[0] == "  choice")
+    assert "3" not in top_menu[1]
+    assert not any(c[0] == "  which reading" for c in calls), "never reached — nothing offered"
+    assert rec.choice == "llm_resolved"
+    assert out == [dup_a]
+
+
+# --- Task 7 review, m5 and M3: an orphaned "resolved" label, and honest reasons
+
+
+def test_a_resolved_label_absent_from_entries_stays_disputed(tmp_path, monkeypatch):
+    """m5. `resolve_disputed` only ever answers about labels it was asked
+    about, but those labels come from `rec.labels_disputed` — computed over
+    ALL candidate readings (crossref, llm included), not just the chosen
+    `entries` list. A label the chosen list never carried at all has nothing
+    to substitute, and must not be recorded resolved with no entry behind it."""
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
+    orphan = _entry("99", "Nobody In The Chosen List. 2020.")
+    real = _entry("2", "Beta B. The real one resolved. 2021.")
+    monkeypatch.setattr(
+        reflist_mod, "resolve_disputed",
+        lambda labels, names, texts, model=None: reflist_mod.Resolution(
+            resolved={"2": real, "99": orphan}, still_disputed=[],
+            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5"),
+        ),
+    )
+    chosen = _entry("2", "Beta B. Original. 2021.")
+    rec = _rec(labels_disputed=["2", "99"])
+    out = cli._escalate_disputed(
+        tmp_path, rec, [chosen], {"parsed": [chosen]}, {"parsed": "text"},
+    )
+
+    assert rec.labels_resolved == ["2"], "99 has no entry to substitute"
+    assert rec.labels_disputed == ["99"], "orphaned, not silently dropped"
+    assert out == [real]
+
+
+def test_the_console_names_the_real_reason_a_label_stayed_disputed(tmp_path, monkeypatch, capsys):
+    """M3. A malformed reply, an unprinted title and a genuine "cannot tell"
+    are three different findings `resolve_disputed` already records in
+    `provenance` — asserting one blanket "the model could not tell" over all
+    three is a plausible-looking cause standing in for the honest one."""
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
+    prov = reflist_mod.ReflistProvenance(model="claude-opus-5")
+    prov.fields_discarded.append("[9].title")
+    monkeypatch.setattr(
+        reflist_mod, "resolve_disputed",
+        lambda labels, names, texts, model=None: reflist_mod.Resolution(
+            still_disputed=["9"], provenance=prov,
+        ),
+    )
+    rec = _rec(labels_disputed=["9"])
+    entry = _entry("9", "Somebody. 2020.")
+    cli._escalate_disputed(tmp_path, rec, [entry], {"parsed": [entry]}, {"parsed": "text"})
+    out = capsys.readouterr().out
+
+    assert "not printed in either text" in out
+    assert "could not tell which paper it names" not in out
+
+
+# --- Task 7 review, m1: the span window backs up to the previous line break -
+
+
+def test_label_span_backs_up_past_a_long_preceding_entry():
+    """m1. The old fixed-distance backtrack (`_SPAN_BEFORE = 260`) degraded
+    silently once the preceding entry was longer than it — routine with a
+    full author list. Backing up to the previous line break is exactly one
+    entry by construction and cannot degrade regardless of length."""
+    long_entry = "A" * 400
+    text = f"[1] {long_entry}\n[2] Beta B. Second paper. 2021.\n"
+    span = cli._label_span(text, "2")
+    assert long_entry in span, "a 400-char preceding entry must still be included"
+
+
+def test_label_span_at_the_very_start_of_the_text():
+    text = "[1] Alpha A. First paper. 2020.\n[2] Beta B. Second paper. 2021.\n"
+    span = cli._label_span(text, "1")
+    assert span.startswith("[1]")
+
+
+def test_label_span_is_empty_when_the_numeral_was_never_printed():
+    assert cli._label_span("no numbered list here", "7") == ""
+
+
+def test_a_resolved_entrys_slug_collision_is_disambiguated(tmp_path, monkeypatch):
+    """C1's remaining half. `resolve_all` never re-slugs, so a resolved entry
+    whose freshly computed slug collides with one already carried in the
+    chosen list would share a download path with it — the second download
+    overwrites the first. `_unique_slugs` re-runs over the WHOLE substituted
+    list, not just the newly resolved entries, so a collision introduced by
+    the substitution itself is caught too.
+    """
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(cli.Prompt, "ask", staticmethod(lambda *a, **k: "1"))
+    kept = _entry("1", "Smith J. An unrelated paper. 2020.")
+    wrong_two = _entry("2", "Wrong Wrong. 1999.")
+    resolved_same_slug = _entry("2", "Smith J. The resolved paper. 2020.")
+    monkeypatch.setattr(
+        reflist_mod, "resolve_disputed",
+        lambda labels, names, texts, model=None: reflist_mod.Resolution(
+            resolved={"2": resolved_same_slug}, still_disputed=[],
+            provenance=reflist_mod.ReflistProvenance(model="claude-opus-5"),
+        ),
+    )
+    rec = _rec(labels_disputed=["2"])
+    out = cli._escalate_disputed(
+        tmp_path, rec, [kept, wrong_two],
+        {"parsed": [kept, wrong_two]}, {"parsed": "text"},
+    )
+    slugs = [e.slug for e in out]
+    assert len(slugs) == len(set(slugs)), f"colliding slugs would share a download path: {slugs}"

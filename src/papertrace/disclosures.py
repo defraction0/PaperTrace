@@ -67,6 +67,11 @@ CLAIM_PAIRING_CORROBORATED_TOKEN = "agreed by every reading of the reference lis
 # that escape and two that do not
 REFLIST_TOKEN = "the reference list was also read by a model"
 NUMBERING_CORROBORATION_TOKEN = "two readings of the reference list agree on every cited label"
+# Task 7 review, M6: without this, a run that resolved 11 of 14 disputed
+# labels says so only on the claims that happen to cite one of them — the
+# withholding disclosure below (`labels_disputed`) already has a run-level
+# counterpart, and the resolution deserves the same one.
+NUMBERING_RESOLUTION_TOKEN = "labels resolved after the reference list readings disagreed"
 # a DIFFERENT token for a DIFFERENT fact — `numbering_corroborated` is a
 # per-label property (every cited label was independently agreed by >= 2
 # readings), while `corroborating_readings` is a per-reading one (this
@@ -834,6 +839,38 @@ def _numbering_corroboration(manifest) -> Disclosure | None:
     )
 
 
+def _numbering_resolution(manifest) -> Disclosure | None:
+    """Run-level surface for what `cli._escalate_disputed` settled.
+
+    `_labels_disputed` above is the run-level roll-up of what was withheld;
+    this is its counterpart for what was NOT — a reader who stops at the top
+    of the report should see that some verdicts below rest on a model reading
+    or a person's choice, not discover it claim by claim on only the claims
+    that happen to cite a resolved label (Task 7 review, M6).
+    """
+    choice = getattr(manifest, "numbering_choice", "") or ""
+    resolved = sorted(getattr(manifest, "labels_resolved", None) or [], key=lambda r: int(r))
+    if not resolved or choice not in ("llm_resolved", "parsed", "pymupdf"):
+        return None
+    named = f"[{'], ['.join(resolved)}]"
+    by = (
+        "a model reading of both texts, verified field by field, which you accepted"
+        if choice == "llm_resolved"
+        else f"you, who chose the `{choice}` reading whole for every disputed label"
+    )
+    return Disclosure(
+        key="numbering_resolution",
+        level="warn",
+        token=NUMBERING_RESOLUTION_TOKEN,
+        text=(
+            f"{named} {NUMBERING_RESOLUTION_TOKEN}, settled by {by}. That is a reading, "
+            "not a confirmation — the numbering stays recorded as unconfirmed for these "
+            "labels, and each claim citing one carries its own note."
+        ),
+        short=f"{named} {NUMBERING_RESOLUTION_TOKEN}",
+    )
+
+
 def _label_group(labels: list[str]) -> str:
     """`["4", "5"]` -> `[4], [5]` — a citation-label group as the reader sees it."""
     return f"[{'], ['.join(labels)}]"
@@ -1078,6 +1115,8 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
             out.append(d)
         if d := _labels_disputed(manifest):
             out.append(d)
+        if d := _numbering_resolution(manifest):
+            out.append(d)
         if d := _numbering_corroboration(manifest):
             out.append(d)
         if d := _reflist(manifest):
@@ -1206,18 +1245,31 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
     if withheld or disputed:
         labels = _label_group(withheld or disputed)
         one = len(withheld or disputed) == 1
+        text = (
+            f"This claim cites {labels}, and the {CLAIM_PAIRING_WITHHELD_TOKEN} about "
+            f"{'that label' if one else 'those labels'}: two readings of the "
+            "bibliography name different papers for it, so the source fetched under "
+            f"that label may not be the paper the manuscript actually cites. No "
+            f"verdict was reached on {'it' if one else 'them'} — check the retrieval "
+            "manifest before treating this claim as checked."
+        )
+        if resolved:
+            # This claim cites BOTH a still-disputed label and one that WAS
+            # resolved — the withheld state is the more urgent finding and
+            # keeps the token/level, but a reader who stops here must not be
+            # left thinking every citation on this claim shares the same fate
+            # (m6 of the Task 7 review): the other label's verdict rests on a
+            # resolution, not a withholding, and that is a different caveat.
+            text += (
+                f" This claim also cites {_label_group(resolved)}, where the readings "
+                "disagreed too but a resolution was accepted for it — see that label's "
+                "own reason in the retrieval manifest."
+            )
         return Disclosure(
             key="claim_pairing",
             level="warn",
             token=CLAIM_PAIRING_WITHHELD_TOKEN,
-            text=(
-                f"This claim cites {labels}, and the {CLAIM_PAIRING_WITHHELD_TOKEN} about "
-                f"{'that label' if one else 'those labels'}: two readings of the "
-                "bibliography name different papers for it, so the source fetched under "
-                f"that label may not be the paper the manuscript actually cites. No "
-                f"verdict was reached on {'it' if one else 'them'} — check the retrieval "
-                "manifest before treating this claim as checked."
-            ),
+            text=text,
             short=f"{labels} {CLAIM_PAIRING_WITHHELD_TOKEN}",
         )
 
@@ -1230,10 +1282,10 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
             text=(
                 f"This claim cites {labels}, {CLAIM_PAIRING_RESOLVED_TOKEN}. Two readings "
                 "of the bibliography disagreed there. A model was shown both, every field "
-                "of its answer was found verbatim in one of them, and a person accepted "
-                "the result — so this verdict rests on a reading nobody checked against "
-                "the printed page, chosen by a person. The numbering is still recorded as "
-                "unconfirmed."
+                "of its answer was found verbatim in one of them, and you accepted the "
+                "result — so this verdict rests on a reading nobody checked against the "
+                "printed page, and you are who accepted it. The numbering is still "
+                "recorded as unconfirmed."
             ),
             short=f"{labels} {CLAIM_PAIRING_RESOLVED_TOKEN}",
         )
