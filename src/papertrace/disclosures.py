@@ -67,6 +67,15 @@ CLAIM_PAIRING_CORROBORATED_TOKEN = "agreed by every reading of the reference lis
 # that escape and two that do not
 REFLIST_TOKEN = "the reference list was also read by a model"
 NUMBERING_CORROBORATION_TOKEN = "two readings of the reference list agree on every cited label"
+# a DIFFERENT token for a DIFFERENT fact — `numbering_corroborated` is a
+# per-label property (every cited label was independently agreed by >= 2
+# readings), while `corroborating_readings` is a per-reading one (this
+# reading agreed on ALL of them). The two can now disagree: every label
+# agreed, but no single reading spans every label. Forcing
+# NUMBERING_CORROBORATION_TOKEN's literal words ("two readings … agree on
+# every cited label") to cover that state would assert something the
+# `corroborating_readings` list — 0 or 1 names — cannot back up.
+NUMBERING_NO_SPANNING_READING_TOKEN = "no single reading agreed on every cited label"
 # The keys `claim_disclosures()` can emit. Declared here, where the producers
 # live, because three of the four report formats filter claim disclosures by
 # explicit key and so drop an unlisted one without erroring. The viewer is
@@ -573,6 +582,8 @@ def _reflist(manifest) -> Disclosure | None:
     leave `reflist_model == ""`; that is a SEPARATE fact from `outcome` and is
     handled by `named` below, never by conflating the two.
     """
+    from .reflist import REFLIST_OUTCOMES  # lazy: `.reflist` pulls in `.refs` -> `httpx`
+
     outcome = getattr(manifest, "reflist_outcome", "") or ""
     model = getattr(manifest, "reflist_model", "") or ""
     failure = getattr(manifest, "reflist_failure", "") or ""
@@ -581,17 +592,70 @@ def _reflist(manifest) -> Disclosure | None:
     # whose own labels do not add up is worth knowing about even when every
     # value it proposed was printed
     numbering = list(getattr(manifest, "reflist_numbering_findings", []) or [])
-    entries_proposed = int(getattr(manifest, "reflist_entries_proposed", 0) or 0)
+    # `None` — never `0` as a default — because `0` is a MEASURED value: a
+    # manifest that recorded a real reading (via `model` OR `notes`) without
+    # ever recording this count must not be told apart from one that measured
+    # zero. See `RefManifest.reflist_entries_proposed`'s own docstring.
+    entries_proposed = getattr(manifest, "reflist_entries_proposed", None)
     if not outcome:
-        # An older manifest from before `reflist_outcome` existed. A reported
-        # model name is positive proof a call happened and answered — settle
-        # as "read". Absent that, a `failure` reason alone is enough to say
-        # SOMETHING was asked for even though which state it reached was never
-        # recorded; treat it as "not_attempted" rather than manufacture a
-        # third guess. Only the inverse ("no name and no reason -> no call")
-        # would be the forbidden derivation, and that is exactly the case
-        # below that returns `None`.
-        outcome = "read" if model else ("not_attempted" if failure else "")
+        # An older manifest from before `reflist_outcome` existed.
+        # `reflist_fields_discarded` used to be the ONLY slot for "why there
+        # is no reading" too, before `reflist_failure` existed — round 1's
+        # `_llm_reference_reading` stored a failed call there as
+        # `"not obtained — <Exc>: …"` and an unavailable `claude` as
+        # `"not attempted — …"`. Those two prefixes are NOT positive proof of
+        # a reply (the exact false-success shape N1 was raised about, now
+        # reachable again on the LOAD path if they were counted as discarded
+        # values); a note without either prefix — `"[2] journal"` — is.
+        failure_notes = [n for n in notes if n.startswith(("not obtained — ", "not attempted — "))]
+        value_notes = [n for n in notes if n not in failure_notes]
+        if model or value_notes:
+            # A reported model name AND a genuinely discarded VALUE are each
+            # positive proof a call happened and a reply was obtained — settle
+            # as "read" from either, not from `model` alone (a real, unnamed
+            # reading with discarded fields but no `reflist_outcome` used to
+            # lose its required disclosure entirely).
+            outcome = "read"
+        elif failure_notes:
+            old = failure_notes[0]
+            outcome = "failed" if old.startswith("not obtained") else "not_attempted"
+            failure = failure or old.split(" — ", 1)[-1]
+        elif failure:
+            # A `failure` reason alone says SOMETHING was asked for even
+            # though which state it reached was never recorded; treat it as
+            # "not_attempted" rather than manufacture a third guess. Only the
+            # inverse ("no positive evidence -> no call") would be the
+            # forbidden derivation, and that is exactly the case below that
+            # returns `None`.
+            #
+            # This is a WEAKER inference than the ones above, and worth
+            # naming as such: a bare `failure` string cannot actually
+            # distinguish "never attempted" from "attempted and failed" (both
+            # states write to the same field), so "not_attempted" here is a
+            # guess at which of the two happened, not positive proof of it —
+            # only reachable from a hand-written manifest, since a live run
+            # always records `reflist_outcome` itself.
+            outcome = "not_attempted"
+        else:
+            outcome = ""
+    elif outcome not in REFLIST_OUTCOMES:
+        # A value this build's vocabulary does not recognise — a hand edit, or
+        # a manifest from a future version with a fourth outcome. Fail CLOSED:
+        # the alternative (falling through to the success branch below) would
+        # assert the token as a reading that was taken and used, which is the
+        # one claim an unrecognised state can least afford to make.
+        return Disclosure(
+            key="reflist",
+            level="warn",
+            token=REFLIST_TOKEN,
+            text=(
+                f"This run recorded that {REFLIST_TOKEN}, with an outcome "
+                f"({outcome!r}) this build of papertrace does not recognise. "
+                "Treat the reference numbering as resting on the readings above this "
+                "and nothing else, the same as an outcome that was never obtained."
+            ),
+            short=f"{REFLIST_TOKEN}: unrecognised outcome {outcome!r}",
+        )
     if not outcome or (outcome == "not_attempted" and not failure):
         # the second clause is the caller's own silent choice (`--no-llm-refs`,
         # `--parse-only`): `outcome` is recorded as `"not_attempted"` either
@@ -631,7 +695,16 @@ def _reflist(manifest) -> Disclosure | None:
         short = f"{REFLIST_TOKEN}: the call failed — {failure}"
         level = "warn"  # a call that did not return is not an aside
     elif any(n.startswith("reading discarded") for n in notes):
-        why = next(n for n in notes if n.startswith("reading discarded"))
+        # `removeprefix`, not the raw note: the note is stored WITH the
+        # "reading discarded — " marker so the console can find it (it looks
+        # for that same prefix), but this sentence already says "was
+        # discarded rather than used" in its own words — keeping the marker
+        # here reads as "discarded … reading discarded — the model's reply …",
+        # the exact stutter the console strips and this branch used not to
+        why = next(
+            n.removeprefix("reading discarded — ")
+            for n in notes if n.startswith("reading discarded")
+        )
         head = (
             f"Here {REFLIST_TOKEN} ({named}), and its reading was discarded rather than "
             f"used: {why}. Nothing it proposed contributed to the list below."
@@ -651,8 +724,21 @@ def _reflist(manifest) -> Disclosure | None:
                 f"{'was' if len(notes) == 1 else 'were'} not found in the printed text and "
                 f"{'was' if len(notes) == 1 else 'were'} discarded"
             )
-        else:
+        elif entries_proposed:
+            # >0 and nothing discarded — a real, positive corroboration
             dropped = "every value it proposed was found in the printed text"
+        else:
+            # `entries_proposed is None`: never recorded, and `notes` empty is
+            # not evidence of anything either, since a manifest that never
+            # recorded the count may equally never have recorded a discard.
+            # Saying nothing about the count is the honest degradation here —
+            # "every value … was found" would claim corroboration this
+            # manifest never measured, the same overstatement `entries_proposed
+            # == 0` used to make in the other direction.
+            dropped = (
+                "no discarded values were recorded for it, though this manifest never "
+                "recorded how many entries it proposed either"
+            )
         head = (
             f"Here {REFLIST_TOKEN} ({named}), shown two extractions of the same printed "
             f"bibliography and asked what numbered list it carries; {dropped}."
@@ -663,10 +749,16 @@ def _reflist(manifest) -> Disclosure | None:
             head += " The CLI did not report which model answered."
         short = f"{REFLIST_TOKEN} ({named}) — {len(notes)} discarded"
         level = "info"
-    if numbering:
+    if numbering and outcome not in ("not_attempted", "failed"):
         # appended rather than folded into `dropped`: "3 values discarded" and
         # "it numbered one entry twice" are different facts, and a reader who
-        # sees them as one number cannot tell which happened
+        # sees them as one number cannot tell which happened. Gated to the
+        # states where a reply actually exists to have numbered anything —
+        # `not_attempted`/`failed` provenances never carry numbering findings
+        # in a live run (`ReflistProvenance()` defaults empty), but a
+        # hand-built or forward-version manifest could combine "the call
+        # never returned" with a numbering finding that describes a reply
+        # that was never obtained.
         head += (
             " Its own numbering did not add up either — "
             + "; ".join(numbering)
@@ -695,11 +787,38 @@ def _numbering_corroboration(manifest) -> Disclosure | None:
     This is the other half of that sentence, and it is careful not to become the
     claim the warning is about: agreement between readings is not a checked
     numbering.
+
+    `numbering_corroborated` is a PER-LABEL fact (every cited label was
+    independently agreed by >= 2 readings); `corroborating_readings` is a
+    PER-READING one (this reading agreed on ALL of them, computed by
+    `refs.corroborating_readings`'s intersection). The two can be true and
+    short respectively: every label agreed, but no single reading spans every
+    label — 0 or 1 names in the list. `NUMBERING_CORROBORATION_TOKEN`'s own
+    words say "two readings … agree on every cited label", so it is asserted
+    only when the list actually has two or more names to back it; the
+    `len(readings) < 2` branch says the honest, weaker thing instead, under a
+    DIFFERENT token, rather than stretch that token over a list that cannot
+    support it (the "the readings taken" fallback used to do exactly that for
+    a legitimately computed, and now reachable, empty list).
     """
     if not getattr(manifest, "numbering_corroborated", False):
         return None
     readings = list(getattr(manifest, "corroborating_readings", []) or [])
-    named = ", ".join(readings) if readings else "the readings taken"
+    if len(readings) < 2:
+        return Disclosure(
+            key="numbering_corroboration",
+            level="info",
+            token=NUMBERING_NO_SPANNING_READING_TOKEN,
+            text=(
+                f"On this run {NUMBERING_NO_SPANNING_READING_TOKEN}: each label the body "
+                "cites was independently agreed by at least two readings of the "
+                "bibliography, but no reading agreed on every one of them at once. That "
+                "is short of corroboration, not a stronger version of it, and it does not "
+                "make the numbering verified."
+            ),
+            short=NUMBERING_NO_SPANNING_READING_TOKEN,
+        )
+    named = ", ".join(readings)
     return Disclosure(
         key="numbering_corroboration",
         level="info",

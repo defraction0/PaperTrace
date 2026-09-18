@@ -627,11 +627,16 @@ class RefManifest:
     # entries is not the same as none present.
     reflist_numbering_findings: list[str] = field(default_factory=list)
     # How many entries the model's reply proposed, before verification —
-    # ALWAYS recorded when `reflist_outcome == "read"`, including 0. Without
-    # this, "0 fields discarded" reads identically whether the model proposed
-    # nothing at all or proposed several entries that all verified cleanly,
-    # and the report cannot tell a reader which happened.
-    reflist_entries_proposed: int = 0
+    # ALWAYS recorded when `reflist_outcome == "read"`, including 0. `None`
+    # means NEVER RECORDED, not "proposed nothing" — the same three-state
+    # discipline `table_warnings` is documented under ("a list, `[]`, and
+    # null — nobody watched"). Without the distinction, "0 fields discarded"
+    # reads identically whether a model proposed nothing at all, proposed
+    # several entries that all verified cleanly, or this manifest simply
+    # predates the field — and a normalization that settles an older
+    # manifest's `reflist_outcome` as `"read"` from `reflist_model` alone
+    # would otherwise make EVERY such manifest read as "proposed nothing".
+    reflist_entries_proposed: int | None = None
 
     def document(self, slug: str) -> Document | None:
         """The judgeable file this slug names, article or supplement, or None."""
@@ -765,7 +770,9 @@ class RefManifest:
             reflist_model=data.get("reflist_model", ""),
             reflist_fields_discarded=data.get("reflist_fields_discarded", []),
             reflist_numbering_findings=data.get("reflist_numbering_findings", []),
-            reflist_entries_proposed=data.get("reflist_entries_proposed", 0),
+            # `.get` with no default: absent AND explicit `null` both read as
+            # `None` — "never recorded" — never coerced to `0`
+            reflist_entries_proposed=data.get("reflist_entries_proposed"),
         )
 
 

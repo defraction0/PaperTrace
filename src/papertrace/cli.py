@@ -1099,6 +1099,17 @@ def _refs_pipeline(
                 f"the reference list was also read by [bold]{named_model}[/bold], "
                 f"and its reading was [yellow]discarded[/yellow] — {whole}"
             )
+        elif reflist_prov.entries_proposed == 0:
+            # NF3: the exact mirror of the `whole` branch above, in the other
+            # direction — a reply of `[]` is a real reply, not a refused one,
+            # but "0 fields discarded as not printed — a second reading, not
+            # confirmation" reads as a clean corroboration from a model that
+            # proposed nothing to corroborate anything with
+            console.print(
+                f"the reference list was also read by [bold]{named_model}[/bold] — "
+                f"it proposed no entries at all [dim]— a second reading, not "
+                f"confirmation[/dim]"
+            )
         else:
             dropped = len(reflist_prov.fields_discarded)
             console.print(
@@ -1150,12 +1161,25 @@ def _refs_pipeline(
     rec.corroborating_readings = (
         corroborating_readings(others, body_labels) if rec.corroborated else []
     )
-    if rec.corroborated:
+    # `rec.corroborated` is per-label (every cited label agreed by >= 2
+    # readings); `corroborating_readings` is per-reading (this reading agreed
+    # on ALL of them). They can now disagree — every label agreed, but no
+    # SINGLE reading spans every label, leaving 0 or 1 names. A count under 2
+    # cannot back a "N readings agree" claim (agreement takes two), so this
+    # gates on the list itself rather than on `rec.corroborated` alone — the
+    # same fix `disclosures._numbering_corroboration` makes for the report.
+    if rec.corroborated and len(rec.corroborating_readings) >= 2:
         console.print(
             f"[green]✓ {len(rec.corroborating_readings)} readings of the reference list "
             f"agree[/green] on every cited label "
             f"[dim]({', '.join(rec.corroborating_readings)}) — corroboration, not a "
             f"confirmed numbering[/dim]"
+        )
+    elif rec.corroborated:
+        console.print(
+            "[dim]every cited label was independently agreed by at least two readings, "
+            "but no single reading agreed on all of them — not printed as "
+            "corroboration[/dim]"
         )
     if rec.labels_disputed:
         console.print(
@@ -1267,7 +1291,13 @@ def _refs_pipeline(
         reflist_model=reflist_prov.model,
         reflist_fields_discarded=reflist_prov.fields_discarded,
         reflist_numbering_findings=reflist_prov.numbering_findings,
-        reflist_entries_proposed=reflist_prov.entries_proposed,
+        # `None`, not `0`, for every outcome but `"read"`: `entries_proposed`
+        # is only ever measured once a reply exists, and writing the
+        # provenance's own unmeasured default would publish "measured zero"
+        # for a call that never returned anything to measure
+        reflist_entries_proposed=(
+            reflist_prov.entries_proposed if reflist_prov.outcome == "read" else None
+        ),
     )
     manifest.to_json(case / "refs_manifest.json")
     ok = len(manifest.retrieved)

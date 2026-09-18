@@ -214,9 +214,13 @@ def propose(
         # "checked and refused" (`discarded_whole`'s meaning) — the reason
         # belongs in `failure`, the same slot a disabled or claude-absent call
         # uses for "why there is no reading"
+        # worded for a model that was never asked, not one whose reply could
+        # not be checked — no subprocess call happens on this path at all, so
+        # "the model proposed" (which the round-1 wording said) claims an
+        # attempt that never occurred
         prov.failure = (
-            "only one of the two extractions of the bibliography had any text, so "
-            "nothing the model proposed could have been checked against a second reading"
+            "only one of the two extractions of the bibliography had any text, so a "
+            "model reading was not attempted — there was no second reading to check it against"
         )
         return [], prov
 
