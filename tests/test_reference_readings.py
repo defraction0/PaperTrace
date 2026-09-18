@@ -492,12 +492,18 @@ def test_no_model_reply_can_set_numbering_verified(tmp_path, offline, monkeypatc
     has three entries against two cited labels and fails `_covers` on its own —
     the only way to make the two cases distinguishable.
 
-    `corroborating_readings` names three, not two: `offline`'s default
+    `corroborating_readings` names `parsed` and `pymupdf`: `offline`'s default
     `needs_flat=True` means the real, local flat-text reading of this same PDF
     also runs and also carries labels [1] and [2] (identical text to the
     parse, since the real backend here is pymupdf too) — so it votes exactly
-    where "parsed" does, and Major 1's fix (name only readings that actually
-    carried a cited label) correctly counts it alongside "llm" and "parsed".
+    where "parsed" does.
+
+    `llm` is NOT among them, and the model here is agreeing entry for entry:
+    that is the whole-branch review's Major 1. `reflist.propose` may only copy
+    from the two extractions, and both of those vote here in their own right,
+    so the model's agreement is one text read twice. It can still dispute; it
+    cannot corroborate. The count printed on the console — 2 — is therefore
+    the number of readings that actually read the page.
     """
     agrees = (
         [RefEntry(num="1", raw="Alpha A. A first paper. J Fixture. 2020;1:1-9.",
@@ -516,7 +522,7 @@ def test_no_model_reply_can_set_numbering_verified(tmp_path, offline, monkeypatc
     payload = json.loads((case / "refs_manifest.json").read_text())
     assert payload["numbering_verified"] is False
     assert payload["numbering_corroborated"] is True
-    assert payload["corroborating_readings"] == ["llm", "parsed", "pymupdf"]
+    assert payload["corroborating_readings"] == ["parsed", "pymupdf"]
 
 
 def test_a_successful_reading_that_named_no_model_still_discloses_the_attempt(
@@ -870,13 +876,19 @@ def test_a_realistic_split_vote_prints_neither_a_bad_count_nor_a_false_token(
 ):
     """NF1 of the second Task 6 re-review, reproduced end to end — not merely
     constructed. `parsed` carries a `boundary_ambiguous` entry at one cited
-    label (so it casts no vote there — the 0.7.0 numbering case); the mocked
-    `llm` reading skips a different cited label entirely. Every cited label
-    still ends up `agreed` (by the readings that DO carry it), so
+    label (so it casts no vote there — the 0.7.0 numbering case); the
+    `crossref` deposit skips a different cited label entirely. Every cited
+    label still ends up `agreed` (by the readings that DO carry it), so
     `numbering_corroborated` is `True` — but no single reading voted on both,
     so `corroborating_readings` cannot name two. Before the fix this printed
     `✓ 1 readings … agree … (pymupdf)` — ungrammatical, and asserting an
     agreement the list does not contain.
+
+    The third reading is the deposit and not the model's: since the
+    whole-branch review's Major 1 a `DERIVED_READINGS` reading is never
+    credited with an agreement, so an `llm` third voter would make [1]
+    `single` for a reason this test is not about, and the split vote NF1 is
+    about would stop being reproduced at all.
     """
     ambiguous_1 = RefEntry(num="1", raw="Alpha A. A first paper. J Fixture. 2020;1:1-9.",
                            title="A first paper", year="2020", boundary_ambiguous=True)
@@ -912,8 +924,8 @@ def test_a_realistic_split_vote_prints_neither_a_bad_count_nor_a_false_token(
                              title="A first paper", year="2020"),
                     RefEntry(num="2", raw="Beta B. A second paper. J Fixture. 2021;2:10-19.",
                              title="A second paper", year="2021")],
-        "llm": [RefEntry(num="1", raw="Alpha A. A first paper. J Fixture. 2020;1:1-9.",
-                        title="A first paper", year="2020")],
+        "crossref": [RefEntry(num="1", raw="Alpha A. A first paper. J Fixture. 2020;1:1-9.",
+                              title="A first paper", year="2020")],
     }
     body = {"1", "2"}
     agreement = label_agreement(others, body)

@@ -746,32 +746,61 @@ def _first_divergence(a: list[RefEntry], b: list[RefEntry]) -> int | None:
 LABEL_AGREEMENT = ("agreed", "single", "disputed", "absent")
 
 
-def _comparably_same(x: RefEntry, y: RefEntry) -> bool:
-    """`_same_work` without its benefit of the doubt — agreement needs evidence.
+def _comparably_same(x: RefEntry, y: RefEntry) -> bool | None:
+    """Do these two readings name the same paper — or is there no way to tell?
 
-    The two functions answer opposite questions and so must break ties in
-    opposite directions. `_same_work` asks *"is there evidence these differ?"*,
-    which is right for `_first_divergence`: nothing comparable must not
-    manufacture a divergence, so it returns True. A per-label vote asks *"is
-    there evidence these agree?"*, and nothing comparable must not manufacture
-    agreement either.
+    Three answers, `True | False | None`, and `None` is the load-bearing one:
+    it means *cannot tell*, and it is a third answer rather than a collapsed
+    `False` for a measured reason. This is the same convention
+    `models.titles_match` publishes, for the same reason in the mirror
+    direction — the two are siblings answering opposite questions with one
+    three-valued vocabulary, so neither has to launder ignorance into an
+    answer its caller will act on.
 
-    Measured before this existed: `_same_work` gives the benefit of the doubt
-    when **either** side yields no title tokens, so a garbled DOI-less entry
-    paired with `Fujita S (2023) Characterization of brain volume changes…`
-    came back True, and the label was reported `agreed`. Two readings naming
-    demonstrably unrelated papers corroborating each other is the laundering of
-    ignorance this codebase exists to refuse — and `agreed` is the one state
-    that lets a verdict through.
+    `_same_work` is the other sibling and is deliberately untouched. It asks
+    *"is there evidence these differ?"* and answers True when there is nothing
+    comparable, which is right for `_first_divergence`: silence must not
+    manufacture a divergence. This asks *"is there evidence these agree?"*, so
+    silence must not manufacture agreement either — but it must not manufacture
+    DISAGREEMENT either, which is what returning `False` here did.
 
-    `_same_work` itself is deliberately untouched: `reconcile` computes
-    `contested` from it and needs the old direction.
+    Measured, both ways round. With `_same_work` as the comparator, a garbled
+    DOI-less entry paired with `Fujita S (2023) Characterization of brain
+    volume changes…` came back True and the label was reported `agreed` — two
+    readings naming demonstrably unrelated papers corroborating each other.
+    With a two-valued `False` here, a Crossref deposit of bare DOIs (the
+    documented `_reference_raw` fallback, 49 of 52 references on the paper
+    that prompted this) disputed every label it voted on, while the parse and
+    the flat reading agreed perfectly — an audit with no verdicts in it.
+    `None` is what neither of those can say.
     """
     if x.doi and y.doi:
         return x.doi.lower() == y.doi.lower()
     if not _title_tokens(x.raw) or not _title_tokens(y.raw):
-        return False  # nothing to compare is not agreement
+        return None  # nothing to compare: not agreement, and not disagreement
     return _same_work(x, y)
+
+
+def _says_something_comparable(e: RefEntry) -> bool:
+    """Does this entry carry anything a comparison could ever have used?
+
+    Per ENTRY, not per pair. A voter that carries a DOI has said something
+    comparable even where no other reading printed one; a voter with neither a
+    DOI nor a single title token has said nothing any reading could ever agree
+    or disagree with, and `label_agreement` treats a label ALL of whose voters
+    are like that as `disputed` rather than `single`.
+    """
+    return bool(e.doi) or bool(_title_tokens(e.raw))
+
+
+# Readings whose entries are COPIED, value by value, out of other readings
+# that vote here in their own right. `reflist.propose` may only reproduce what
+# text A or text B already printed — so the model agreeing with one of them is
+# one text read twice, not two readings agreeing, and naming it as
+# corroboration would make `numbering_corroborated` true on the strength of a
+# reading echoing another voter. It still votes: a DISAGREEMENT from it is
+# real, and disagreeing is the only power the safety property grants it.
+DERIVED_READINGS = ("llm",)
 
 
 def label_agreement(
@@ -805,22 +834,77 @@ def label_agreement(
     majority (invariant 3): "a non-unique match is refused, never ranked" is
     this codebase's own rule for exactly this shape of choice, applied here to
     readings instead of provided files.
+
+    A voter that **cannot be compared** abstains rather than dissenting — see
+    `_label_state` for the whole rule and for the one case where it does not
+    apply.
     """
-    result: dict[str, str] = {}
-    for label in body:
-        voters, duplicated = _label_voters(candidates, label)
-        if duplicated:
-            result[label] = "disputed"
-        elif not voters:
-            result[label] = "absent"
-        elif len(voters) == 1:
-            result[label] = "single"
-        else:
-            agree = all(
-                _comparably_same(x, y) for (_, x), (_, y) in itertools.combinations(voters, 2)
-            )
-            result[label] = "agreed" if agree else "disputed"
-    return result
+    return {label: _label_state(candidates, label)[0] for label in body}
+
+
+def _label_state(
+    candidates: dict[str, list[RefEntry]], label: str
+) -> tuple[str, list[str]]:
+    """One label's agreement state, and the readings that earned an `agreed`.
+
+    The single place the rule lives: `label_agreement` publishes the state and
+    `corroborating_readings` intersects the names, so the two can never drift
+    into two different definitions of what agreeing means.
+
+    The comparison is pairwise through `_comparably_same`, which has three
+    answers:
+
+    * any pair `False` — two readings actively name different papers — is
+      `disputed`, with no majority and no tie-break.
+    * a pair that is `None` is not a vote against anything. The voter is
+      EXCLUDED from the comparison rather than counted as dissent: a Crossref
+      deposit of bare DOIs can be compared with nothing, and counting that as
+      disagreement withheld every verdict in a run whose two parses agreed
+      perfectly.
+    * excluding it can leave one reading standing, which is `single` — no
+      corroboration claimed, no verdict withheld. That is the state a
+      one-reading run has always been in, and it is the honest one: one
+      reading spoke and nothing agreed or disagreed with it.
+
+    The exception, and it is one character away from the rule above: where NO
+    voter said anything comparable at all (`_says_something_comparable` false
+    for every one of them) the label is `disputed`, not `single`. `absent`
+    would be false — readings do carry it; `single` would be false — none of
+    them spoke comparably; `agreed` is the laundering this function exists to
+    refuse. Nothing establishes that these name one paper, and withholding is
+    the honest answer to that.
+
+    So `disputed` carries two causes — the readings contradict each other, and
+    nothing could be compared. Both withhold a verdict, which is right, but
+    **no prose may say the readings named different papers on the strength of
+    this state alone**; the report's wording covers both.
+
+    The second returned value is the readings credited with the agreement,
+    which is not simply the voters: `DERIVED_READINGS` are excluded, and a
+    label needs two CREDITED readings to reach `agreed`.
+    """
+    voters, duplicated = _label_voters(candidates, label)
+    if duplicated:
+        return "disputed", []
+    if not voters:
+        return "absent", []
+    if len(voters) == 1:
+        # nothing was compared because there was nobody to compare with — a
+        # different fact from "compared and found uncomparable" below
+        return "single", []
+    concurring: set[str] = set()
+    for (name_x, x), (name_y, y) in itertools.combinations(voters, 2):
+        same = _comparably_same(x, y)
+        if same is False:
+            return "disputed", []
+        if same:
+            concurring |= {name_x, name_y}
+    if not concurring:
+        if not any(_says_something_comparable(e) for _, e in voters):
+            return "disputed", []  # see this docstring's "exception"
+        return "single", []
+    credited = sorted(n for n in concurring if n not in DERIVED_READINGS)
+    return ("agreed", credited) if len(credited) >= 2 else ("single", [])
 
 
 def _label_voters(
@@ -855,23 +939,22 @@ def corroborating_readings(candidates: dict[str, list[RefEntry]], body: set[str]
     an entry — is not one that agreed on all of them, and a reading whose only
     carrier of a label is `boundary_ambiguous` cast no vote on it at all. Both
     were measured to overstate `corroborating_readings` in exactly this
-    function's absence. This recomputes each label's voters with
-    `_label_voters` — the same test `label_agreement` uses — and intersects
-    their names across every cited label, so a reading is named only when it
+    function's absence. This runs `_label_state` — the one place the rule
+    lives, the same call `label_agreement` makes — and intersects the readings
+    it credits across every cited label, so a reading is named only when it
     voted, and agreed, everywhere it was asked to.
+
+    A reading that could not be COMPARED on a label is not credited with it
+    either, and neither is a `DERIVED_READINGS` one: the model's reading is
+    copied out of the other voters' own texts, so naming it here would print
+    "two readings agree" over one text read twice.
     """
     names: set[str] | None = None
     for label in body:
-        voters, duplicated = _label_voters(candidates, label)
-        if duplicated or len(voters) < 2:
+        state, credited = _label_state(candidates, label)
+        if state != "agreed":
             return []
-        agree = all(
-            _comparably_same(x, y) for (_, x), (_, y) in itertools.combinations(voters, 2)
-        )
-        if not agree:
-            return []
-        label_names = {name for name, _ in voters}
-        names = label_names if names is None else (names & label_names)
+        names = set(credited) if names is None else (names & set(credited))
     return sorted(names) if names else []
 
 
@@ -882,18 +965,36 @@ def stamp_seen_in(chosen: list[RefEntry], candidates: dict[str, list[RefEntry]])
     by one reading only is the interesting case — especially `["llm"]`, which
     means no deterministic reading found it at all.
 
-    Matched on the label AND `_same_work`: a reading that carries [12] naming a
-    different paper has not corroborated this entry, and stamping its name here
-    on the strength of the shared numeral would turn a disagreement into
-    provenance. That is the same mistake `_covers` makes about extent, and it is
-    the reason this is not simply `label in {e.num for e in cand}`.
+    Matched on the label AND `_comparably_same`, the SAME comparator the
+    agreement axis uses. Stamping on the shared numeral alone would turn a
+    disagreement into provenance — the extent-for-content substitution
+    `_covers` is documented as blind to — and matching through `_same_work`
+    did it anyway: that function gives the benefit of the doubt when either
+    side yields no title tokens, so one manifest published both "two readings
+    contributed this entry" and "the readings do not agree about this label"
+    for the same label in the same run. Only a `True` stamps; `None` — nothing
+    to compare — is not evidence that a reading carried this work.
+
+    Two rules keep `[]` meaning one thing (no reading was established as
+    carrying this work) rather than doubling as "never computed":
+
+    * a chosen entry that IS one of the readings' own objects is credited to
+      that reading by identity, whatever the comparator can or cannot see in
+      it. A garbled entry the parse demonstrably produced must not come back
+      with an empty provenance.
+    * an entry that already carries a `seen_in` keeps it. `cli` stamps after
+      the escalation, and an entry substituted by `reflist.resolve_disputed`
+      records which printed text its values were copied from — a fact this
+      pass cannot recompute, because the readings that disputed the label
+      carry no entry matching the resolved one.
     """
     for e in chosen:
-        e.seen_in = sorted(
+        names = {
             name
             for name, cand in candidates.items()
-            if any(o.num == e.num and _same_work(e, o) for o in cand)
-        )
+            if any(o.num == e.num and (o is e or _comparably_same(e, o) is True) for o in cand)
+        }
+        e.seen_in = sorted(names | set(e.seen_in))
 
 
 def reconcile(

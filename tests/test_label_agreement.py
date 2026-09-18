@@ -334,6 +334,11 @@ def test_two_uncomparable_entries_are_disputed_rather_than_agreed():
     must not manufacture a divergence out of silence. A per-label vote asks the
     opposite question, so silence must not manufacture agreement either.
     Measured before `_comparably_same` existed: these two came back `agreed`.
+
+    NEITHER entry carries a DOI or a single title token, so nothing comparable
+    was said by anybody — see
+    `test_a_label_every_voter_is_mute_about_is_disputed_not_single` for the
+    ruling that keeps this `disputed` now that a cannot-tell voter abstains.
     """
     a = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
     b = RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")
@@ -344,14 +349,154 @@ def test_one_garbled_reading_cannot_corroborate_a_legible_one():
     """Broader than it looks: the benefit of the doubt applied when **either**
     side yielded no tokens, not only when both did. So a real reference paired
     with an unreadable one was `agreed`, and `agreed` is the single state that
-    lets a verdict through untouched."""
+    lets a verdict through untouched.
+
+    RE-RULED at the whole-branch review: the answer is `single`, not
+    `disputed`. The intent of this test — a garbled reading must not
+    CORROBORATE a legible one — is preserved by abstention, which is what
+    `single` records: one reading spoke, nothing agreed with it, nothing
+    contradicted it. Counting the garbled reading as dissent instead withheld
+    the verdict on a label nothing had said anything against, and on a
+    bare-DOI Crossref deposit it withheld every verdict in the run.
+    """
     good = RefEntry(
         num="7",
         raw="Fujita S (2023) Characterization of brain volume changes in aging individuals. "
             "JAMA Netw Open.",
     )
     garbled = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
-    assert label_agreement({"parsed": [good], "llm": [garbled]}, {"7"}) == {"7": "disputed"}
+    assert label_agreement({"parsed": [good], "llm": [garbled]}, {"7"}) == {"7": "single"}
+    assert corroborating_readings({"parsed": [good], "llm": [garbled]}, {"7"}) == []
+
+
+# --- "cannot compare" is a third answer, and it abstains --------------------
+
+
+def _bare_doi(num: str, doi: str) -> RefEntry:
+    """A Crossref deposit of a DOI and nothing else — `_reference_raw`'s
+    documented fallback, and 49 of 52 references on the Wiley paper that
+    prompted this. It yields no title tokens at all, permanently, by the
+    deposit's shape."""
+    return RefEntry(num=num, raw=f"https://doi.org/{doi}", doi=doi)
+
+
+def _printed(num: str) -> RefEntry:
+    """One entry as a reference list that prints no DOIs carries it — normal
+    for many journals, and the other half of Critical 1's shape: the deposit
+    has a DOI and nothing else, the page has everything but."""
+    return _entry(
+        num,
+        f"Fujita S, Mori S. Characterization of brain volume changes, entry {num}. "
+        "JAMA Netw Open. 2023;6(6).",
+    )
+
+
+def test_comparably_same_has_a_third_answer_for_nothing_to_compare():
+    """`None`, the same three-valued vocabulary `models.titles_match`
+    publishes for the same reason. `False` here is a claim about the two
+    papers being different, and a bare-DOI deposit is not evidence of that."""
+    assert _comparably_same(_bare_doi("7", "10.1002/hep.31884"), _printed("7")) is None
+    assert _comparably_same(_work("7", "10.1000/x7"), _work("7", "10.1000/x7")) is True
+    assert _comparably_same(_work("7", "10.1000/x7"), _work("7", "10.1000/x9")) is False
+
+
+def test_a_bare_doi_deposit_does_not_withhold_a_label_the_parses_agree_on():
+    """Critical 1 of the whole-branch review, reproduced.
+
+    A publisher deposits bare DOIs; the printed list prints none. The deposit
+    can be compared with neither parse, but the two parses agree with each
+    other perfectly. Counting the uncomparable voter as dissent made every
+    cited label `disputed`, every source withheld and every claim
+    `unchecked` — an audit with no verdicts in it, on a paper where nothing
+    was wrong."""
+    candidates = {
+        "crossref": [_bare_doi("7", "10.1002/hep.31884")],
+        "parsed": [_printed("7")],
+        "pymupdf": [_printed("7")],
+    }
+    assert label_agreement(candidates, {"7"}) == {"7": "agreed"}
+    # and the voter nobody could compare is not named as having agreed
+    assert corroborating_readings(candidates, {"7"}) == ["parsed", "pymupdf"]
+
+
+def test_dropping_the_uncomparable_voter_can_leave_one_and_that_prints():
+    """The second-order effect of the abstention rule, pinned deliberately.
+
+    On a `--backend pymupdf` run there is no flat reading, so the deposit and
+    the parse are the only two voters and the deposit cannot be compared.
+    One comparable voter remains, which is `single`: no corroboration is
+    claimed and no verdict is withheld. That is the state a one-reading run
+    has always been in, and it is what the pre-branch behaviour was — the
+    laundering this branch removed is `agreed`, which is what would claim the
+    deposit backed the parse."""
+    candidates = {
+        "crossref": [_bare_doi("7", "10.1002/hep.31884")],
+        "parsed": [_printed("7")],
+    }
+    assert label_agreement(candidates, {"7"}) == {"7": "single"}
+    assert corroborating_readings(candidates, {"7"}) == []
+
+
+def test_a_label_every_voter_is_mute_about_is_disputed_not_single():
+    """The cell the abstention rule does not cover, ruled at the review.
+
+    Two readings carry [7] and NEITHER says anything a comparison could use.
+    `absent` is false (two readings carry it), `single` is false (no reading
+    spoke comparably), `agreed` is the laundering. `disputed` is the true one:
+    nothing establishes that these name one paper."""
+    a = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
+    b = RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")
+    assert label_agreement({"parsed": [a], "pymupdf": [b]}, {"7"}) == {"7": "disputed"}
+
+
+def test_a_label_no_voter_carries_at_all_is_absent_not_disputed():
+    """One character apart from the cell above and opposite in meaning: zero
+    voters is `absent` (nobody read it), zero COMPARABLE voters with the label
+    carried is `disputed` (it was read and nothing could be compared)."""
+    a = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
+    b = RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")
+    assert label_agreement({"parsed": [a], "pymupdf": [b]}, {"9"}) == {"9": "absent"}
+
+
+# --- the model's reading may dispute, and that is all it may do -------------
+
+
+def test_the_model_reading_never_corroborates_what_it_copied_out_of():
+    """Major 1. `reflist.propose` may only COPY from the two extractions, and
+    both of those are voters in their own right — so the model agreeing with
+    one of them is one text read twice, not two readings agreeing. Here the
+    flat parse lost [7] entirely and the model echoed it back out of text A:
+    counting that as a second reading turned `numbering_corroborated` True and
+    printed "two readings of the reference list agree" over one text."""
+    e = _work("7", "10.1000/x7")
+    candidates = {"parsed": [e], "pymupdf": [], "llm": [_work("7", "10.1000/x7")]}
+    assert label_agreement(candidates, {"7"}) == {"7": "single"}
+    assert corroborating_readings(candidates, {"7"}) == []
+
+
+def test_the_model_reading_can_still_dispute_a_label():
+    """The other half of Major 1's ruling, and the only power the safety
+    property grants the model reading: it may disagree. Excluding it from
+    corroboration must not also excuse it from the comparison."""
+    candidates = {
+        "parsed": [_work("7", "10.1000/x7")],
+        "pymupdf": [_work("7", "10.1000/x7")],
+        "llm": [_work("7", "10.1000/x9")],
+    }
+    assert label_agreement(candidates, {"7"}) == {"7": "disputed"}
+
+
+def test_the_model_reading_is_not_named_beside_two_real_readings_that_agree():
+    """Three voters all agreeing: the two that read the page are named, the
+    one that copied out of them is not. The printed count is then 2, which is
+    what `NUMBERING_CORROBORATION_TOKEN` asserts."""
+    candidates = {
+        "parsed": [_work("7", "10.1000/x7")],
+        "pymupdf": [_work("7", "10.1000/x7")],
+        "llm": [_work("7", "10.1000/x7")],
+    }
+    assert label_agreement(candidates, {"7"}) == {"7": "agreed"}
+    assert corroborating_readings(candidates, {"7"}) == ["parsed", "pymupdf"]
 
 
 def test_two_doi_less_readings_that_do_share_a_title_still_agree():
@@ -387,7 +532,10 @@ def test_same_work_keeps_its_own_direction_for_its_own_callers():
     a = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
     b = RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")
     assert _same_work(a, b) is True
-    assert _comparably_same(a, b) is False
+    # `None`, not `False`: the two functions are siblings answering opposite
+    # questions, and each says "cannot tell" in its own caller's safe
+    # direction — `_same_work` as True, `_comparably_same` as a third answer
+    assert _comparably_same(a, b) is None
 
 
 # --- seen_in: which readings also carried a chosen entry's work ------------
@@ -420,6 +568,45 @@ def test_a_reading_naming_a_different_paper_under_the_same_label_is_not_provenan
     assert chosen[0].seen_in == ["parsed"]
 
 
+def test_seen_in_never_names_a_reading_label_agreement_says_disagrees():
+    """Major 3. `stamp_seen_in` matched through the lenient `_same_work`,
+    which gives the benefit of the doubt when either side yields no title
+    tokens — so one manifest published, for one label in one run, both "two
+    readings contributed this entry" (`seen_in`) and "the readings do not
+    agree about it" (`labels_disputed`). Two published fields contradicting
+    each other. The comparator here is now the same one the agreement axis
+    uses."""
+    chosen = [RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")]
+    other = RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")
+    candidates = {"parsed": chosen, "pymupdf": [other]}
+    assert label_agreement(candidates, {"7"}) == {"7": "disputed"}
+    stamp_seen_in(chosen, candidates)
+    assert chosen[0].seen_in == ["parsed"]
+
+
+def test_a_chosen_entry_is_always_credited_to_the_reading_it_came_from():
+    """Identity, not comparison: the chosen list IS one of the readings'
+    lists, so an entry nothing could be compared against still records where
+    it came from. Without this, a garbled entry's `seen_in` would be `[]` —
+    which the schema reads as "no reading was established as carrying this" —
+    for a reading that demonstrably carried it."""
+    garbled = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
+    chosen = [garbled]
+    stamp_seen_in(chosen, {"parsed": [garbled], "pymupdf": []})
+    assert chosen[0].seen_in == ["parsed"]
+
+
+def test_stamping_twice_never_erases_a_provenance_an_earlier_pass_recorded():
+    """`cli` stamps AFTER the escalation, so an entry substituted by
+    `reflist.resolve_disputed` already carries the reading its values were
+    copied from. That name is a fact this pass cannot recompute — the
+    readings that disputed the label carry no entry matching the resolved
+    one — so it is merged, never overwritten."""
+    resolved = RefEntry(num="7", raw="A resolved title.", seen_in=["pymupdf"])
+    stamp_seen_in([resolved], {"parsed": [], "pymupdf": []})
+    assert resolved.seen_in == ["pymupdf"]
+
+
 # --- corroborating_readings: named only where a reading actually voted -----
 # (N3 of the Task 6 re-review: `any(e.num in body for e in cand)` — the filter
 # that shipped in round 1 — named a reading that carried only SOME cited
@@ -447,7 +634,13 @@ def test_corroborating_readings_excludes_a_reading_whose_only_carrier_is_boundar
     """A `boundary_ambiguous` carrier casts no vote at all (invariant 5 of
     `label_agreement`) — sharing that fact with `corroborating_readings` is
     the point of factoring `_label_voters` out, rather than a coincidence two
-    unrelated filters happen to agree on."""
+    unrelated filters happen to agree on.
+
+    The two readings that DO vote here are `crossref` and `pymupdf`. This
+    fixture used to name `llm` as the second voter, which since Major 1 is
+    excluded from corroboration for a different reason entirely — so the test
+    would have gone green through a rule it was never about. Two independent
+    exclusions must not be tested by one fixture."""
     ambiguous_1 = _work("1", "10.1000/x1")
     ambiguous_1.boundary_ambiguous = True
     ambiguous_2 = _work("2", "10.1000/x2")
@@ -456,10 +649,10 @@ def test_corroborating_readings_excludes_a_reading_whose_only_carrier_is_boundar
     candidates = {
         "parsed": [ambiguous_1, ambiguous_2],
         "crossref": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
-        "llm": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
+        "pymupdf": [_work("1", "10.1000/x1"), _work("2", "10.1000/x2")],
     }
     assert label_agreement(candidates, body) == {"1": "agreed", "2": "agreed"}
-    assert corroborating_readings(candidates, body) == ["crossref", "llm"]
+    assert corroborating_readings(candidates, body) == ["crossref", "pymupdf"]
 
 
 def test_corroborating_readings_is_empty_unless_every_cited_label_agreed():
