@@ -883,17 +883,40 @@ def check_claims(
         avail = [(r, e) for r, e in avail_all if r not in disputed]
         c.withheld_refs = sorted({r for r, _ in withheld}, key=lambda r: int(r))
         own = manifest.manuscript_supplements if c.own_supplement else []
+        # Decided HERE, above every branch, so no path can `continue` past it.
+        # What is left after the retrieval filter could NOT be obtained — the
+        # only remaining reason a cited source goes unopened. Computed from
+        # `avail_all`, not `avail`: a withheld label WAS obtained, so it
+        # belongs in `withheld_refs` above, never here.
+        #
+        # The one state it stays empty in is the last clause: a claim where
+        # NOTHING was judged, withheld or provided is `not_retrieved`, and the
+        # verdict is already the whole report — repeating every cited label
+        # here would report the same gap twice, under a field whose published
+        # meaning is the CO-cited ones a surviving verdict did not rest on.
+        # When this assignment lived below the withheld branch's `continue`
+        # instead, a claim citing a withheld label and a paywalled one put the
+        # paywalled one in none of the three accounts a reader has — judged,
+        # withheld, unjudged — so a retrieval gap was erased by a withholding.
+        avail_all_refs = {r for r, _ in avail_all}
+        if avail or own or withheld:
+            c.unjudged_refs = [r for r in c.refs if r not in avail_all_refs]
         if not avail and not own:
             if withheld:
                 # NOT not_retrieved: every one of these sources WAS fetched and
                 # read. not_retrieved would falsely claim the source could not
-                # be obtained; the true reason is that two readings of the
-                # bibliography disagree about which paper this label names, so
+                # be obtained; the true reason is that the readings of the
+                # bibliography did not agree on which paper this label names, so
                 # no verdict can safely name the paper it was fetched for.
                 c.verdict = "unchecked"
                 labels = f"[{'], ['.join(c.withheld_refs)}]"
+                # "do not agree", never "name different papers": `disputed`
+                # has two causes — the readings contradict each other, and
+                # nothing in them could be compared — and no published field
+                # tells them apart, so a note asserting the first would be
+                # false whenever the second happened.
                 c.note = (
-                    f"withheld: the reference list's readings disagree about {labels}, "
+                    f"withheld: the reference list's readings do not agree about {labels}, "
                     "so the source retrieved under that label may not be the paper the "
                     "manuscript cites — check the retrieval manifest before relying on "
                     "this claim"
@@ -952,12 +975,6 @@ def check_claims(
                 SourceJudgement(source_slug=s.slug, ref="", kind="own_supplement")
             )
             by_slug.setdefault(s.slug, []).append(c)
-        # what is left here could NOT be obtained — the only remaining reason a
-        # cited source goes unopened. Computed from `avail_all`, not `avail`: a
-        # withheld label WAS obtained, so it belongs in `withheld_refs` above,
-        # never here — this is retrieval failure only.
-        avail_all_refs = {r for r, _ in avail_all}
-        c.unjudged_refs = [r for r in c.refs if r not in avail_all_refs]
 
     for slug, group in by_slug.items():
         try:

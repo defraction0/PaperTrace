@@ -59,6 +59,12 @@ LABELS_DISPUTED_TOKEN = "labels where the reference list readings disagree"
 # ANCHOR_UNKNOWN_TOKEN are one Disclosure key with one token per state actually
 # reached.
 CLAIM_PAIRING_WITHHELD_TOKEN = "verdict withheld — the reference list readings disagree"
+# A DIFFERENT fact from the one above, and it needs its own words: the
+# readings disagree AND nothing was ever fetched under the label, so there is
+# no source that "may not be the paper the manuscript cites" — there is no
+# source. `check.py` keeps such a label out of `withheld_refs` for this
+# reason; this token is how the report keeps the distinction it computed.
+CLAIM_PAIRING_UNRETRIEVED_TOKEN = "the readings disagree, and no source was retrieved for it"
 CLAIM_PAIRING_RESOLVED_TOKEN = "resolved by a model reading of both texts, accepted by you"
 CLAIM_PAIRING_CHOSEN_TOKEN = "you chose which reading of the reference list to use"
 CLAIM_PAIRING_CORROBORATED_TOKEN = "agreed by every reading of the reference list"
@@ -555,10 +561,12 @@ def _labels_disputed(manifest) -> Disclosure | None:
         token=LABELS_DISPUTED_TOKEN,
         text=(
             f"{named} are {LABELS_DISPUTED_TOKEN}: two or more readings of the "
-            "reference list name different papers for each of these labels, so "
-            "every claim citing one had that source withheld from judgement "
-            "rather than risk a verdict about the wrong paper. See each claim's "
-            "own note for which of its citations this affected."
+            "reference list did not agree on which paper each of these labels "
+            "names — they either named different papers, or nothing in them "
+            "could be compared — so every claim citing one had that source "
+            "withheld from judgement rather than risk a verdict about the wrong "
+            "paper. See each claim's own note for which of its citations this "
+            "affected."
         ),
         short=f"{named} {LABELS_DISPUTED_TOKEN}",
     )
@@ -1226,33 +1234,73 @@ def _no_quote(claim) -> Disclosure:
     )
 
 
+def _was_obtained(manifest, label: str) -> bool:
+    """Did this manifest actually retrieve a judgeable source for this label?
+
+    The same predicate `check.py`'s retrieval filter applies before it
+    partitions the withheld from the judged, restated here rather than
+    inferred from the emptiness of `withheld_refs` — an empty list is also
+    what a `results.json` written before that field existed carries.
+    """
+    e = next((x for x in getattr(manifest, "entries", []) if x.num == label), None)
+    return bool(e and e.status in ("retrieved", "provided") and e.slug)
+
+
 def _claim_pairing(claim, manifest=None) -> Disclosure | None:
     """Which pairing state this claim's cited labels are in, if not a clean one.
 
-    Four states, four tokens — the same one-key-many-tokens shape `anchor`
-    uses. `withheld` reads only `claim.withheld_refs`, so it fires with no
-    `manifest` at all (as it always has); the other three read the manifest's
-    escalation fields and are silent without one. `corroborated` is the only
-    `info`-level state, and `claim_disclosures` gates it on the claim already
-    carrying a `warn`: reassurance repeated on every clean claim is noise a
-    reader stops reading.
+    Five states, five tokens — the same one-key-many-tokens shape `anchor`
+    uses. `withheld` reads `claim.withheld_refs` and fires with no `manifest`
+    at all (as it always has); the other four read the manifest's escalation
+    fields and are silent without one. `corroborated` is the only `info`-level
+    state, and `claim_disclosures` gates it on the claim already carrying a
+    `warn`: reassurance repeated on every clean claim is noise a reader stops
+    reading.
+
+    A disputed label is in exactly one of two of those states, and the split
+    is the manifest entry's own status: withheld (a source was retrieved and
+    set aside) or unretrieved (there is no source at all). Both withhold a
+    verdict; only one of them has a fetched paper to warn about.
     """
     cited = set(claim.refs)
-    withheld = sorted(cited & set(claim.withheld_refs), key=int)
     disputed = sorted(cited & set(getattr(manifest, "labels_disputed", None) or []), key=int)
     resolved = sorted(cited & set(getattr(manifest, "labels_resolved", None) or []), key=int)
+    # A disputed label splits in two, and `check.py` already computed the
+    # split once: a label whose source WAS obtained is in `withheld_refs`; one
+    # that was never retrieved is deliberately kept out of it
+    # (`check.py`'s retrieval filter, and the test that pins it). Reading only
+    # `labels_disputed` when `withheld_refs` is empty undid that care and told
+    # a reader "the source fetched under that label" about a source nobody
+    # fetched. The entry's own status is what decides, NOT the emptiness of
+    # `withheld_refs`: a `results.json` written before that field existed
+    # carries `[]` for every claim, and choosing the never-retrieved wording
+    # from that emptiness would be the same mistake in the other direction.
+    unretrieved = [r for r in disputed if not _was_obtained(manifest, r)]
+    withheld = sorted(set(claim.withheld_refs) | (set(disputed) - set(unretrieved)), key=int)
+    withheld = [r for r in withheld if r in cited]
 
-    if withheld or disputed:
-        labels = _label_group(withheld or disputed)
-        one = len(withheld or disputed) == 1
+    if withheld:
+        labels = _label_group(withheld)
+        one = len(withheld) == 1
         text = (
             f"This claim cites {labels}, and the {CLAIM_PAIRING_WITHHELD_TOKEN} about "
-            f"{'that label' if one else 'those labels'}: two readings of the "
-            "bibliography name different papers for it, so the source fetched under "
-            f"that label may not be the paper the manuscript actually cites. No "
-            f"verdict was reached on {'it' if one else 'them'} — check the retrieval "
-            "manifest before treating this claim as checked."
+            f"{'that label' if one else 'those labels'}: the readings of the "
+            "bibliography did not agree on which paper it names — they either named "
+            "different papers or left nothing that could be compared — so the source "
+            "retrieved under that label may not be the paper the manuscript actually "
+            f"cites. No verdict was reached on {'it' if one else 'them'} — check the "
+            "retrieval manifest before treating this claim as checked."
         )
+        if unretrieved:
+            # named separately, never folded into the sentence above: nothing
+            # was fetched under these, so "the source retrieved under that
+            # label" is not true of them and the reader must not read one
+            # sentence as covering both
+            text += (
+                f" It also cites {_label_group(unretrieved)}, where the readings did "
+                "not agree either and the source was never retrieved, so nothing was "
+                "judged under that label at all."
+            )
         if resolved:
             # This claim cites BOTH a still-disputed label and one that WAS
             # resolved — the withheld state is the more urgent finding and
@@ -1271,6 +1319,28 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
             token=CLAIM_PAIRING_WITHHELD_TOKEN,
             text=text,
             short=f"{labels} {CLAIM_PAIRING_WITHHELD_TOKEN}",
+        )
+
+    if unretrieved:
+        # Nothing was withheld here, because nothing was obtained to withhold.
+        # Its own token and its own sentence: the withheld one asserts a
+        # source was retrieved under the label, which is the one thing that
+        # did not happen.
+        labels = _label_group(unretrieved)
+        one = len(unretrieved) == 1
+        return Disclosure(
+            key="claim_pairing",
+            level="warn",
+            token=CLAIM_PAIRING_UNRETRIEVED_TOKEN,
+            text=(
+                f"This claim cites {labels}, and {CLAIM_PAIRING_UNRETRIEVED_TOKEN}: the "
+                "readings of the bibliography did not agree on which paper "
+                f"{'it names' if one else 'they name'}, and the source was never "
+                "retrieved either, so nothing was judged under "
+                f"{'that label' if one else 'those labels'} in either direction. The "
+                "disagreement is recorded, not resolved."
+            ),
+            short=f"{labels} {CLAIM_PAIRING_UNRETRIEVED_TOKEN}",
         )
 
     if resolved and manifest is not None and manifest.numbering_choice == "llm_resolved":

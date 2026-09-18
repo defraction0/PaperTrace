@@ -546,8 +546,9 @@ def _write_disagreement(
     lines = [
         "# Reference numbering — where the readings disagree",
         "",
-        "One section per citation label whose readings of the bibliography name "
-        "different papers. Each reading's structured fields sit above the verbatim "
+        "One section per citation label whose readings of the bibliography did not "
+        "agree on one paper — either they name different papers, or nothing in them "
+        "could be compared. Each reading's structured fields sit above the verbatim "
         "text it was read from, so the disagreement can be settled by eye against "
         "the printed list.",
         "",
@@ -1261,8 +1262,10 @@ def _refs_pipeline(
         )
     if rec.labels_disputed:
         console.print(
-            f"[yellow]⚠ readings disagree at [{'], ['.join(rec.labels_disputed)}][/yellow] — "
-            "verdicts on claims citing those labels are withheld unless resolved below"
+            f"[yellow]⚠ the readings do not agree at "
+            f"[{'], ['.join(rec.labels_disputed)}][/yellow] — either they name different "
+            "papers there or nothing in them could be compared; verdicts on claims citing "
+            "those labels are withheld unless resolved below"
         )
     stamp_seen_in(entries, others)
 

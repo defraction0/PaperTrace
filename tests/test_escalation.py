@@ -436,7 +436,10 @@ def test_a_run_never_says_confirmed_beside_a_withheld_label(disputed, capsys):
 
     assert manifest.numbering_verified is True
     assert manifest.labels_disputed == ["2"]
-    assert "readings disagree at [2]" in out
+    # "do not agree", not "disagree": `disputed` also covers "nothing in the
+    # readings could be compared", and the console may not assert the
+    # contradicting cause for both — see `refs._label_state`
+    assert "the readings do not agree at [2]" in out
     assert "numbering confirmed" not in out, "confirmed printed beside a withheld label"
     assert "accounts for every cited label" in out
 

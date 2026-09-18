@@ -246,7 +246,7 @@
     },
     "labels_disputed": {
       "type": "array",
-      "description": "Citation labels where two or more readings of the bibliography actively named different papers, so the verdict on any claim citing them was withheld rather than printed. Absent means never computed — NOT 'none disputed' — the same three-state discipline as `table_warnings`.",
+      "description": "Citation labels where two or more readings of the bibliography did not agree on which paper the label names, so the verdict on any claim citing them was withheld rather than printed. Two causes reach this list and no field tells them apart: the readings named different papers, or nothing in them could be compared — so a reader must not take an entry here as evidence of a contradiction. Absent means never computed — NOT 'none disputed' — the same three-state discipline as `table_warnings`.",
       "items": {
         "type": "string"
       }

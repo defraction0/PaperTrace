@@ -181,6 +181,151 @@ def test_withheld_refs_round_trips_and_validates_against_the_schema(tmp_path):
     jsonschema.Draft202012Validator(schema).validate(json.loads(path.read_text()))
 
 
+def test_a_co_cited_label_that_could_not_be_retrieved_survives_a_withholding(tmp_path):
+    """Major 2 of the whole-branch review, and a regression against `main`.
+
+    A claim cites a disputed-and-retrieved [3] and a paywalled [4]. Nothing
+    survives to judge, so the claim is `unchecked` for the withholding — and
+    on the way out of that branch `unjudged_refs` was never filled, so [4]
+    was in none of the three accounts a reader has (judged, withheld,
+    unjudged) and appeared in no note. A retrieval gap erased by a
+    withholding is the cardinal rule's own example of what may not happen.
+    """
+    _write_source(tmp_path, "three-2019")
+    manifest = _manifest(
+        _entry("3", "three-2019"),
+        _entry("4", "four-2020", status="paywalled"),
+    )
+    claims = [ClaimResult(id=1, claim="x", location="Results", refs=["3", "4"])]
+
+    check_claims(claims, manifest, tmp_path, backend="pymupdf", disputed={"3"})
+
+    assert claims[0].verdict == "unchecked"
+    assert claims[0].withheld_refs == ["3"]
+    assert claims[0].unjudged_refs == ["4"]
+
+
+def test_an_unretrievable_co_citation_is_reported_where_a_verdict_survives_too(
+    tmp_path, monkeypatch
+):
+    """The same accounting on the path that DOES keep a verdict, so the fix
+    is not a special case bolted onto the one branch the review named: [3]
+    withheld, [4] paywalled, [5] judged."""
+    _write_source(tmp_path, "five-2021")
+    manifest = _manifest(
+        _entry("3", "three-2019"),
+        _entry("4", "four-2020", status="paywalled"),
+        _entry("5", "five-2021"),
+    )
+    monkeypatch.setattr(check_mod, "_ask", lambda prompt, model=None: _reply(1, "supported"))
+    claims = [ClaimResult(id=1, claim="x", location="Results", refs=["3", "4", "5"])]
+
+    check_claims(claims, manifest, tmp_path, backend="pymupdf", disputed={"3"})
+
+    assert claims[0].verdict == "supported"
+    assert claims[0].withheld_refs == ["3"]
+    assert claims[0].unjudged_refs == ["4"]
+
+
+# --- what the prose may say about a label whose readings did not agree -----
+
+
+def test_the_withholding_note_does_not_assert_the_readings_named_different_papers(
+    tmp_path,
+):
+    """`label_agreement` returns `disputed` for two causes — the readings
+    actively name different papers, and nothing in them could be compared —
+    and no published field tells the two apart. A note asserting the first is
+    therefore false whenever the second happened, which is the same mistake
+    as describing a source that was never fetched as one that was."""
+    _write_source(tmp_path, "six-2019")
+    manifest = _manifest(_entry("6", "six-2019"))
+    claims = [ClaimResult(id=1, claim="x", location="Results", refs=["6"])]
+
+    check_claims(claims, manifest, tmp_path, backend="pymupdf", disputed={"6"})
+
+    assert "different papers" not in claims[0].note
+    assert "do not agree" in claims[0].note
+
+
+def test_the_run_level_disputed_disclosure_covers_both_causes():
+    """The run-level roll-up says the same thing as the note above, so it
+    inherits the same constraint."""
+    from papertrace.disclosures import _labels_disputed
+
+    d = _labels_disputed(RefManifest(manuscript="m.pdf", labels_disputed=["6"]))
+
+    assert d is not None
+    # the disjunction, not the assertion: naming both causes is honest,
+    # asserting the contradicting one is not
+    assert "did not agree on which paper" in d.text
+    assert "nothing in them could be compared" in d.text
+    assert "name different papers for each of these labels" not in d.text
+
+
+# --- a disputed label nobody retrieved is not a source that was fetched ----
+
+
+def test_a_disputed_label_nobody_retrieved_is_not_described_as_fetched():
+    """Major 5. `check.py` keeps such a label out of `withheld_refs` on
+    purpose (`test_a_disputed_label_never_retrieved_stays_not_retrieved`);
+    the disclosure layer undid that care by falling back to
+    `labels_disputed`, and printed "the source fetched under that label" for
+    a source nobody ever fetched."""
+    from papertrace.disclosures import _claim_pairing
+
+    manifest = _manifest(_entry("6", "six-2019", status="paywalled"))
+    manifest.labels_disputed = ["6"]
+    claim = ClaimResult(id=1, claim="x", location="Results", refs=["6"],
+                        verdict="not_retrieved")
+
+    d = _claim_pairing(claim, manifest)
+
+    assert d is not None
+    assert "fetched" not in d.text
+    assert "never retrieved" in d.text
+
+
+def test_a_retrieved_disputed_label_still_reads_as_a_source_that_was_fetched():
+    """The other side of Major 5's split, and the load-path guard on it: a
+    `results.json` written before `withheld_refs` existed carries `[]` for
+    every claim, so the new branch must not be chosen from that emptiness
+    alone. The manifest's own entry status is what decides, and here the
+    source really was retrieved."""
+    from papertrace.disclosures import _claim_pairing
+
+    manifest = _manifest(_entry("6", "six-2019"))
+    manifest.labels_disputed = ["6"]
+    claim = ClaimResult(id=1, claim="x", location="Results", refs=["6"])  # no withheld_refs
+
+    d = _claim_pairing(claim, manifest)
+
+    assert d is not None
+    assert "the source retrieved under that label" in d.text
+
+
+def test_a_claim_citing_both_a_withheld_and_an_unretrieved_disputed_label_names_both():
+    """One claim, both causes. The withheld label keeps the token and the
+    level — it is the more urgent finding, because a paper WAS fetched under
+    it — and the label nobody retrieved is named rather than folded into the
+    same sentence."""
+    from papertrace.disclosures import _claim_pairing
+
+    manifest = _manifest(
+        _entry("6", "six-2019"),
+        _entry("7", "seven-2020", status="paywalled"),
+    )
+    manifest.labels_disputed = ["6", "7"]
+    claim = ClaimResult(id=1, claim="x", location="Results", refs=["6", "7"],
+                        withheld_refs=["6"])
+
+    d = _claim_pairing(claim, manifest)
+
+    assert d is not None
+    assert "[6]" in d.text and "[7]" in d.text
+    assert "never retrieved" in d.text
+
+
 def test_any_iterable_of_labels_withholds_every_claim_not_just_the_first(tmp_path, monkeypatch):
     """`disputed` is typed `set[str] | None`, and a set is what the CLI passes.
 

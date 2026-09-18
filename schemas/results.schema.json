@@ -203,7 +203,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Cited labels whose source WAS retrieved but withheld from judgement because two or more readings of the reference list disagree about which paper that label names. Distinct from `unjudged_refs`: an entry here means the source was fetched and read, not that it could not be reached. Absent, or an empty array, means nothing was withheld for this claim."
+            "description": "Cited labels whose source WAS retrieved but withheld from judgement because two or more readings of the reference list did not agree on which paper that label names (either they named different papers, or nothing in them could be compared). Distinct from `unjudged_refs`: an entry here means the source was fetched and read, not that it could not be reached. Absent, or an empty array, means nothing was withheld for this claim."
           },
           "anchor_located": {
             "type": [
