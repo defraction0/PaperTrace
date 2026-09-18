@@ -910,13 +910,18 @@ def check_claims(
                 # no verdict can safely name the paper it was fetched for.
                 c.verdict = "unchecked"
                 labels = f"[{'], ['.join(c.withheld_refs)}]"
-                # "do not agree", never "name different papers": `disputed`
-                # has two causes — the readings contradict each other, and
-                # nothing in them could be compared — and no published field
-                # tells them apart, so a note asserting the first would be
-                # false whenever the second happened.
+                # WHICH cause, when the manifest recorded the split, and the
+                # disjunction when it did not: `disputed` covers both "the
+                # readings named different papers" and "nothing in them could
+                # be compared", and asserting the first over the second is the
+                # plausible-looking value this codebase exists to refuse.
+                # Phrased by `disclosures.dispute_causes`, the one producer
+                # every surface uses, so the note and the report cannot
+                # describe one label two ways.
+                from .disclosures import dispute_causes
+
                 c.note = (
-                    f"withheld: the reference list's readings do not agree about {labels}, "
+                    f"withheld: at {labels}, {dispute_causes(manifest, c.withheld_refs)}, "
                     "so the source retrieved under that label may not be the paper the "
                     "manuscript cites — check the retrieval manifest before relying on "
                     "this claim"

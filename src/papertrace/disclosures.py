@@ -565,13 +565,10 @@ def _labels_disputed(manifest) -> Disclosure | None:
         level="warn",
         token=LABELS_DISPUTED_TOKEN,
         text=(
-            f"{named} are {LABELS_DISPUTED_TOKEN}: two or more readings of the "
-            "reference list did not agree on which paper each of these labels "
-            "names — they either named different papers, or nothing in them "
-            "could be compared — so every claim citing one had that source "
-            "withheld from judgement rather than risk a verdict about the wrong "
-            "paper. See each claim's own note for which of its citations this "
-            "affected."
+            f"{named} are {LABELS_DISPUTED_TOKEN}: {dispute_causes(manifest, labels)}. "
+            "Every claim citing one had that source withheld from judgement rather "
+            "than risk a verdict about the wrong paper. See each claim's own note "
+            "for which of its citations this affected."
         ),
         short=f"{named} {LABELS_DISPUTED_TOKEN}",
     )
@@ -1313,6 +1310,43 @@ def _no_quote(claim) -> Disclosure:
     )
 
 
+def dispute_causes(manifest, labels: list[str]) -> str:
+    """Why these labels are in dispute, in the reader's terms.
+
+    One producer for every surface, because `labels_disputed` carries two
+    causes and each warrants a different action: a contradiction means one
+    reading is wrong and somebody should look; nothing comparable means no
+    conflict is known and the withholding is precautionary — on a bare-DOI
+    deposit against a list that prints no DOIs, which is common, it is
+    benign.
+
+    `labels_uncomparable is None` means the split was NEVER COMPUTED — every
+    manifest written before that field — and the honest answer there is the
+    disjunction, not a cause picked for it. `[]` is a measurement: every
+    dispute was a contradiction.
+    """
+    unc = getattr(manifest, "labels_uncomparable", None)
+    if unc is None:
+        return (
+            "the readings did not agree on which paper each of them names — they "
+            "either named different papers, or nothing in them could be compared"
+        )
+    mute = [x for x in labels if x in set(unc)]
+    clashed = [x for x in labels if x not in set(unc)]
+    if mute and clashed:
+        return (
+            f"the readings named different papers at {_label_group(clashed)}, and at "
+            f"{_label_group(mute)} nothing in them could be compared"
+        )
+    if mute:
+        return (
+            "nothing in them could be compared — no reading is known to contradict "
+            "another here, and the verdict is withheld because nothing establishes "
+            "what the label names"
+        )
+    return "the readings named different papers there"
+
+
 def _resolution_clause(manifest, *, lead: str = " Separately, later in this run") -> str:
     """What the RESOLUTION call did, as a sentence to append — or "".
 
@@ -1457,12 +1491,12 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
         one = len(withheld) == 1
         text = (
             f"This claim cites {labels}, and the {CLAIM_PAIRING_WITHHELD_TOKEN} about "
-            f"{'that label' if one else 'those labels'}: the readings of the "
-            "bibliography did not agree on which paper it names — they either named "
-            "different papers or left nothing that could be compared — so the source "
-            "retrieved under that label may not be the paper the manuscript actually "
-            f"cites. No verdict was reached on {'it' if one else 'them'} — check the "
-            "retrieval manifest before treating this claim as checked."
+            f"{'that label' if one else 'those labels'}: "
+            f"{dispute_causes(manifest, withheld)}. So the source retrieved under "
+            f"{'that label' if one else 'those labels'} may not be the paper the "
+            f"manuscript actually cites, and no verdict was reached on "
+            f"{'it' if one else 'them'} — check the retrieval manifest before "
+            "treating this claim as checked."
         )
         if unretrieved:
             # named separately, never folded into the sentence above: nothing
@@ -1495,9 +1529,8 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
             level="warn",
             token=CLAIM_PAIRING_UNRETRIEVED_TOKEN,
             text=(
-                f"This claim cites {labels}, and {CLAIM_PAIRING_UNRETRIEVED_TOKEN}: the "
-                "readings of the bibliography did not agree on which paper "
-                f"{'it names' if one else 'they name'}, and the source was never "
+                f"This claim cites {labels}, and {CLAIM_PAIRING_UNRETRIEVED_TOKEN}: "
+                f"{dispute_causes(manifest, unretrieved)}, and the source was never "
                 "retrieved either, so nothing was judged under "
                 f"{'that label' if one else 'those labels'} in either direction. The "
                 "disagreement is recorded, not resolved."

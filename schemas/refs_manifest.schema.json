@@ -251,6 +251,11 @@
         "type": "string"
       }
     },
+    "labels_uncomparable": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "A SUBSET of `labels_disputed`: the labels whose dispute was that nothing in the readings could be compared — a Crossref deposit of bare DOIs against a printed list carrying none — rather than that the readings named different papers. Both causes withhold a verdict and `labels_disputed` remains the single list that drives withholding; this one exists because the two warrant different reader actions. Every entry here MUST also appear in `labels_disputed`. `null` or absent means NEVER COMPUTED, and is not the same as `[]`, which means the split was measured and every dispute was a contradiction."
+    },
     "labels_resolved": {
       "type": "array",
       "description": "Citation labels that were in `labels_disputed` and were then settled — by a targeted model call the user accepted, or by the user choosing one reading whole. Absent means never computed, not 'none resolved'.",

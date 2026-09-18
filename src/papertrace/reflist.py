@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from . import ask
 from .models import RefEntry, _fold
-from .refs import DOI_RE, _entry
+from .refs import DOI_RE, _entry, _label_key
 
 REFLIST_PROMPT = """You are the reference-list reading step of a peer-review fact-checker.
 
@@ -412,11 +412,6 @@ def propose(
     if gaps := _numeral_gaps(nums):
         prov.numbering_findings.append("numerals absent from 1..max: " + ", ".join(gaps))
     return out, prov
-
-
-def _label_key(label: str) -> tuple[int, int, str]:
-    """Numeric labels in numeric order, anything else after them, by name."""
-    return (0, int(label), "") if label.isdigit() else (1, 0, label)
 
 
 def _numeral_gaps(nums: list[str]) -> list[str]:

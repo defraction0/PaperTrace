@@ -73,6 +73,19 @@ _TITLE_STOPWORDS = frozenset(
 )
 
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
+# A DOI is the same class of thing as the URL above and fails the same way.
+# `_reference_raw`'s documented fallback for a DOI-only Crossref deposit is
+# the DOI string itself, and most publisher DOIs embed a journal or platform
+# slug: `10.1148/radiol.…` yields `radiol`, `10.1001/jamanetworkopen.…` yields
+# `jamanetworkopen`. Those are substrings of an identifier, not words from a
+# title, and they were being compared against real title words — a deposit
+# came back as naming a DIFFERENT paper from the page, which disputed every
+# label it voted on. From the other side they inflate the denominator of
+# `_title_check_text` with a token no first page carries ("JAMA Network Open"
+# is printed with spaces), which pushes a correct retrieval toward mismatch.
+# Kept as its own pattern rather than folded into `_URL_RE`: a bare DOI is not
+# a URL, and `https://doi.org/10.…` is already covered by that one.
+_DOI_IN_TEXT_RE = re.compile(r"\b10\.\d{4,9}/\S+", re.I)
 
 
 # What NFKD cannot decompose, because these are distinct letters rather than a
@@ -117,7 +130,7 @@ def _fold(text: str) -> str:
 
 
 def _title_tokens(raw: str) -> set[str]:
-    """The reference's own distinctive words — URLs removed first.
+    """The reference's own distinctive words — URLs and DOIs removed first.
 
     A URL is not part of a title, and a *tracking parameter* least of all:
     `?utm_source=chatgpt.com` on a cited news page contributed `chatgpt` and
@@ -126,10 +139,15 @@ def _title_tokens(raw: str) -> set[str]:
     inflating the denominator with `firstmedical`, `assuranceprogram` and
     `publications` — words no first page will carry, so they dilute the ratio
     the check is measured on.
+
+    A DOI is stripped for exactly those two reasons — see `_DOI_IN_TEXT_RE`.
+    It is the same class of thing: an identifier, whose substrings are not
+    words anybody wrote as a title.
     """
     # folded, not merely lowercased: `[a-z]{5,}` over raw text drops `Späth`
     # entirely and truncates `Cristóbal` to `crist`
-    return set(re.findall(r"[a-z]{5,}", _fold(_URL_RE.sub(" ", raw)))) - _TITLE_STOPWORDS
+    stripped = _DOI_IN_TEXT_RE.sub(" ", _URL_RE.sub(" ", raw))
+    return set(re.findall(r"[a-z]{5,}", _fold(stripped))) - _TITLE_STOPWORDS
 
 
 # Four distinct words, not three. The observed false positive cleared the 0.35
@@ -592,6 +610,19 @@ class RefManifest:
     # before this feature says nothing about disputes, it does not assert
     # there were none.
     labels_disputed: list[str] = field(default_factory=list)
+    # A documented SUBSET of `labels_disputed`: the labels whose dispute was
+    # that nothing in the readings could be compared, rather than that they
+    # named different papers. `labels_disputed` stays the single list that
+    # drives withholding, so behaviour is unchanged and the two cannot
+    # contradict each other — `refs.uncomparable_labels` reads this off the
+    # same call that decides the state.
+    #
+    # Three states, not two: `None` is NEVER COMPUTED — every manifest written
+    # before this field, including one from an earlier commit of this branch —
+    # and `[]` is "computed, and every dispute was a contradiction". One empty
+    # list could not mean both, and the report picks a cause only when one was
+    # actually measured.
+    labels_uncomparable: list[str] | None = None
     labels_resolved: list[str] = field(default_factory=list)
     # How a disputed numbering was left; "" means the interactive escalation
     # never ran. Never set from a model's own say-so alone.
@@ -744,6 +775,7 @@ class RefManifest:
             "numbering_corroborated": self.numbering_corroborated,
             "corroborating_readings": self.corroborating_readings,
             "labels_disputed": self.labels_disputed,
+            "labels_uncomparable": self.labels_uncomparable,
             "labels_resolved": self.labels_resolved,
             "numbering_choice": self.numbering_choice,
             "numbering_chosen_by": self.numbering_chosen_by,
@@ -799,6 +831,9 @@ class RefManifest:
             corroborating_readings=data.get("corroborating_readings", []),
             # absent means never computed, not "none disputed" or "none resolved"
             labels_disputed=data.get("labels_disputed", []),
+            # `.get` with no default: absent AND explicit `null` both read as
+            # `None` — never computed — never coerced to an empty list
+            labels_uncomparable=data.get("labels_uncomparable"),
             labels_resolved=data.get("labels_resolved", []),
             numbering_choice=data.get("numbering_choice", ""),
             numbering_chosen_by=data.get("numbering_chosen_by", ""),

@@ -803,6 +803,66 @@ def test_a_tracking_parameter_is_not_part_of_a_title():
     assert {"launches", "practice", "artificial"} <= tokens, "the title's own words survive"
 
 
+def test_a_doi_is_not_part_of_a_title_either():
+    """The same class of thing as the tracking parameter above, and the same
+    failure. `_reference_raw`'s documented fallback for a DOI-only deposit is
+    the DOI string itself, and most publisher DOIs embed a journal or platform
+    slug — `radiol`, `jamanetworkopen`, `neuroimage`, `bioinformatics` — which
+    `[a-z]{5,}` happily lifts out and then compares against real title words.
+    An identifier's substring is not a word from a title.
+
+    Three shapes, because only the third had no five-letter run and so was the
+    only one the earlier fix reached."""
+    from papertrace.refs import _title_tokens
+
+    for doi in ("10.1148/radiol.2019181432",
+                "10.1001/jamanetworkopen.2023.18153",
+                "10.1038/s41591-019-0673-2",
+                "10.1016/j.neuroimage.2020.117161",
+                "10.1093/bioinformatics/btaa123"):
+        assert _title_tokens(doi) == set(), doi
+        # and written the way a reference prints it, prefix and all
+        assert _title_tokens(f"doi:{doi}") == set(), doi
+
+    # the reference's own words survive a trailing DOI, and the DOI's do not
+    tokens = _title_tokens(
+        "Fujita S. Characterization of brain volume changes in aging individuals. "
+        "JAMA Netw Open. 2023. doi:10.1001/jamanetworkopen.2023.18153"
+    )
+    assert {"characterization", "changes", "individuals"} <= tokens
+    assert "jamanetworkopen" not in tokens
+
+
+def test_a_trailing_doi_no_longer_inflates_the_title_checks_denominator():
+    """The URL strip's own stated reason, applied to the identifier that
+    replaced it: a token no first page will carry sits in the denominator and
+    pushes a correct retrieval toward `mismatch`. `jamanetworkopen` is printed
+    on no page — the page says "JAMA Network Open", with spaces."""
+    from papertrace.refs import _title_check_text
+
+    raw = ("Fujita S, Mori S, Onda K. Characterization of brain volume changes in aging "
+           "individuals. JAMA Netw Open. 2023;6(6):e2318153. "
+           "doi:10.1001/jamanetworkopen.2023.18153")
+    page = ("Characterization of Brain Volume Changes in Aging Individuals\n"
+            "Fujita S, Mori S, Onda K. JAMA Network Open. 2023;6(6):e2318153\n")
+
+    state, detail = _title_check_text(raw, page)
+    assert state == "verified", detail
+    assert "6/6" in detail, detail
+
+
+def test_a_doi_only_reference_has_nothing_to_match_on_rather_than_one_word():
+    """`unverifiable` either way, but for the honest reason: a single journal
+    slug lifted out of an identifier is not "one distinctive word" of the
+    reference, and calling it that invites a future ratio to believe it."""
+    from papertrace.refs import _title_check_text
+
+    state, detail = _title_check_text("10.1148/radiol.2019181432",
+                                      "Radiology 2019 imaging study of the chest")
+    assert state == "unverifiable"
+    assert "no distinctive words" in detail, detail
+
+
 def test_three_generic_domain_words_are_not_an_identity_check():
     """The last line of defence, in case a URL-only reference reaches it by some
     other route: with the URL stripped the ACR news page still scores 3/7 =

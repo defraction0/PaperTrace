@@ -244,8 +244,12 @@ def test_the_withholding_note_does_not_assert_the_readings_named_different_paper
 
     check_claims(claims, manifest, tmp_path, backend="pymupdf", disputed={"6"})
 
-    assert "different papers" not in claims[0].note
-    assert "do not agree" in claims[0].note
+    # the disjunction, not the assertion — this manifest never recorded which
+    # cause applied (`labels_uncomparable is None`), so neither may the note
+    assert "did not agree on which paper" in claims[0].note
+    assert "either named different papers, or nothing in them could be compared" in (
+        claims[0].note
+    )
 
 
 def test_the_run_level_disputed_disclosure_covers_both_causes():
@@ -367,3 +371,63 @@ def test_a_claim_citing_an_unretrieved_disputed_label_and_a_resolved_one_names_b
     assert d is not None
     assert "never retrieved" in d.text
     assert "[7]" in d.text
+
+
+# --- fix round 2: which cause, per claim and in the note ------------------
+
+
+def test_the_claim_disclosure_says_which_cause_applies():
+    """Per claim, the same split the run-level roll-up makes."""
+    from papertrace.disclosures import _claim_pairing
+
+    m = _manifest(_entry("6", "six-2019"))
+    m.labels_disputed = ["6"]
+    m.labels_uncomparable = ["6"]
+    claim = ClaimResult(id=1, claim="x", location="Results", refs=["6"], withheld_refs=["6"])
+    d = _claim_pairing(claim, m)
+    assert "nothing in them could be compared" in d.text
+    assert "named different papers" not in d.text
+
+    m.labels_uncomparable = []
+    d = _claim_pairing(claim, m)
+    assert "named different papers" in d.text
+    assert "could be compared" not in d.text
+
+
+def test_an_unretrieved_disputed_claim_says_which_cause_too():
+    from papertrace.disclosures import _claim_pairing
+
+    m = _manifest(_entry("6", "six-2019", status="paywalled"))
+    m.labels_disputed = ["6"]
+    m.labels_uncomparable = ["6"]
+    claim = ClaimResult(id=1, claim="x", location="Results", refs=["6"])
+    d = _claim_pairing(claim, m)
+    assert "never retrieved" in d.text
+    assert "nothing in them could be compared" in d.text
+
+
+def test_the_withholding_note_says_which_cause_when_the_manifest_split_them(tmp_path):
+    """`check_claims` has the manifest, so the note can say which rather than
+    naming the disjunction."""
+    _write_source(tmp_path, "six-2019")
+    manifest = _manifest(_entry("6", "six-2019"))
+    manifest.labels_disputed = ["6"]
+    manifest.labels_uncomparable = ["6"]
+    claims = [ClaimResult(id=1, claim="x", location="Results", refs=["6"])]
+
+    check_claims(claims, manifest, tmp_path, backend="pymupdf", disputed={"6"})
+
+    assert "nothing in them could be compared" in claims[0].note
+    assert "different papers" not in claims[0].note
+
+
+def test_the_withholding_note_keeps_the_disjunction_when_nothing_split_them(tmp_path):
+    """`None` is never computed, and the note may not pick a cause for it."""
+    _write_source(tmp_path, "six-2019")
+    manifest = _manifest(_entry("6", "six-2019"))
+    manifest.labels_disputed = ["6"]
+    claims = [ClaimResult(id=1, claim="x", location="Results", refs=["6"])]
+
+    check_claims(claims, manifest, tmp_path, backend="pymupdf", disputed={"6"})
+
+    assert "either" in claims[0].note

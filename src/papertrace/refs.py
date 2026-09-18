@@ -611,10 +611,14 @@ class Reconciliation:
     # plan — nothing here may redefine it or be read as a substitute for it.
     corroborated: bool = False
     corroborating_readings: list[str] = field(default_factory=list)
-    # Citation labels where two or more readings actively named different
-    # papers — the set `label_agreement` marked `disputed`, and the set whose
-    # verdicts a downstream withholding filter must drop.
+    # Citation labels the readings did not agree on — the set
+    # `label_agreement` marked `disputed`, and the set whose verdicts a
+    # downstream withholding filter must drop.
     labels_disputed: list[str] = field(default_factory=list)
+    # A subset of the line above: those disputed because nothing in the
+    # readings could be COMPARED, rather than because they named different
+    # papers. `None` means the split was never computed.
+    labels_uncomparable: list[str] | None = None
     # Labels that WERE in `labels_disputed` and were then settled — by a
     # targeted model call the user accepted, or by choosing one reading whole.
     labels_resolved: list[str] = field(default_factory=list)
@@ -757,6 +761,12 @@ def _first_divergence(a: list[RefEntry], b: list[RefEntry]) -> int | None:
 # than trusting a bare string a typo could silently narrow to three states.
 LABEL_AGREEMENT = ("agreed", "single", "disputed", "absent")
 
+# Why a label is `disputed`, for the one consumer that needs to tell them
+# apart. `""` is every non-disputed state. Not persisted as a per-label map:
+# the manifest publishes `labels_uncomparable`, one subset, because that is
+# the distinction that changes what a reader should do.
+DISPUTE_CAUSES = ("duplicate", "contradiction", "uncomparable")
+
 
 def _comparably_same(x: RefEntry, y: RefEntry) -> bool | None:
     """Do these two readings name the same paper — or is there no way to tell?
@@ -854,10 +864,40 @@ def label_agreement(
     return {label: _label_state(candidates, label)[0] for label in body}
 
 
+def _label_key(label: str) -> tuple[int, int, str]:
+    """Numeric labels in numeric order, anything else after them, by name.
+
+    Lives here, the lower layer, because three call sites need it —
+    `uncomparable_labels` below, `reflist.propose`'s numbering findings and
+    `cli`'s `labels_disputed` — and three inline copies of one tuple key is
+    how the same labels come to be sorted two ways in one report.
+    """
+    return (0, int(label), "") if label.isdigit() else (1, 0, label)
+
+
+def uncomparable_labels(candidates: dict[str, list[RefEntry]], body: set[str]) -> list[str]:
+    """The disputed labels whose cause was that nothing could be COMPARED.
+
+    A documented subset of what `label_agreement` calls `disputed`, and a
+    subset by construction: both are read off `_label_state`, so the pair
+    cannot contradict each other the way `seen_in` and `labels_disputed` once
+    did. It changes nothing about what is withheld — `labels_disputed` stays
+    the single list that drives withholding — and exists because the two
+    causes warrant different reader actions. "The readings named different
+    papers" means one of them is wrong and somebody should look; "nothing in
+    them could be compared" means no conflict is known and the withholding is
+    precautionary, which on a bare-DOI deposit is both common and benign.
+    """
+    return sorted(
+        (label for label in body if _label_state(candidates, label)[2] == "uncomparable"),
+        key=_label_key,
+    )
+
+
 def _label_state(
     candidates: dict[str, list[RefEntry]], label: str
-) -> tuple[str, list[str]]:
-    """One label's agreement state, and the readings that earned an `agreed`.
+) -> tuple[str, list[str], str]:
+    """One label's agreement state, the readings that earned an `agreed`, and why.
 
     The single place the rule lives: `label_agreement` publishes the state and
     `corroborating_readings` intersects the names, so the two can never drift
@@ -886,10 +926,14 @@ def _label_state(
     refuse. Nothing establishes that these name one paper, and withholding is
     the honest answer to that.
 
-    So `disputed` carries two causes — the readings contradict each other, and
-    nothing could be compared. Both withhold a verdict, which is right, but
-    **no prose may say the readings named different papers on the strength of
-    this state alone**; the report's wording covers both.
+    So `disputed` carries three causes — a duplicate, a contradiction, and
+    nothing comparable — and the THIRD returned value is which of them, from
+    `DISPUTE_CAUSES`. They warrant different reader actions: a contradiction
+    means one reading is wrong and somebody should look; nothing comparable
+    means no conflict is known and the withholding is precautionary, which on
+    a bare-DOI deposit is the benign and common case. `uncomparable_labels`
+    is the published subset built from this, and it is a subset BY
+    CONSTRUCTION because it is read off the same call that decides the state.
 
     The second returned value is the readings credited with the agreement,
     which is not simply the voters: `DERIVED_READINGS` are excluded, and a
@@ -897,26 +941,26 @@ def _label_state(
     """
     voters, duplicated = _label_voters(candidates, label)
     if duplicated:
-        return "disputed", []
+        return "disputed", [], "duplicate"
     if not voters:
-        return "absent", []
+        return "absent", [], ""
     if len(voters) == 1:
         # nothing was compared because there was nobody to compare with — a
         # different fact from "compared and found uncomparable" below
-        return "single", []
+        return "single", [], ""
     concurring: set[str] = set()
     for (name_x, x), (name_y, y) in itertools.combinations(voters, 2):
         same = _comparably_same(x, y)
         if same is False:
-            return "disputed", []
+            return "disputed", [], "contradiction"
         if same:
             concurring |= {name_x, name_y}
     if not concurring:
         if not any(_says_something_comparable(e) for _, e in voters):
-            return "disputed", []  # see this docstring's "exception"
-        return "single", []
+            return "disputed", [], "uncomparable"  # see this docstring's "exception"
+        return "single", [], ""
     credited = sorted(n for n in concurring if n not in DERIVED_READINGS)
-    return ("agreed", credited) if len(credited) >= 2 else ("single", [])
+    return ("agreed", credited, "") if len(credited) >= 2 else ("single", [], "")
 
 
 def _label_voters(
@@ -963,7 +1007,7 @@ def corroborating_readings(candidates: dict[str, list[RefEntry]], body: set[str]
     """
     names: set[str] | None = None
     for label in body:
-        state, credited = _label_state(candidates, label)
+        state, credited, _ = _label_state(candidates, label)
         if state != "agreed":
             return []
         names = set(credited) if names is None else (names & set(credited))

@@ -1664,3 +1664,70 @@ def test_a_resolution_from_an_earlier_commit_claims_only_what_it_recorded():
     assert claim is not None
     assert "what each reading said" not in claim.text
     assert "does not record" in claim.text
+
+
+# --- fix round 2: labels_uncomparable, a documented subset of labels_disputed
+
+
+def test_labels_uncomparable_round_trips_and_validates(tmp_path):
+    """Gate 2: additive, not required, and three-valued. `None` is never
+    computed and `[]` is "computed, every dispute was a contradiction" —
+    a single empty list could not say both, which is `table_warnings`'
+    rule and the one this branch has now broken four times."""
+    import jsonschema
+
+    m = RefManifest(manuscript="p.pdf", labels_disputed=["6", "7"],
+                    labels_uncomparable=["7"])
+    path = tmp_path / "refs_manifest.json"
+    m.to_json(path)
+    schema = json.loads(SCHEMA_PATH.read_text())
+    jsonschema.Draft202012Validator(schema).validate(json.loads(path.read_text()))
+    assert "labels_uncomparable" not in schema.get("required", [])
+
+    assert RefManifest.from_json(path).labels_uncomparable == ["7"]
+
+    payload = json.loads(path.read_text())
+    del payload["labels_uncomparable"]
+    path.write_text(json.dumps(payload))
+    assert RefManifest.from_json(path).labels_uncomparable is None
+
+    m2 = RefManifest(manuscript="p.pdf", labels_disputed=["6"], labels_uncomparable=[])
+    m2.to_json(path)
+    jsonschema.Draft202012Validator(schema).validate(json.loads(path.read_text()))
+    assert RefManifest.from_json(path).labels_uncomparable == []
+
+
+def test_the_run_level_disclosure_says_which_cause_applies():
+    """The disjunction was honest but weak, and the two causes warrant
+    different reader actions."""
+    from papertrace.disclosures import _labels_disputed
+
+    contradiction = _labels_disputed(
+        RefManifest(manuscript="p", labels_disputed=["6"], labels_uncomparable=[])
+    )
+    assert "named different papers" in contradiction.text
+    assert "could be compared" not in contradiction.text
+
+    uncomparable = _labels_disputed(
+        RefManifest(manuscript="p", labels_disputed=["6"], labels_uncomparable=["6"])
+    )
+    assert "nothing in them could be compared" in uncomparable.text
+    assert "named different papers" not in uncomparable.text
+
+    mixed = _labels_disputed(
+        RefManifest(manuscript="p", labels_disputed=["6", "7"], labels_uncomparable=["7"])
+    )
+    assert "[6]" in mixed.text and "[7]" in mixed.text
+    assert "named different papers" in mixed.text
+    assert "could be compared" in mixed.text
+
+
+def test_a_manifest_that_never_split_the_causes_keeps_the_disjunction():
+    """`None` is never computed — every manifest written before this field,
+    including one from an earlier commit of this branch — and the report may
+    not pick a cause for it."""
+    from papertrace.disclosures import _labels_disputed
+
+    d = _labels_disputed(RefManifest(manuscript="p", labels_disputed=["6"]))
+    assert "either" in d.text
+    assert "named different papers" in d.text and "could be compared" in d.text

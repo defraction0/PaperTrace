@@ -548,7 +548,8 @@ def _write_disagreement(
         "",
         "One section per citation label whose readings of the bibliography did not "
         "agree on one paper — either they name different papers, or nothing in them "
-        "could be compared. Each reading's structured fields sit above the verbatim "
+        "could be compared; the manifest's `labels_uncomparable` says which, per "
+        "label. Each reading's structured fields sit above the verbatim "
         "text it was read from, so the disagreement can be settled by eye against "
         "the printed list.",
         "",
@@ -1044,12 +1045,13 @@ def _refs_pipeline(
     the value. This function is what they actually call; `refs()` is a thin CLI
     adapter over it.
     """
+    from .disclosures import dispute_causes  # one wording for console and report
     from .ingest import ingest_pdf, references_span, references_span_flat
     from .models import SourceMap, citation_labels, is_references_heading, paper_title
 
-    # `_label_key` is shared with `reflist.propose`'s own numbering-findings
-    # sort, rather than a third inline copy of the same tuple key — a
-    # divergence between them would sort the same labels two ways in one report
+    # `_label_key` lives in `refs`, the layer below both users, rather than as
+    # a third inline copy of the same tuple key — a divergence between them
+    # would sort the same labels two ways in one report
     from .reflist import _label_key
     from .refs import (
         _client,
@@ -1063,6 +1065,7 @@ def _refs_pipeline(
         reconcile,
         resolve_all,
         stamp_seen_in,
+        uncomparable_labels,
         unused_provided,
     )
 
@@ -1283,6 +1286,12 @@ def _refs_pipeline(
         (label for label, state in agreement.items() if state == "disputed"),
         key=_label_key,
     )
+    # WHICH of the two causes, per label. A subset by construction —
+    # `uncomparable_labels` reads it off the same `_label_state` call the line
+    # above does — and a real list even when empty, because `[]` here is a
+    # measurement ("every dispute was a contradiction") and `None` is the
+    # never-computed state a live run must never publish.
+    rec.labels_uncomparable = uncomparable_labels(others, body_labels)
     # every cited label, or it is not corroboration. One disputed label is not
     # "mostly corroborated", and `single` is not agreement — it is one reading
     rec.corroborated = bool(body_labels) and all(
@@ -1321,8 +1330,10 @@ def _refs_pipeline(
     if rec.labels_disputed:
         console.print(
             f"[yellow]⚠ the readings do not agree at "
-            f"[{'], ['.join(rec.labels_disputed)}][/yellow] — either they name different "
-            "papers there or nothing in them could be compared; verdicts on claims citing "
+            f"[{'], ['.join(rec.labels_disputed)}][/yellow] — "
+            # the same producer the report uses, so the console and the
+            # written report never describe one label two different ways
+            f"{dispute_causes(rec, rec.labels_disputed)}; verdicts on claims citing "
             "those labels are withheld unless resolved below"
         )
     if rec.verified and rec.labels_disputed:
@@ -1427,6 +1438,17 @@ def _refs_pipeline(
         numbering_corroborated=rec.corroborated,
         corroborating_readings=rec.corroborating_readings,
         labels_disputed=rec.labels_disputed,
+        # Re-intersected HERE, after every mutation: `_escalate_disputed` can
+        # take a label OUT of `labels_disputed` (a resolution accepted, or a
+        # reading adopted whole), and a subset computed before it would then
+        # name a label this manifest no longer disputes. Two published fields
+        # contradicting each other on one manifest is Major 3 of the
+        # whole-branch review; one intersection, in one place, is what stops
+        # it recurring here.
+        labels_uncomparable=(
+            None if rec.labels_uncomparable is None
+            else [x for x in rec.labels_uncomparable if x in set(rec.labels_disputed)]
+        ),
         labels_resolved=rec.labels_resolved,
         numbering_choice=rec.choice,
         numbering_chosen_by=rec.chosen_by,

@@ -38,6 +38,7 @@ from papertrace.refs import (  # noqa: E402
     corroborating_readings,
     label_agreement,
     stamp_seen_in,
+    uncomparable_labels,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -668,3 +669,109 @@ def test_corroborating_readings_is_empty_unless_every_cited_label_agreed():
         "llm": [_work("1", "10.1000/x1"), _work("2", "10.1000/x9")],
     }
     assert corroborating_readings(candidates, body) == []
+
+
+# --- fix round 2: a DOI-only deposit abstains on EVERY DOI shape -----------
+
+
+def test_a_doi_only_deposit_abstains_whatever_its_doi_tokenises_to():
+    """Critical 1, reopened and closed properly.
+
+    `_reference_raw`'s fallback is the DOI string itself — bare, not a URL —
+    and `[a-z]{5,}` lifts a journal slug out of most publisher DOIs. Only the
+    third shape here has no five-letter run, and it was the only one the
+    first fix reached: the other two came back `False` and disputed every
+    label they voted on, which is the audit-with-no-verdicts outcome the
+    finding named.
+    """
+    page = _printed("7")
+    for doi in ("10.1148/radiol.2019181432",          # tokenised to {'radiol'}
+                "10.1001/jamanetworkopen.2023.18153",  # {'jamanetworkopen'}
+                "10.1038/s41591-019-0673-2",           # set()
+                "10.1016/j.neuroimage.2020.117161",    # {'neuroimage'}
+                "10.1093/bioinformatics/btaa123"):     # {'bioinformatics'}
+        deposit = RefEntry(num="7", raw=doi, doi=doi)
+        assert _comparably_same(deposit, page) is None, doi
+        assert label_agreement({"crossref": [deposit], "parsed": [page]}, {"7"}) == {
+            "7": "single"
+        }, doi
+        assert label_agreement(
+            {"crossref": [deposit], "parsed": [page], "pymupdf": [_printed("7")]}, {"7"}
+        ) == {"7": "agreed"}, doi
+
+
+def test_two_doi_only_deposits_still_compare_by_doi_and_never_reach_the_mute_cell():
+    """The ordering the `_comparably_same` branches rest on, re-checked under
+    the corrected tokeniser: with DOIs stripped, two deposits have no tokens
+    on either side — but they never get that far, because the DOI comparison
+    comes first. Only an entry with NEITHER a DOI nor a title word is mute."""
+    a = RefEntry(num="7", raw="10.1148/radiol.2019181432", doi="10.1148/radiol.2019181432")
+    b_same = RefEntry(num="7", raw="10.1148/radiol.2019181432", doi="10.1148/radiol.2019181432")
+    b_other = RefEntry(num="7", raw="10.1038/nature12373", doi="10.1038/nature12373")
+
+    assert _comparably_same(a, b_same) is True
+    assert _comparably_same(a, b_other) is False
+    assert label_agreement({"crossref": [a], "parsed": [b_same]}, {"7"}) == {"7": "agreed"}
+    assert label_agreement({"crossref": [a], "parsed": [b_other]}, {"7"}) == {"7": "disputed"}
+    # and the mute cell still needs an entry carrying neither
+    mute = RefEntry(num="7", raw="A. B. 2020. 14(3):1-9.")
+    assert label_agreement(
+        {"parsed": [mute], "pymupdf": [RefEntry(num="7", raw="Q. Z. 2020. 88(1):4-7.")]}, {"7"}
+    ) == {"7": "disputed"}
+
+
+# --- fix round 2: which of the two causes put a label in dispute -----------
+
+
+def test_uncomparable_labels_names_only_the_labels_nothing_could_compare():
+    """`disputed` has two causes and they warrant different reader actions:
+    a contradiction means one reading is wrong and a human should look;
+    nothing comparable means no conflict is known and the withholding is
+    precautionary. [1] is a contradiction, [2] is uncomparable, [3] agrees."""
+    body = {"1", "2", "3"}
+    candidates = {
+        "parsed": [_work("1", "10.1000/x1"),
+                   RefEntry(num="2", raw="A. B. 2020. 14(3):1-9."),
+                   _work("3", "10.1000/x3")],
+        "pymupdf": [_work("1", "10.1000/x9"),
+                    RefEntry(num="2", raw="Q. Z. 2020. 88(1):4-7."),
+                    _work("3", "10.1000/x3")],
+    }
+    assert label_agreement(candidates, body) == {
+        "1": "disputed", "2": "disputed", "3": "agreed",
+    }
+    assert uncomparable_labels(candidates, body) == ["2"]
+
+
+def test_uncomparable_labels_is_always_a_subset_of_the_disputed_ones():
+    """The invariant, pinned rather than assumed. Major 3 on this branch was
+    exactly two published fields disagreeing on one manifest, and this pair
+    is the next candidate: both come out of `_label_state`, which is the one
+    place the rule lives, and a label can only be uncomparable by way of
+    being disputed."""
+    body = {"1", "2", "3", "4"}
+    candidates = {
+        "parsed": [_work("1", "10.1000/x1"),
+                   RefEntry(num="2", raw="A. B. 2020. 14(3):1-9."),
+                   _work("3", "10.1000/x3"), _work("4", "10.1000/x4")],
+        "pymupdf": [_work("1", "10.1000/x9"),
+                    RefEntry(num="2", raw="Q. Z. 2020. 88(1):4-7."),
+                    _work("3", "10.1000/x3"), _work("4", "10.1000/x4"),
+                    _work("4", "10.1000/x44")],
+    }
+    agreement = label_agreement(candidates, body)
+    disputed = {lbl for lbl, state in agreement.items() if state == "disputed"}
+    assert disputed == {"1", "2", "4"}, agreement
+    assert set(uncomparable_labels(candidates, body)) <= disputed
+
+
+def test_a_duplicate_is_disputed_for_its_own_reason_not_an_uncomparable_one():
+    """A reading carrying the label twice is judgeable — two papers, one of
+    which would really be downloaded — which is a different finding from
+    nothing being comparable, and must not be filed under it."""
+    candidates = {
+        "parsed": [_work("7", "10.1000/x7"), _work("7", "10.1000/x77")],
+        "pymupdf": [_work("7", "10.1000/x7")],
+    }
+    assert label_agreement(candidates, {"7"}) == {"7": "disputed"}
+    assert uncomparable_labels(candidates, {"7"}) == []

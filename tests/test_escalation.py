@@ -858,3 +858,56 @@ def test_a_resolution_call_that_was_never_made_is_not_a_model_that_could_not_tel
     assert "too long to send" in rec.resolution_failure
     # and the note must not claim a reading that never happened
     assert "verified verbatim" not in rec.note
+
+
+# --- fix round 2: labels_uncomparable stays a subset through the escalation
+
+
+def test_the_manifest_never_publishes_an_uncomparable_label_it_stopped_disputing(
+    disputed, monkeypatch
+):
+    """The subset invariant, through the one path that can break it: the
+    escalation takes a label OUT of `labels_disputed`, and a
+    `labels_uncomparable` computed before it would then name a label the
+    manifest no longer disputes. Two published fields disagreeing on one
+    manifest is Major 3 of this review, and this is where it would recur."""
+    pdf, case, answers = disputed
+    answers.append("1")
+    _capture_ask(monkeypatch, json.dumps([{"num": "2", "title": "Second paper"}]))
+
+    manifest = _run_refs(pdf, case)
+
+    assert manifest.labels_resolved == ["2"]
+    assert manifest.labels_disputed == []
+    assert manifest.labels_uncomparable == []
+    assert set(manifest.labels_uncomparable) <= set(manifest.labels_disputed)
+
+
+def test_a_run_that_computed_the_split_publishes_it_even_when_empty(disputed):
+    """`[]` is a measurement — every dispute here was a contradiction — and a
+    live run must never leave the field at its never-computed default."""
+    pdf, case, answers = disputed
+    answers.append("2")
+
+    manifest = _run_refs(pdf, case)
+
+    assert manifest.labels_disputed == ["2"]
+    assert manifest.labels_uncomparable == []
+    assert manifest.labels_uncomparable is not None
+
+
+def test_the_console_names_the_cause_it_measured(disputed, capsys):
+    """The console is a surface like any other, and it has the split in hand
+    — `rec.labels_uncomparable` is computed two lines above the line that
+    prints. On this fixture the two readings name genuinely different papers
+    at [2], so the contradiction wording is the true one."""
+    pdf, case, answers = disputed
+    answers.append("2")
+    capsys.readouterr()
+
+    _run_refs(pdf, case)
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert "the readings do not agree at [2]" in out
+    assert "named different papers there" in out
+    assert "nothing in them could be compared" not in out
