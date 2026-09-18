@@ -1521,13 +1521,15 @@ def test_the_resolved_claim_disclosure_does_not_claim_the_model_saw_both():
 
 def test_a_resolution_whose_manifest_recorded_no_readings_says_so():
     """`[]` is never recorded, not "it was shown nothing" — and the sentence
-    must not silently read as the latter."""
+    must not silently read as the latter, nor assert the fuller account of
+    what this build's call is shown."""
     from papertrace.disclosures import _numbering_resolution
 
     d = _numbering_resolution(_resolved_manifest(resolution_readings=[]))
 
     assert d is not None
-    assert "does not name" in d.text
+    assert "does not record which extractions" in d.text
+    assert "what each reading said" not in d.text
 
 
 # --- whole-branch review, minors 1 and 6
@@ -1637,3 +1639,28 @@ def test_a_run_with_no_resolution_keeps_the_nothing_else_claim():
              if d.key == "reflist"]
     assert len(fired) == 1, fired
     assert "nothing else" in fired[0].text
+
+
+def test_a_resolution_from_an_earlier_commit_claims_only_what_it_recorded():
+    """The load axis, which is where four of this branch's defects lived: a
+    manifest written by an earlier commit of this same branch resolved a
+    label and recorded none of the `resolution_*` fields — because that call
+    was ALSO not shown the reading it ruled against. So the report may not
+    assert, for that manifest, either which extractions the model saw or that
+    it was shown what each reading said; both are true only of a run this
+    build made."""
+    from papertrace.disclosures import _claim_pairing, _numbering_resolution
+    from papertrace.models import ClaimResult
+
+    old = RefManifest(manuscript="p.pdf", labels_resolved=["2"],
+                      numbering_choice="llm_resolved", numbering_chosen_by="user")
+
+    run = _numbering_resolution(old)
+    assert run is not None
+    assert "what each reading said" not in run.text
+    assert "does not record" in run.text
+
+    claim = _claim_pairing(ClaimResult(id=1, claim="x", location="R", refs=["2"]), old)
+    assert claim is not None
+    assert "what each reading said" not in claim.text
+    assert "does not record" in claim.text

@@ -925,10 +925,23 @@ def _numbering_resolution(manifest) -> Disclosure | None:
         getattr(manifest, "resolution_model", "")
         or "a model that did not report its own name"
     )
-    shown = _readings_phrase(getattr(manifest, "resolution_readings", []))
+    # `[]` is never recorded, and a manifest written by an earlier commit of
+    # this branch is exactly that case — its resolution call was ALSO not
+    # shown what each reading said, so neither half of the fuller sentence is
+    # true of it. Claiming either would be a report describing this build's
+    # behaviour over another build's run.
+    readings = list(getattr(manifest, "resolution_readings", []) or [])
+    by_model = (
+        f"{model}, which read {_readings_phrase(readings)} and was shown what each "
+        "reading said at those labels, verified field by field against that text, and "
+        "which you accepted"
+        if readings
+        else f"{model}, verified field by field against the printed list — this "
+             "manifest does not record which extractions it was shown — which you "
+             "accepted"
+    )
     by = (
-        f"{model}, which read {shown} and was shown what each reading said at those "
-        "labels, verified field by field against that text, and which you accepted"
+        by_model
         if choice == "llm_resolved"
         else f"you, who chose the `{choice}` reading whole for every disputed label"
     )
@@ -1365,6 +1378,27 @@ def _was_obtained(manifest, label: str) -> bool:
     return bool(e and e.status in ("retrieved", "provided") and e.slug)
 
 
+def _resolution_sentence(manifest) -> str:
+    """What the resolution call was shown, claimed no more strongly than recorded.
+
+    `resolution_readings == []` means never recorded, which on this branch
+    identifies a manifest written by an earlier commit — whose call was also
+    not shown what each reading said. Asserting either half over that run
+    would be this build describing another build's behaviour.
+    """
+    readings = list(getattr(manifest, "resolution_readings", []) or [])
+    if not readings:
+        return (
+            "A model was shown the printed list — this manifest does not record which "
+            "extractions — and every field of its answer was found verbatim there."
+        )
+    return (
+        f"A model was shown {_readings_phrase(readings)} and what each reading said at "
+        "that label, and every field of its answer was found verbatim in that printed "
+        "text."
+    )
+
+
 def _also_resolved(resolved: list[str]) -> str:
     """The sentence a claim owes about a label that WAS settled, or "".
 
@@ -1480,13 +1514,11 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
             token=CLAIM_PAIRING_RESOLVED_TOKEN,
             text=(
                 f"This claim cites {labels}, {CLAIM_PAIRING_RESOLVED_TOKEN}. The readings "
-                "of the bibliography did not agree there. A model was shown "
-                f"{_readings_phrase(getattr(manifest, 'resolution_readings', []))} and "
-                "what each reading said at that label, every field of its answer was "
-                "found verbatim in that printed text, and you accepted the result — so "
-                "this verdict rests on a reading nobody checked against the printed "
-                "page, and you are who accepted it. The numbering is still recorded as "
-                "unconfirmed."
+                "of the bibliography did not agree there. "
+                + _resolution_sentence(manifest)
+                + " You accepted the result — so this verdict rests on a reading nobody "
+                "checked against the printed page, and you are who accepted it. The "
+                "numbering is still recorded as unconfirmed."
             ),
             short=f"{labels} {CLAIM_PAIRING_RESOLVED_TOKEN}",
         )
@@ -1498,8 +1530,9 @@ def _claim_pairing(claim, manifest=None) -> Disclosure | None:
             level="warn",
             token=CLAIM_PAIRING_CHOSEN_TOKEN,
             text=(
-                f"This claim cites {labels}. Two readings of the bibliography disagreed "
-                f"there and {CLAIM_PAIRING_CHOSEN_TOKEN} — the `{manifest.numbering_choice}` "
+                f"This claim cites {labels}. The readings of the bibliography did not "
+                f"agree there and {CLAIM_PAIRING_CHOSEN_TOKEN} — the "
+                f"`{manifest.numbering_choice}` "
                 "one, for every disputed label. That is an assertion about which reading "
                 "is right, not a check of it, and this verdict is about whichever paper "
                 "that reading names."
