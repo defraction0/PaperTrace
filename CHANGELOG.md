@@ -127,28 +127,118 @@ on both `refs` and `run`.
 
 Agreement is then computed **per printed citation label** — joined on the
 numeral the page carries, never on position — and reported as `agreed`,
-`single`, `disputed` or `absent`. Where two readings name different papers at a
-label, verdicts on claims citing it are **withheld**: the claim is reported
-`unchecked` with the label named, not `not_retrieved`, because the source was
-obtained and read. `single` deliberately prints, with the caveat it already
-carried. `numbering_corroborated` is a new, independent axis beside
-`numbering_verified`, which keeps its exact meaning.
+`single`, `disputed` or `absent`. A disputed label's source is **withheld**:
+dropped before any model call and named in `ClaimResult.withheld_refs`. A
+claim left with no other source is then reported `unchecked` with the label
+named, not `not_retrieved`, because the source was obtained and read; a claim
+that also cites an undisputed source is still judged on that one, with the
+withheld label named beside the verdict. `single` deliberately prints, with
+the caveat it already carried. `numbering_corroborated` is a new, independent
+axis beside `numbering_verified`, which keeps its exact meaning.
 
-Where nothing accounted for the body's labels and labels are in dispute, an
-interactive run writes the full disagreement to
+Where the readings are in dispute at any label, an interactive run writes the
+full disagreement to
 `case/out/reference_disagreement.md` — every reading's fields and the verbatim
 text each was read from — **prints the path, and only then asks** what to do
-about it. Four options: resolve the disputed labels with a model, withhold
-verdicts on all of them, adopt one reading whole, or abort. Whatever is
+about it. There is no second condition: a run whose numbering passed the
+extent check can still have a disputed label, because extent and content are
+different questions. Four options: resolve the disputed labels with a model,
+withhold verdicts on all of them, adopt one reading whole, or abort. Whatever is
 answered is recorded as `numbering_chosen_by: "user"`; a person consenting to
 proceed is an input, not evidence, and nothing a user answers can set
-`numbering_verified`. A non-interactive run withholds the disputed labels and
-asks nothing.
+`numbering_verified`. A run that is not interactive — no terminal, output
+piped, or `CI` set — withholds the disputed labels and asks nothing.
+
+**Choosing *resolve* is the one place a model's answer reaches retrieval, and
+it is gated on that answer.** A second model call is shown the printed
+extractions and the entries that disagree, every field it returns is verified
+verbatim against the printed text, and each label it settles has its entry
+**substituted** into the list that is then downloaded and judged. Substituting
+is mandatory rather than optional: leaving the list untouched would take the
+label out of dispute while leaving the entry the resolution ruled *against* as
+the paper judged — the original wrong-paper bug, reached through the one path
+a person authorised. The call's own provenance is persisted
+(`resolution_outcome`, `resolution_model`, `resolution_fields_discarded`,
+`resolution_readings`) and reported, including which extractions it was shown
+— never "both texts", since a pymupdf-backend run has one printed span.
 
 Partial resolution is a normal, representable, reported outcome:
 `labels_resolved` and `labels_disputed` are both non-empty on a run where some
 labels were settled and some were not, and "cannot tell" from the resolution
 call is a correct answer that keeps a label withheld.
+
+### Fixed — a reading nothing could be compared with was counted as disagreeing
+
+The comparison behind agreement is three-valued now (`True | False | None`),
+the same vocabulary `titles_match` already published in the mirror direction.
+A voter it cannot compare **abstains** instead of dissenting, which can leave
+one reading standing and print `single`. Collapsing that to "disagrees" made a
+Crossref deposit of bare DOIs dispute every label it voted on while the two
+parses agreed perfectly — an audit with no verdicts in it. The one exception
+is a label where *no* reading said anything comparable at all: that stays
+disputed, because nothing establishes what the label names.
+
+A bare DOI is the documented fallback when a deposit carries no reference
+strings, and `_title_tokens` was reading the publisher slug inside it as a
+title word — `10.1148/radiol.2019181432` contributed `radiol`, and a spread of
+real DOIs showed that is common rather than exotic. DOIs are now stripped the
+way URLs already were, for the reason the URL strip was written for: an
+identifier's substrings are not words anybody wrote as a title. The same strip
+stops `jamanetworkopen` sitting in the title check's denominator against a page
+that prints "JAMA Network Open".
+
+### Added — `labels_uncomparable`, so a report can say which cause withheld a label
+
+`disputed` carries two causes a reader should act on differently: the readings
+named different papers (one of them is wrong, somebody should look), or
+nothing in them could be compared (no conflict is known, the withholding is
+precautionary). `RefManifest.labels_uncomparable` publishes the second as a
+**documented subset** of `labels_disputed` — a subset by construction, both
+read off one call — and every surface that used to name the disjunction now
+names the cause where one was measured. Behaviour is unchanged:
+`labels_disputed` remains the single list that drives withholding.
+
+Three states, not two. `null` is never computed — including every manifest
+written before the field existed — and `[]` is "computed, and every dispute
+was a contradiction". One empty list cannot mean both.
+
+### Changed — `numbering_corroborated` is `boolean | null`
+
+Its description had claimed three states for a type that held two, so "never
+computed" and "measured, not corroborated" were the same value. The type moved
+rather than the meaning: `true` and `false` mean exactly what they did, and
+`from_json` no longer coerces an absent field to `false`. Every consumer
+already treated falsy uniformly.
+
+### Fixed — a retrieval gap erased by a withholding
+
+`ClaimResult.unjudged_refs` is decided above every branch of the claim loop
+now. A claim citing one withheld label and one co-cited source that could not
+be retrieved put the unretrievable one in none of the three accounts a reader
+has — judged, withheld, unjudged. The one path it is deliberately empty on is
+a claim where nothing at all was obtained: the `not_retrieved` verdict is
+already the whole report there, and the field's published meaning is the
+*co*-cited labels a surviving verdict did not rest on.
+
+A disputed label whose source was never retrieved is also described as that,
+rather than as withheld: the report splits on the manifest entry's own status,
+the same predicate the retrieval filter applies, so it no longer asserts a
+fetch that did not happen.
+
+### Fixed — `seen_in` could name a reading the same manifest said disagreed
+
+`stamp_seen_in` matches through the agreement comparator, so only a positive
+comparison stamps and the two published fields can no longer contradict each
+other on one manifest. It runs *after* the interactive escalation, because
+adopting a reading whole replaces every entry and a stamp computed before that
+published `[]` for all of them; it merges rather than overwrites, so an entry
+the resolution substituted keeps the printed text its values were copied from.
+`[]` now means one thing: no reading was established as carrying this work.
+
+The model's reading is excluded from `corroborating_readings` entirely. It may
+only copy values out of the two extractions, and both of those vote in their
+own right, so crediting it counts one text twice. It still votes, and a
+disagreement from it is still real.
 
 ### Added — `ask.py`, the one seam, with the model recorded per call site
 
@@ -196,10 +286,12 @@ because three of its references are cited only in the supplement.
 `--llm-refs` defaults on, so a fresh demo run now makes one extra model call
 and, on the docling backend the demo uses, emits the `reflist` disclosure in
 all four formats. The committed showcase in `examples/demo/output/` was
-generated before this feature existed and shows none of it. That is staleness
-in the committed artefact, not a defect in the feature — the showcase needs a
-fresh end-to-end run (network, a logged-in `claude` CLI) to pick it up, and
-that run is a branch-level step, not part of this change.
+generated before this feature existed and shows none of it — nor the report
+wording this release changed around disputes, resolutions and corroboration.
+That is staleness in the committed artefact, not a defect in the feature: the
+showcase needs a fresh end-to-end run (network, a logged-in `claude` CLI) to
+pick it up, and that run is **deferred by the user**, not skipped silently. It
+is a branch-level step and must happen before this version is released.
 
 ## [0.6.0] — 2026-09-13 (beta)
 

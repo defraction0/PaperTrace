@@ -52,12 +52,23 @@ denominator — deleting it would quietly make the set easier.
 
 ### A second unit, specified elsewhere: (citation label, printed reference entry)
 
+What follows is a **pointer plus the constraints that would otherwise be
+rediscovered wrongly** — not a specification this harness implements. The
+sibling plan owns the design; the paragraphs below exist so that plan cannot
+quietly reuse `align.py`, key a gold set on position, or blend two error
+directions. Nothing here is implemented, and the Status note at the top of
+this document governs every word of it.
+
 The unit above is `(manuscript claim, cited source)` and it grades a model's
 judgement. It cannot grade the join that *chooses* the source. That join broke
 on a real manuscript — 22 printed references read as 18, and six substantive
 verdicts naming papers the manuscript never cited — and every one of them
 carried `title_check: verified`, because the glued reference string really did
-contain the downloaded paper's words alongside the cited paper's.
+contain the downloaded paper's words alongside the cited paper's. (That count
+is an incident on one manuscript, recorded in
+`docs/superpowers/specs/2026-09-16-llm-reference-list-design.md`; the
+manuscript is not in this repository and gate 3 forbids committing it. It is
+not a measurement of anything.)
 
 So there is a second task, never folded into `judgment_accuracy`, whose unit is
 `(citation label, printed reference entry)`. Deliberately **not**
@@ -68,7 +79,12 @@ keyed on position breaks whenever parsing changes.
 
 Its two error directions are reported **separately and never blended**: labels
 the parse got wrong and the tool confirmed anyway (the safety metric), and
-labels the parse got right and the tool refused (the cost). Superscript papers
+labels the parse got right and the tool refused (the cost). The cost direction
+has two causes that must not be blended either — the readings contradicted
+each other, or nothing in them could be compared — because the tool now
+publishes which (`labels_uncomparable`, a subset of `labels_disputed`) and a
+precautionary withholding on a bare-DOI deposit is a different finding from a
+real contradiction. Superscript papers
 have no arbiter and cannot be scored at all; they are excluded with a reason and
 counted, never deleted.
 

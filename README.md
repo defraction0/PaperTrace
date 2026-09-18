@@ -103,7 +103,9 @@ went uncited?**
   authority over neither (`--no-llm-refs` turns it off) — and the manuscript's
   own `[N]` markers arbitrate between them. Only the parse and the deposit can
   be *adopted* as the list; the other two are readings that can disagree, and a
-  disagreement is all they can do. Every field of the model's reply is checked
+  disagreement is all they can do on their own — the one thing that can change
+  which paper is fetched is your own answer at the prompt described below, and
+  the report records that you gave it. Every field of the model's reply is checked
   against the text it was shown and discarded if it is not printed there, so
   nothing it invented can name a paper. A reading is used only if it accounts
   for exactly the labels the body cites. When neither does, the audit continues,
@@ -129,17 +131,32 @@ went uncited?**
   disagree is a label nothing can say the cited paper for — and a confident
   verdict there is about a paper the manuscript may never have cited. Agreement
   is computed for each printed label separately, on the numeral the page
-  carries. Any disagreement withholds: the claim is reported `⚠ not checked`
+  carries. Any disagreement withholds **that source**: it is dropped before any
+  model call, and a claim left with no other source is reported `⚠ not checked`
   with the label named, **not** `⊘ not retrieved`, because that source was
   obtained and read — what is in doubt is whether it is the paper the label
-  names. Where nothing accounted for the body's labels and labels are in
-  dispute, an interactive run writes the whole disagreement to
+  names. A claim that also cites a source nobody disputes is still judged on
+  that source, and the withheld label is named beside the verdict. Two
+  different things put a label in dispute — the readings named different
+  papers, or nothing in them could be compared (a Crossref deposit of bare
+  DOIs, say) — and the report says which, per label, rather than leaving you
+  the disjunction: the first means one reading is wrong and somebody should
+  look, the second means no conflict is known and the withholding is
+  precautionary. Where the readings are in dispute at any label, an interactive
+  run writes the whole disagreement to
   `case/out/reference_disagreement.md` — every reading's fields and the
   verbatim printed text each came from — prints the path, and only then asks
-  whether to resolve them, withhold them, adopt one reading, or stop. Nothing
-  you answer marks the numbering as confirmed; the report records which choice
-  was made and that you made it. A run that is not attached to a terminal
-  withholds the disputed labels and asks nothing.
+  whether to resolve them, withhold them, adopt one reading, or stop.
+  *Resolve* is the one answer that changes which papers get fetched: a second
+  model call is shown the printed list and the entries that disagree, every
+  field of its answer is checked verbatim against the printed text, and each
+  label it settles has its entry substituted into the list that is then
+  downloaded and judged. Labels it cannot settle stay disputed and withheld —
+  partial resolution is the normal outcome. Nothing you answer marks the
+  numbering as confirmed; the report records which choice was made, that you
+  made it, which model was asked and which extractions it was shown. A run that
+  is not interactive — no terminal, output piped, or `CI` set — withholds the
+  disputed labels and asks nothing.
 - Report every citation **occurrence** — each bracketed marker at its own place
   in the text — that no extracted claim reached, so a second sentence citing an
   already-checked reference is not silently counted as covered. It also
@@ -196,9 +213,14 @@ went uncited?**
 **PaperTrace does not**
 
 - **Confirm** a reference numbering by agreement between its readings. Where
-  they agree, the report says the numbering was *corroborated*, and says which
-  readings corroborated it — never that it was verified. They all read the same
-  document: a reference the page layout destroyed is one every reading may have
+  every cited label was agreed by at least two readings, and at least two
+  readings agreed on *all* of them, the report says the numbering was
+  *corroborated* and names those readings — never that it was verified. Where
+  every label was agreed but no single reading spans them all, it says that
+  instead, in as many words: that is short of corroboration, not a stronger
+  version of it. The model's own reading never counts toward either, because it
+  may only copy values out of the two extractions that already vote. They all
+  read the same document: a reference the page layout destroyed is one every reading may have
   missed, and a model agreeing with the parse read the same damaged text the
   parse did. *"Verified"* still means one thing only — the manuscript's own
   `[N]` markers accounted for exactly the labels a candidate list carried — and

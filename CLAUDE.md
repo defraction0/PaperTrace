@@ -27,6 +27,26 @@ Every subsystem encodes this, and most past bugs have been breaches of it:
 - A flat-text ingest fallback stamps `converter: pymupdf` into the source map so
   the fidelity loss appears in the report.
 
+Two rules about the wire format follow from it, both learned the expensive way
+on 0.7.0:
+
+- **A published field's meaning is never widened to fix a misleading
+  sentence.** When `numbering_verified` (extent: the chosen list accounts for
+  exactly the cited labels) read as "confirmed" beside a line withholding
+  verdicts for a disputed label (content), the fix was the *sentence*, not the
+  flag — four report formats already read that boolean, and stretching it to
+  cover content would have silently changed what every one of them asserts.
+  Add a second axis (`numbering_corroborated`, `labels_uncomparable`) or
+  reword; do not redefine.
+- **A zero or an empty value must not mean both "measured zero" and "never
+  measured".** `labels_uncomparable` is `None` when nothing computed it and
+  `[]` when every dispute was measured and every one was a contradiction;
+  `numbering_corroborated` is `bool | None` for the same reason, after its
+  docstring claimed three states for a type that held two. The report picks a
+  cause only where one was actually measured, and `evals/DESIGN.md` says the
+  same thing about a rate: *"Absent is not zero, and the two must never render
+  the same way."*
+
 When you add a feature, ask what it does when it fails. If the answer is "falls
 back to something reasonable", that is a bug in this codebase.
 
@@ -147,26 +167,70 @@ ingest → refs → scout → check → highlight → report
   **Agreement is per printed label, and disagreement is refused rather than
   ranked** (0.7.0). `reconcile` arbitrates between the Crossref deposit and the
   run backend's parse, unchanged; a flat-text pymupdf reading and a model
-  reading (`reflist.py`, `--llm-refs`) are **voters only** and reach neither
-  `reconcile`'s arguments nor `resolve_all`, so no model output can cause a
-  source to be resolved, downloaded or judged — only a verdict to be withheld.
+  reading (`reflist.py`, `--llm-refs`) are **voters only** — neither reaches
+  `reconcile`'s arguments nor `resolve_all`, so on their own they cannot cause
+  a source to be resolved, downloaded or judged: they withhold a verdict, and
+  (through `stamp_seen_in`) name themselves on an entry they also carried.
+  **Do not restate that as "no model output can": one path escapes it and is
+  gated on a person.** `_escalate_disputed` menu option 1 makes a *second*
+  model call (`reflist.resolve_disputed`) and substitutes each resolved entry
+  into the chosen list, which `resolve_all` downloads and `check.py` judges.
+  The substitution is mandatory, not optional: returning `entries` untouched
+  un-disputes the label while leaving the entry the resolution ruled *against*
+  as the paper judged, which is the original wrong-paper bug reached through
+  the one path a user authorised. What keeps it honest is the gate, and the
+  gate is what may not be relaxed — an interactive run, the full disagreement
+  on disk before anything is asked, `numbering_chosen_by: "user"`, only the
+  labels actually resolved substituted, and no answer setting
+  `numbering_verified`.
   `label_agreement` joins on `e.num`, the printed numeral, never on position:
   `_first_divergence` zips, and would compare docling's 6th entry against
-  pymupdf's 6th and report divergence for the wrong reason. Any pair failing
-  `_same_work` is `disputed` — no majority vote, because *"a non-unique match is
-  refused, never ranked"* — and `single` deliberately **prints**, since a
-  pymupdf-backend run whose model candidate was discarded has one reading, every
-  label would be `single`, and the audit would report nothing at all. A
-  `boundary_ambiguous` entry does not speak for its label and neither does a
+  pymupdf's 6th and report divergence for the wrong reason. Any pair
+  `_comparably_same` answers `False` for makes the label `disputed` — no majority vote,
+  because *"a non-unique match is refused, never ranked"* — and `single`
+  deliberately **prints**, since a pymupdf-backend run whose model candidate
+  was discarded has one reading, every label would be `single`, and the audit
+  would report nothing at all. **`_same_work` is deliberately not reused here.**
+  It returns True when either side has no comparable title — right for
+  `_first_divergence`, where silence must not manufacture a divergence — and
+  here it once reported two demonstrably unrelated papers as `agreed`, which is
+  the one state that lets a verdict through. `_comparably_same` asks the mirror
+  question and is three-valued: `None` is *cannot tell*, and a voter it answers
+  `None` for **abstains** rather than dissenting. Collapsing that to `False`
+  made a Crossref deposit of bare DOIs dispute every label it voted on while
+  the two parses agreed perfectly — an audit with no verdicts in it. The one
+  exception is a label where *no* voter said anything comparable at all
+  (`_says_something_comparable`): that is `disputed`, because nothing
+  establishes what the label names. So `disputed` has three causes — duplicate,
+  contradiction, nothing comparable — `_label_state` returns which, and
+  `labels_uncomparable` publishes the third as a subset of `labels_disputed`
+  **by construction**, both read off the same call. Never compute the subset
+  from a second pass, and re-intersect it after every mutation: the escalation
+  can take a label out of `labels_disputed`, and a subset computed before it
+  then names a label the manifest no longer disputes.
+  A `boundary_ambiguous` entry does not speak for its label and neither does a
   reading carrying that label twice: the first has said it cannot stand behind
-  the label, and for the second, which of the two it means is the question.
+  the label, and for the second, which of the two it means is the question. The
+  model's reading may not **corroborate** at all (`DERIVED_READINGS`):
+  `reflist.propose` may only copy values out of the two extractions, both of
+  which vote in their own right, so crediting it is one text counted twice.
   Every field of the model's reply must be found **verbatim** in one of the two
-  texts it was shown or it is discarded, and an unverifiable title discards the
-  answer — nothing invented may name a paper. `numbering_corroborated` is a
-  second, independent axis: `numbering_verified` keeps its exact meaning and
-  stays `False` through every model reply and every interactive choice, which
+  texts it was shown or it is discarded, and one entry's unverifiable title
+  discards the model's **whole reading**, never just that entry — nothing
+  invented may name a paper. `numbering_corroborated` is a second, independent
+  axis: `numbering_verified` keeps its exact meaning and stays `False` through
+  every model reply and every interactive choice, which
   `tests/test_numbering_invariant.py` parametrises over and which is the one
   thing in this feature that may not be relaxed for convenience.
+  `models._title_tokens` strips DOIs the way it strips URLs, and for the reason
+  the URL strip's own docstring gives: an identifier's substrings are not words
+  anybody wrote as a title. A DOI-only Crossref deposit (`_reference_raw`'s
+  documented fallback, and the majority of the deposit on the paper that
+  prompted this) was contributing `radiol` and `jamanetworkopen` as title
+  words, which disputed every label it voted on and pushed `_title_check_text`
+  toward `mismatch` on correct retrievals. Stripping it is global, not scoped
+  to the comparator: `_same_work` and `_title_check_text` both move, both
+  toward honesty, and both movements were measured before the strip landed.
 - **`ask.py`** — the **only** file in `src/` that runs a subprocess, and the
   only place this codebase shells out to a model (`claude -p --safe-mode
   --tools ""` in a private scratch cwd; inherits the user's Claude Code login,
@@ -174,23 +238,27 @@ ingest → refs → scout → check → highlight → report
   until `refs` needed a reading of the bibliography too — the rule was
   protecting the seam, not the module, and `tests/test_ask.py` greps `src/` and
   asserts exactly one file, which makes it enforceable rather than
-  conventional. Two callers, `check.py` and `refs.py` (through `reflist.py`),
-  and no third without that test going red. The model is recorded **per call
+  conventional. Two callers, `check.py` and `reflist.py` (driven by the `refs`
+  stage in `cli.py` — `refs.py` itself imports neither), and no third without
+  that test going red. The model is recorded **per call
   site** (`for_site`, `model_for`, `SITE_CHECK`, `SITE_REFS`), not in one
   global: `_LAST_MODEL` was overwritten by every call, so a run whose judging
   made zero calls — every cited source `not_retrieved`, nothing to judge —
   printed the reference-list model as the `Checker:` of verdicts it never saw.
-  `_ask`'s signature is frozen at `(prompt, model=None)`; sixty-two test sites
-  patch it with a two-argument lambda, which is why the site travels out of
-  band in a context manager instead of as a third parameter.
+  `_ask`'s signature is frozen at `(prompt, model=None)`; every offline test
+  that patches the seam does so with a two-argument lambda, which is why the
+  site travels out of band in a context manager instead of as a third
+  parameter. **No integer here**: the count moves with every test added or
+  removed, and `ask.py` and `reflist.py` each still carry a stale one in a
+  comment.
 - **`check.py`** — every prompt and every verdict rule, and no subprocess of
   its own. Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per
   **document** so context stays small — an article, each of its supplements,
   and each of the audited paper's own are separate calls with separate
   verdicts. Call the bare name `_ask(...)`, imported `from .ask import _ask`, so
   `monkeypatch.setattr(check_mod, "_ask", …)` still intercepts; rewriting a
-  call site as `ask._ask(...)` bypasses every patch and turns sixty-two offline
-  tests into live paid calls. `_ask_with_retry` wraps the seam and reads
+  call site as `ask._ask(...)` bypasses every patch and turns the offline suite
+  into live paid calls. `_ask_with_retry` wraps the seam and reads
   `ASK_ATTEMPTS` rather than hardcoding one retry — the wizard prints a
   worst-case bill derived from that constant. Also holds `coverage_audit()`,
   which is deliberately **mechanical and prompt-independent** — a regex
