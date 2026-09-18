@@ -144,15 +144,63 @@ ingest → refs → scout → check → highlight → report
   subset test is satisfied by exactly the labels in doubt, and
   `_refusals_unconfirm` is what stops a matching count printing "numbering
   confirmed" over a numbering the parser declined to stand behind.
-- **`check.py`** — the **only** module that calls a model, and only through the
-  `_ask()` seam (`claude -p` subprocess; inherits the user's Claude Code login,
-  no API key). Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per
+  **Agreement is per printed label, and disagreement is refused rather than
+  ranked** (0.7.0). `reconcile` arbitrates between the Crossref deposit and the
+  run backend's parse, unchanged; a flat-text pymupdf reading and a model
+  reading (`reflist.py`, `--llm-refs`) are **voters only** and reach neither
+  `reconcile`'s arguments nor `resolve_all`, so no model output can cause a
+  source to be resolved, downloaded or judged — only a verdict to be withheld.
+  `label_agreement` joins on `e.num`, the printed numeral, never on position:
+  `_first_divergence` zips, and would compare docling's 6th entry against
+  pymupdf's 6th and report divergence for the wrong reason. Any pair failing
+  `_same_work` is `disputed` — no majority vote, because *"a non-unique match is
+  refused, never ranked"* — and `single` deliberately **prints**, since a
+  pymupdf-backend run whose model candidate was discarded has one reading, every
+  label would be `single`, and the audit would report nothing at all. A
+  `boundary_ambiguous` entry does not speak for its label and neither does a
+  reading carrying that label twice: the first has said it cannot stand behind
+  the label, and for the second, which of the two it means is the question.
+  Every field of the model's reply must be found **verbatim** in one of the two
+  texts it was shown or it is discarded, and an unverifiable title discards the
+  answer — nothing invented may name a paper. `numbering_corroborated` is a
+  second, independent axis: `numbering_verified` keeps its exact meaning and
+  stays `False` through every model reply and every interactive choice, which
+  `tests/test_numbering_invariant.py` parametrises over and which is the one
+  thing in this feature that may not be relaxed for convenience.
+- **`ask.py`** — the **only** file in `src/` that runs a subprocess, and the
+  only place this codebase shells out to a model (`claude -p --safe-mode
+  --tools ""` in a private scratch cwd; inherits the user's Claude Code login,
+  no API key). "`check.py` is the only module that calls a model" was the rule
+  until `refs` needed a reading of the bibliography too — the rule was
+  protecting the seam, not the module, and `tests/test_ask.py` greps `src/` and
+  asserts exactly one file, which makes it enforceable rather than
+  conventional. Two callers, `check.py` and `refs.py` (through `reflist.py`),
+  and no third without that test going red. The model is recorded **per call
+  site** (`for_site`, `model_for`, `SITE_CHECK`, `SITE_REFS`), not in one
+  global: `_LAST_MODEL` was overwritten by every call, so a run whose judging
+  made zero calls — every cited source `not_retrieved`, nothing to judge —
+  printed the reference-list model as the `Checker:` of verdicts it never saw.
+  `_ask`'s signature is frozen at `(prompt, model=None)`; sixty-two test sites
+  patch it with a two-argument lambda, which is why the site travels out of
+  band in a context manager instead of as a third parameter.
+- **`check.py`** — every prompt and every verdict rule, and no subprocess of
+  its own. Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per
   **document** so context stays small — an article, each of its supplements,
-  and each of the audited paper's own are separate calls with separate verdicts. Also holds `coverage_audit()`, which is
-  deliberately **mechanical and prompt-independent** — a regex
+  and each of the audited paper's own are separate calls with separate
+  verdicts. Call the bare name `_ask(...)`, imported `from .ask import _ask`, so
+  `monkeypatch.setattr(check_mod, "_ask", …)` still intercepts; rewriting a
+  call site as `ask._ask(...)` bypasses every patch and turns sixty-two offline
+  tests into live paid calls. `_ask_with_retry` wraps the seam and reads
+  `ASK_ATTEMPTS` rather than hardcoding one retry — the wizard prints a
+  worst-case bill derived from that constant. Also holds `coverage_audit()`,
+  which is deliberately **mechanical and prompt-independent** — a regex
   (`_LABEL_GROUP`) over bracketed numeric labels, so a citation the extractor
-  missed still surfaces. The module global `_LAST_MODEL` carries the judging
-  model out to the report; truncation travels in a per-run `Truncations`.
+  missed still surfaces. **A `disputed` label is dropped from `avail` before any
+  call is made**, so a source whose identity two readings contradict is never
+  judged; if nothing survives the claim is `unchecked` with the labels named,
+  never `not_retrieved` — that source was obtained, and `withheld_refs` is a
+  different field from `unjudged_refs` for exactly that reason. `last_model()`
+  reads the `check` site; truncation travels in a per-run `Truncations`.
 - **`highlight.py`** — the division of labour that keeps evidence trustworthy:
   the model proposes page, block and verbatim anchor phrases; **Python** locates
   them with PyMuPDF `page.search_for` and draws the boxes. Boxes are never

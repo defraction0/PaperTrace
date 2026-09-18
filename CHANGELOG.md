@@ -107,6 +107,100 @@ before the first paid model call rather than after all of them. An answer of
 whitespace arrives as `.` and is refused, for the reason `default_case` already
 refuses the working directory: an audit needs a folder of its own.
 
+### Added — a third and fourth reading of the reference list, and a per-label verdict on the numbering
+
+`reconcile` arbitrated between two readings of the bibliography: the tool's own
+parse and the reference list the publisher deposited with Crossref. Both can be
+absent — an unpublished manuscript has no DOI to look up — and where the parse
+is the only reading, nothing can contradict it.
+
+Two more candidates now stand beside them. A flat-text (pymupdf) parse of the
+same PDF, free on a docling run and skipped on a pymupdf one because it would
+be identical. And a structured reference list proposed by a model, which is
+shown both texts and given no authority over either: **every field of its
+reply must be found verbatim in one of them or it is discarded**, one entry's
+unverifiable title discards the model's **whole reading** — a title is the
+one field that names the paper, so a reply that got one wrong cannot be
+trusted about the rest — and the model's list never becomes `reconcile`'s
+chosen reading. It is a voter. On by default, `--no-llm-refs` to turn it off,
+on both `refs` and `run`.
+
+Agreement is then computed **per printed citation label** — joined on the
+numeral the page carries, never on position — and reported as `agreed`,
+`single`, `disputed` or `absent`. Where two readings name different papers at a
+label, verdicts on claims citing it are **withheld**: the claim is reported
+`unchecked` with the label named, not `not_retrieved`, because the source was
+obtained and read. `single` deliberately prints, with the caveat it already
+carried. `numbering_corroborated` is a new, independent axis beside
+`numbering_verified`, which keeps its exact meaning.
+
+Where nothing accounted for the body's labels and labels are in dispute, an
+interactive run writes the full disagreement to
+`case/out/reference_disagreement.md` — every reading's fields and the verbatim
+text each was read from — **prints the path, and only then asks** what to do
+about it. Four options: resolve the disputed labels with a model, withhold
+verdicts on all of them, adopt one reading whole, or abort. Whatever is
+answered is recorded as `numbering_chosen_by: "user"`; a person consenting to
+proceed is an input, not evidence, and nothing a user answers can set
+`numbering_verified`. A non-interactive run withholds the disputed labels and
+asks nothing.
+
+Partial resolution is a normal, representable, reported outcome:
+`labels_resolved` and `labels_disputed` are both non-empty on a run where some
+labels were settled and some were not, and "cannot tell" from the resolution
+call is a correct answer that keeps a label withheld.
+
+### Added — `ask.py`, the one seam, with the model recorded per call site
+
+Every model call went through one `_ask` in `check.py`, which was a convention
+stated in `CLAUDE.md` with nothing enforcing it. It is now a file —
+`src/papertrace/ask.py`, the only file in `src/` that runs a subprocess — and
+`tests/test_ask.py` greps `src/` and asserts exactly that. Same flags, same
+timeout, same sandbox: `--safe-mode`, `--tools ""`, a private 0700 scratch cwd.
+
+### Fixed — a run that judged nothing could name a judge
+
+The model that judged the claims was a single module global overwritten by
+every `_ask` call, and the report's `Checker:` line rendered it. With `refs`
+also calling the seam, a run whose judging made zero calls — every cited
+source not retrieved, so nothing to judge — would have printed the
+**reference-list** model as the judge of verdicts it never saw. The model is
+now recorded per call site, and `last_model()` reads the judging site only:
+`None` where no judging happened, never the other site's answer.
+
+### Fixed — claim extraction had no retry, and the wizard's cost ceiling assumed it did
+
+`ASK_ATTEMPTS` exists so the wizard's advertised worst-case bill cannot drift
+from the real retry policy. The retry loop did not read it — it hardcoded one
+retry and matched the constant only because the constant happens to be 2 — and
+the single extraction call, whose failure fails the whole run, had no retry at
+all. Extraction now retries like everything else, and the wizard's ceiling moved
+with it.
+
+### Changed — the coverage of `unjudged_refs`, and a second axis on the numbering
+
+`ClaimResult.withheld_refs` is a new field and is **not** `unjudged_refs`. An
+entry in `unjudged_refs` means the source could not be obtained — nobody read
+it. A withheld reference **was** obtained; what is in doubt is whether it is the
+paper the label names. Putting it in `unjudged_refs` would report a retrieval
+gap that does not exist.
+
+`numbering_verified` is unchanged in meaning and unchanged in what can set it.
+`numbering_corroborated` is reported beside it, which lets the numbering
+disclosure stop crying wolf on the case it was firing on wrongly: a list two
+readings agree about entry for entry, longer than the highest cited label
+because three of its references are cited only in the supplement.
+
+### Known staleness — `examples/demo/output/` predates this feature
+
+`--llm-refs` defaults on, so a fresh demo run now makes one extra model call
+and, on the docling backend the demo uses, emits the `reflist` disclosure in
+all four formats. The committed showcase in `examples/demo/output/` was
+generated before this feature existed and shows none of it. That is staleness
+in the committed artefact, not a defect in the feature — the showcase needs a
+fresh end-to-end run (network, a logged-in `claude` CLI) to pick it up, and
+that run is a branch-level step, not part of this change.
+
 ## [0.6.0] — 2026-09-13 (beta)
 
 Carries 0.4.1 and 0.5.0 with it. Neither was ever published, so neither has a

@@ -95,12 +95,18 @@ went uncited?**
   couldn't be retrieved is `⊘ not retrieved` — recorded, never guessed.
 - **Check its own reference numbering before trusting it.** The citation label
   is the join key between a claim and the source it is judged against, so a
-  list off by one produces a confident audit of the *wrong papers*. Two
-  independent readings are taken — the tool's parse of the printed list, and
-  the reference list the publisher deposited with Crossref (`refs --doi`,
-  defaulting to the DOI printed on page 1) — and the manuscript's own `[N]`
-  markers arbitrate between them. A reading is used only if it accounts for
-  exactly the labels the body cites. When neither does, the audit continues,
+  list off by one produces a confident audit of the *wrong papers*. Up to four
+  independent readings are taken — the tool's parse of the printed list, a
+  flat-text parse of the same PDF, the reference list the publisher deposited
+  with Crossref (`refs --doi`, defaulting to the DOI printed on page 1), and a
+  structured list proposed by a model that is shown the two texts and given
+  authority over neither (`--no-llm-refs` turns it off) — and the manuscript's
+  own `[N]` markers arbitrate between them. Only the parse and the deposit can
+  be *adopted* as the list; the other two are readings that can disagree, and a
+  disagreement is all they can do. Every field of the model's reply is checked
+  against the text it was shown and discarded if it is not printed there, so
+  nothing it invented can name a paper. A reading is used only if it accounts
+  for exactly the labels the body cites. When neither does, the audit continues,
   the report says the numbering is unconfirmed, and every verdict on a claim
   citing a doubtful label carries that caveat beside it. Crossref is a second
   reading, **not** an oracle. A deposit this tool can only partly read is set
@@ -118,6 +124,22 @@ went uncited?**
   publisher deposited are looked for in the reference list printed in the
   paper — and where neither can, the list is used and the manifest says the
   identity behind it was never confirmed.
+- **Withhold a verdict where two readings of the bibliography name different
+  papers.** The citation label is the join key, so a label whose readings
+  disagree is a label nothing can say the cited paper for — and a confident
+  verdict there is about a paper the manuscript may never have cited. Agreement
+  is computed for each printed label separately, on the numeral the page
+  carries. Any disagreement withholds: the claim is reported `⚠ not checked`
+  with the label named, **not** `⊘ not retrieved`, because that source was
+  obtained and read — what is in doubt is whether it is the paper the label
+  names. Where nothing accounted for the body's labels and labels are in
+  dispute, an interactive run writes the whole disagreement to
+  `case/out/reference_disagreement.md` — every reading's fields and the
+  verbatim printed text each came from — prints the path, and only then asks
+  whether to resolve them, withhold them, adopt one reading, or stop. Nothing
+  you answer marks the numbering as confirmed; the report records which choice
+  was made and that you made it. A run that is not attached to a terminal
+  withholds the disputed labels and asks nothing.
 - Report every citation **occurrence** — each bracketed marker at its own place
   in the text — that no extracted claim reached, so a second sentence citing an
   already-checked reference is not silently counted as covered. It also
@@ -173,6 +195,16 @@ went uncited?**
 
 **PaperTrace does not**
 
+- **Confirm** a reference numbering by agreement between its readings. Where
+  they agree, the report says the numbering was *corroborated*, and says which
+  readings corroborated it — never that it was verified. They all read the same
+  document: a reference the page layout destroyed is one every reading may have
+  missed, and a model agreeing with the parse read the same damaged text the
+  parse did. *"Verified"* still means one thing only — the manuscript's own
+  `[N]` markers accounted for exactly the labels a candidate list carried — and
+  nothing a model returns and no answer you give at a prompt can set it. Nor
+  does the model ever see the page: it is shown extracted text, the same as
+  every other model call in this tool.
 - **Always** establish that a supplement belongs to the work it was attached
   to. Where its own title or DOI names that work, it does; where only its
   filename matched, nothing read it, and the audited paper's own are whatever

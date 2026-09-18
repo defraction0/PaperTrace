@@ -50,6 +50,43 @@ a correct answer. A case whose labellers could not agree gets
 `gold_verdict: null`, is kept in the set, and is excluded from every
 denominator — deleting it would quietly make the set easier.
 
+### A second unit, specified elsewhere: (citation label, printed reference entry)
+
+The unit above is `(manuscript claim, cited source)` and it grades a model's
+judgement. It cannot grade the join that *chooses* the source. That join broke
+on a real manuscript — 22 printed references read as 18, and six substantive
+verdicts naming papers the manuscript never cited — and every one of them
+carried `title_check: verified`, because the glued reference string really did
+contain the downloaded paper's words alongside the cited paper's.
+
+So there is a second task, never folded into `judgment_accuracy`, whose unit is
+`(citation label, printed reference entry)`. Deliberately **not**
+`(label, retrieved PDF)`: that conflates the two joins, and it is exactly the
+conflation that let `verified` be printed on six wrong papers. Its gold rows
+carry the entry text **verbatim as printed** and no entry index — a gold set
+keyed on position breaks whenever parsing changes.
+
+Its two error directions are reported **separately and never blended**: labels
+the parse got wrong and the tool confirmed anyway (the safety metric), and
+labels the parse got right and the tool refused (the cost). Superscript papers
+have no arbiter and cannot be scored at all; they are excluded with a reason and
+counted, never deleted.
+
+**It is specified and implemented in its own plan, not here.** It needs
+`metrics.confusion()` parameterised off `JUDGMENT_VERDICTS`, a new population in
+`scoring._populations`, its own pass in `eligibility.py`, and
+`provenance.prompt_fingerprint` extended to cover `REFLIST_PROMPT` and
+`RESOLVE_PROMPT` — hashing only `EXTRACT_PROMPT` and `CHECK_PROMPT` while two
+more prompts decide the answers is the classic eval failure. `align.py` is not
+reusable for it and must not be touched: its candidate scoring is `difflib` over
+`(normalize_claim(text), set(labels))` with a 0.60 floor, and a pairing task
+wants an exact join on the label. `missing` keeps its `list[str]` meaning byte
+for byte — a refused pairing must never be unioned into it, because a
+wrongly-paired label is a numbering fault, not an extraction gap.
+
+Nothing in this section has been measured. The Status note at the top of this
+document governs it too.
+
 ## Paired cases
 
 A pair is the same fact from the same source in two versions: one stated
