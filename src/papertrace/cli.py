@@ -489,6 +489,114 @@ def _body_citation_labels(smap, citation_labels, is_references_heading) -> set[s
     return citation_labels("\n".join(body))
 
 
+def _interactive() -> bool:
+    """May this run stop and ask a person something?
+
+    Both streams, and not under CI. `stdin.isatty()` alone is not the gate: CI
+    runners frequently allocate a tty, and a prompt in CI is a hung build rather
+    than a question. `stdout` is checked too because a run whose output is being
+    piped into a file has a reader who is not watching.
+    """
+    return sys.stdin.isatty() and sys.stdout.isatty() and not os.environ.get("CI")
+
+
+_DISAGREEMENT_NAME = "reference_disagreement.md"
+# How much of the printed list to quote around a disputed label. Enough to show
+# the entries either side of it — a merge or a split is only visible against its
+# neighbours, and the neighbours are what say which reading dropped a reference.
+# Two constants because the window is not centred: the entry ABOVE the first
+# disputed label is where a split began, so it is worth about one reference of
+# backtrack, while the entries below are what shifted.
+_SPAN_BEFORE = 260
+_SPAN_CHARS = 600
+
+
+def _label_span(text: str, label: str) -> str:
+    """The printed text around this label, or "" when the numeral is not printed.
+
+    A window, not a parse. This file exists so a reader can check the parse, so
+    a second parse deciding what to show them would fail in the same place and
+    hide the same reference. `""` where the numeral was never printed is the
+    honest answer, and that absence is often the disagreement itself.
+    """
+    m = re.search(rf"(?:(?<=\n)|\A)\s*\[?{re.escape(label)}[\].:]?\s", text)
+    if m is None:
+        return ""
+    # Open the window ABOVE the label, not at it. When a reading splits one
+    # entry into two, every label after the split is shifted and the damage
+    # started in the entry *before* the first disputed one — a window that
+    # begins at the disputed label shows the symptom and hides the cause. Snap
+    # forward to the next line break so it never opens mid-reference.
+    start = max(0, m.start() - _SPAN_BEFORE)
+    if start:
+        nl = text.find("\n", start)
+        start = nl + 1 if 0 <= nl < m.start() else start
+    return text[start : m.start() + _SPAN_CHARS].strip()
+
+
+def _write_disagreement(
+    case: Path,
+    labels: list[str],
+    candidates: dict[str, list[RefEntry]],
+    texts: dict[str, str],
+) -> Path:
+    """Every reading of every disputed label, with the text each was read from.
+
+    Written before any question is asked. The structured fields alone are not
+    enough to settle a disagreement — they are what disagreed — so the verbatim
+    source span travels with them, and a reader who wants to answer the question
+    themselves can, without opening the PDF.
+    """
+    out = case / "out"
+    out.mkdir(parents=True, exist_ok=True)  # not created by `_refs_pipeline` before this point
+    lines = [
+        "# Reference numbering — where the readings disagree",
+        "",
+        "One section per citation label whose readings of the bibliography name "
+        "different papers. Each reading's structured fields sit above the verbatim "
+        "text it was read from, so the disagreement can be settled by eye against "
+        "the printed list.",
+        "",
+        f"Readings compared: {', '.join(sorted(candidates))}.",
+        "",
+        "Verdicts on claims citing these labels are withheld — reported "
+        "`unchecked`, never guessed — unless a reading is adopted for them.",
+        "",
+    ]
+    for label in labels:
+        lines += [f"## [{label}]", ""]
+        for name in sorted(candidates):
+            hits = [e for e in candidates[name] if e.num == label]
+            lines += [f"### {name}", ""]
+            if not hits:
+                lines += ["Carries no entry for this label.", ""]
+                continue
+            # more than one hit IS the finding on a reading that carried the
+            # label twice — which of the two it means is precisely the question,
+            # so both are printed rather than the first
+            for e in hits:
+                lines += [
+                    f"- doi: `{e.doi or '—'}`",
+                    f"- year: `{e.year or '—'}`",
+                    f"- slug: `{e.slug or '—'}`",
+                    f"- refused to number itself: `{e.boundary_ambiguous}`",
+                    "",
+                    "Read from:",
+                    "",
+                    "```",
+                    e.raw,
+                    "```",
+                    "",
+                ]
+        for name in sorted(texts):
+            if span := _label_span(texts[name], label):
+                lines += [f"### {name} — the printed list around it", "",
+                          "```", span, "```", ""]
+    path = out / _DISAGREEMENT_NAME
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def _detected_doi(manuscript: Path) -> str | None:
     """The DOI printed on the paper's own front matter, or None.
 
@@ -625,6 +733,157 @@ def _llm_reference_reading(
         # and it goes FIRST so the console line quotes it rather than a field name
         prov.fields_discarded.insert(0, f"reading discarded — {prov.discarded_whole}")
     return entries, prov
+
+
+_READING_LABEL = {"parsed": "the run backend's parse", "pymupdf": "the flat-text parse"}
+
+
+def _escalate_disputed(
+    case: Path,
+    rec,
+    entries: list[RefEntry],
+    candidates: dict[str, list[RefEntry]],
+    texts: dict[str, str],
+    model: str | None = None,
+) -> list[RefEntry]:
+    """Show the disagreement, then offer to resolve it. Mutates `rec`, returns the list to use.
+
+    Step 1 is unskippable and happens before the menu: nobody is asked to choose
+    blind. Nothing here may set `rec.verified` — the honest record is *which*
+    choice was made and *by whom*. `chosen_by: "user"` is the whole point: a
+    person consenting to proceed is an input, not evidence. This codebase
+    already ranks that signal — "a filename carries the user's assertion,
+    content carries none."
+
+    Changed by menu option 3 (a whole reading substituted) AND by option 1
+    (each resolved label's entry substituted) — never option 1 leaving the
+    chosen list untouched while un-disputing the label. That would let `check`
+    judge the label again against the very entry the resolution ruled against,
+    under a report line saying a person accepted it: the original wrong-paper
+    bug, reached through the one path a human authorised.
+    """
+    from .refs import _label_list  # top-level in `refs.py`; not visible from `_refs_pipeline`'s
+    # own local import, since this is a different function's frame
+
+    labels = list(rec.labels_disputed)
+    n = len(labels)
+    if not n:
+        return entries
+
+    if not _interactive():
+        # Suppress the disputed labels and nothing else. Not the whole audit —
+        # that throws away a useful audit over a numbering the reader can check
+        # by hand — and not a reading picked on the user's behalf, which would
+        # record a choice nobody made. The evidence file is still written (no
+        # network, no model, no prompt): nobody was asked, but the next person
+        # to open this case folder should not have to re-run interactively just
+        # to see what disagreed.
+        path = _write_disagreement(case, labels, candidates, texts)
+        rec.choice, rec.chosen_by = "withheld", "default"
+        console.print(
+            f"[yellow]⚠ {n} citation label{'' if n == 1 else 's'} in dispute[/yellow] — "
+            f"{_label_list(labels)}. Not a tty, so nothing was asked: verdicts on claims "
+            "citing them are withheld and reported unchecked. Re-run in a terminal to "
+            f"settle them. [dim]full disagreement: {path}[/dim]"
+        )
+        return entries
+
+    # Step 1, unskippable: the file exists before the first question is asked.
+    path = _write_disagreement(case, labels, candidates, texts)
+    console.print(
+        f"\n[yellow]⚠ {n} citation label{'' if n == 1 else 's'} in dispute[/yellow] — "
+        f"{_label_list(labels)}"
+    )
+    for label in labels:
+        for name in sorted(candidates):
+            hits = [e for e in candidates[name] if e.num == label]
+            shown = hits[0].raw[:70] if hits else "— no entry —"
+            console.print(f"  [{label:>3}] [cyan]{name:<8}[/cyan] {shown}")
+    console.print(f"  [dim]full disagreement, with the text each reading came from:[/dim] {path}")
+
+    offered = [r for r in ("parsed", "pymupdf") if r in candidates]
+    console.print(
+        f"\n1. Ask the model to resolve the {n} disputed label{'' if n == 1 else 's'} "
+        "[dim][default][/dim]\n"
+        f"2. Withhold verdicts on all {n}\n"
+        f"3. Use one reading whole: {' / '.join(offered)}\n"
+        "4. Abort"
+    )
+    answer = Prompt.ask("  choice", choices=["1", "2", "3", "4"], default="1")
+
+    if answer == "4":
+        # nothing written: a manifest describing a numbering the user walked
+        # away from is worse than no manifest, because every later stage trusts it
+        console.print("[dim]aborted — nothing was written.[/dim]")
+        raise typer.Exit(1)
+
+    if answer == "2":
+        rec.choice, rec.chosen_by = "withheld", "user"
+        return entries
+
+    if answer == "3":
+        pick = Prompt.ask("  which reading", choices=offered, default=offered[0])
+        rec.choice, rec.chosen_by = pick, "user"
+        rec.labels_resolved = sorted(labels, key=int)
+        rec.labels_disputed = []
+        rec.note += (
+            f"; you chose {_READING_LABEL.get(pick, pick)} for the {n} label"
+            f"{'' if n == 1 else 's'} in dispute. That is your reading, not a check of it "
+            "— the numbering is still unconfirmed"
+        )
+        return list(candidates[pick])
+
+    from .reflist import resolve_disputed
+
+    try:
+        res = resolve_disputed(labels, candidates, tuple(texts[k] for k in sorted(texts)),
+                               model=model)
+    except Exception as e:  # noqa: BLE001 — same shape as `_llm_reference_reading`: the refs
+        # stage has already done useful work and must not go down with a failed
+        # subprocess call. Every disputed label is left exactly where it was —
+        # disputed and withheld — and the failure is named rather than swallowed.
+        # `chosen_by` stays "user": a person did consent to trying, even though
+        # the attempt itself produced nothing.
+        console.print(
+            f"[yellow]⚠ the model could not resolve the disputed label"
+            f"{'' if n == 1 else 's'} — the call did not return: "
+            f"{type(e).__name__}: {str(e)[:200]}[/yellow]"
+        )
+        rec.choice, rec.chosen_by = "withheld", "user"
+        rec.note += (
+            f"; asked a model to resolve the {n} disputed label{'' if n == 1 else 's'} and "
+            "the call failed, so they remain withheld"
+        )
+        return entries
+
+    rec.choice, rec.chosen_by = "llm_resolved", "user"
+    rec.labels_resolved = sorted(res.resolved, key=int)
+    rec.labels_disputed = sorted(res.still_disputed, key=int)
+    done, left = len(rec.labels_resolved), len(rec.labels_disputed)
+    console.print(
+        f"  [green]{done} resolved[/green]"
+        + (f" · [yellow]{left} still disputed[/yellow]" if left else "")
+    )
+    if left:
+        # partial resolution is the normal outcome, and the abstentions are named
+        # because they are the labels a reader should check by hand
+        console.print(
+            f"  [dim]{_label_list(rec.labels_disputed)} — the model could not tell which "
+            "paper these name, so their verdicts stay withheld.[/dim]"
+        )
+    rec.note += (
+        f"; {done} of the {n} disputed label{'' if n == 1 else 's'} were resolved by a "
+        "model reading of both texts, with every field verified verbatim, and you "
+        "accepted that. It is a reading, not a confirmation — the numbering is still "
+        "unconfirmed"
+    )
+    # The resolved entry REPLACES the one in the chosen list, in place, same
+    # order, same length. Returning `entries` unchanged here takes the label out
+    # of `labels_disputed` — so `check` judges it again — while leaving the
+    # entry the resolution just ruled AGAINST as the paper it judges against.
+    # That is the original wrong-paper bug reached through the one path a user
+    # consented to, under a report line saying they accepted it.
+    return [res.resolved.get(e.num, e) for e in entries]
 
 
 def _refs_pipeline(
@@ -905,7 +1164,19 @@ def _refs_pipeline(
         )
     stamp_seen_in(entries, others)
 
-    if rec.verified:
+    if rec.verified and rec.labels_disputed:
+        # `numbering_verified` means EXTENT — the chosen list accounts for
+        # exactly the labels the body cites — and a disputed label is a question
+        # of CONTENT, which no count can answer. Both can be true at once, and
+        # the flag's published meaning is not widened to cover the second (that
+        # would redefine a boolean four report formats already read). What must
+        # not happen is this line saying "confirmed" beside the line above
+        # withholding verdicts: whichever of the two a reader believed, the
+        # other would be a lie.
+        console.print(
+            f"[green]✓ numbering accounts for every cited label[/green] — {rec.note}"
+        )
+    elif rec.verified:
         console.print(f"[green]✓ numbering confirmed[/green] — {rec.note}")
     else:
         console.print(f"[yellow]⚠ numbering unconfirmed[/yellow] — {rec.note}")
@@ -922,6 +1193,15 @@ def _refs_pipeline(
         for e in entries:
             console.print(f"  [{e.num:>3}] {e.raw[:90]}")
         return
+
+    # After --parse-only returns: the escalation can spend a model call, and
+    # --parse-only promises no network. Only "parsed" and "pymupdf" carry a
+    # printed text to show a reader — "crossref" and "llm" are voters with no
+    # separate span of the page, so they are omitted here rather than passed as "".
+    reading_texts: dict[str, str] = {"parsed": refs_text}
+    if needs_flat:
+        reading_texts["pymupdf"] = flat_text
+    entries = _escalate_disputed(case, rec, entries, others, reading_texts, model=None)
 
     if provided is not None and provided.is_file():
         console.print(
@@ -979,6 +1259,9 @@ def _refs_pipeline(
         numbering_corroborated=rec.corroborated,
         corroborating_readings=rec.corroborating_readings,
         labels_disputed=rec.labels_disputed,
+        labels_resolved=rec.labels_resolved,
+        numbering_choice=rec.choice,
+        numbering_chosen_by=rec.chosen_by,
         reflist_outcome=reflist_prov.outcome,
         reflist_failure=reflist_prov.failure,
         reflist_model=reflist_prov.model,

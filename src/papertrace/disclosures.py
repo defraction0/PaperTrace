@@ -53,12 +53,15 @@ NUMBERING_CONTESTED_TOKEN = "second reading of the reference list disagreed"
 # carries one passes here and fails the parity test that asserts it verbatim
 # in all four — "reference list's" was tried first and had to be reworded.
 LABELS_DISPUTED_TOKEN = "labels where the reference list readings disagree"
-# `claim_pairing` gains three more states in Tasks 6 and 7 (resolved by a
-# model call, chosen by the user, corroborated by a second agreeing reading) —
-# each needs its own token, the same way ANCHOR_LOCATED_TOKEN /
-# ANCHOR_NOT_LOCATED_TOKEN / ANCHOR_UNKNOWN_TOKEN are one Disclosure key with
-# one token per state actually reached. Only this state's token exists yet.
+# `claim_pairing` gains three more states in Task 7 (resolved by a model call,
+# chosen by the user, corroborated by a second agreeing reading) — each needs
+# its own token, the same way ANCHOR_LOCATED_TOKEN / ANCHOR_NOT_LOCATED_TOKEN /
+# ANCHOR_UNKNOWN_TOKEN are one Disclosure key with one token per state actually
+# reached.
 CLAIM_PAIRING_WITHHELD_TOKEN = "verdict withheld — the reference list readings disagree"
+CLAIM_PAIRING_RESOLVED_TOKEN = "resolved by a model reading of both texts, accepted by you"
+CLAIM_PAIRING_CHOSEN_TOKEN = "you chose which reading of the reference list to use"
+CLAIM_PAIRING_CORROBORATED_TOKEN = "agreed by every reading of the reference list"
 # no apostrophe, `&`, `<` or `>` in either — same HTML-autoescape rule as
 # LABELS_DISPUTED_TOKEN above, since both are asserted verbatim in two formats
 # that escape and two that do not
@@ -712,6 +715,11 @@ def _numbering_corroboration(manifest) -> Disclosure | None:
     )
 
 
+def _label_group(labels: list[str]) -> str:
+    """`["4", "5"]` -> `[4], [5]` — a citation-label group as the reader sees it."""
+    return f"[{'], ['.join(labels)}]"
+
+
 def _claim_numbering(claim, manifest) -> Disclosure:
     """The run-level warning, said again where the verdict is read.
 
@@ -723,7 +731,7 @@ def _claim_numbering(claim, manifest) -> Disclosure:
         (r for r in claim.refs if manifest.label_is_doubtful(r)),
         key=lambda r: int(r),
     )
-    labels = f"[{'], ['.join(doubtful)}]"
+    labels = _label_group(doubtful)
     return Disclosure(
         key="claim_numbering",
         level="warn",
@@ -1060,18 +1068,25 @@ def _no_quote(claim) -> Disclosure:
     )
 
 
-def _claim_pairing(claim) -> Disclosure | None:
+def _claim_pairing(claim, manifest=None) -> Disclosure | None:
     """Which pairing state this claim's cited labels are in, if not a clean one.
 
-    Only `withheld` exists yet — `withheld_refs` is the only field a pairing
-    state has written to `ClaimResult` so far. Tasks 6 and 7 add the
-    model-resolved, user-chosen and corroborated states as further branches
-    reading their own new fields, never a second function — so `CLAIM_KEYS`
-    keeps exactly one claim-level entry covering all four.
+    Four states, four tokens — the same one-key-many-tokens shape `anchor`
+    uses. `withheld` reads only `claim.withheld_refs`, so it fires with no
+    `manifest` at all (as it always has); the other three read the manifest's
+    escalation fields and are silent without one. `corroborated` is the only
+    `info`-level state, and `claim_disclosures` gates it on the claim already
+    carrying a `warn`: reassurance repeated on every clean claim is noise a
+    reader stops reading.
     """
-    if claim.withheld_refs:
-        labels = f"[{'], ['.join(claim.withheld_refs)}]"
-        one = len(claim.withheld_refs) == 1
+    cited = set(claim.refs)
+    withheld = sorted(cited & set(claim.withheld_refs), key=int)
+    disputed = sorted(cited & set(getattr(manifest, "labels_disputed", None) or []), key=int)
+    resolved = sorted(cited & set(getattr(manifest, "labels_resolved", None) or []), key=int)
+
+    if withheld or disputed:
+        labels = _label_group(withheld or disputed)
+        one = len(withheld or disputed) == 1
         return Disclosure(
             key="claim_pairing",
             level="warn",
@@ -1086,11 +1101,57 @@ def _claim_pairing(claim) -> Disclosure | None:
             ),
             short=f"{labels} {CLAIM_PAIRING_WITHHELD_TOKEN}",
         )
-    # Task 6: `resolved_by_model` — the resolution call named a reading and the
-    # default (non-interactive) run accepted it.
-    # Task 7: `chosen_by_user` — an interactive session picked one reading
-    # whole; `corroborated`, level="info", fires only when the claim already
-    # carries a warn-level disclosure, so a clean claim stays silent.
+
+    if resolved and manifest is not None and manifest.numbering_choice == "llm_resolved":
+        labels = _label_group(resolved)
+        return Disclosure(
+            key="claim_pairing",
+            level="warn",
+            token=CLAIM_PAIRING_RESOLVED_TOKEN,
+            text=(
+                f"This claim cites {labels}, {CLAIM_PAIRING_RESOLVED_TOKEN}. Two readings "
+                "of the bibliography disagreed there. A model was shown both, every field "
+                "of its answer was found verbatim in one of them, and a person accepted "
+                "the result — so this verdict rests on a reading nobody checked against "
+                "the printed page, chosen by a person. The numbering is still recorded as "
+                "unconfirmed."
+            ),
+            short=f"{labels} {CLAIM_PAIRING_RESOLVED_TOKEN}",
+        )
+
+    if resolved and manifest is not None and manifest.numbering_choice in ("parsed", "pymupdf"):
+        labels = _label_group(resolved)
+        return Disclosure(
+            key="claim_pairing",
+            level="warn",
+            token=CLAIM_PAIRING_CHOSEN_TOKEN,
+            text=(
+                f"This claim cites {labels}. Two readings of the bibliography disagreed "
+                f"there and {CLAIM_PAIRING_CHOSEN_TOKEN} — the `{manifest.numbering_choice}` "
+                "one, for every disputed label. That is an assertion about which reading "
+                "is right, not a check of it, and this verdict is about whichever paper "
+                "that reading names."
+            ),
+            short=f"{labels} {CLAIM_PAIRING_CHOSEN_TOKEN} ({manifest.numbering_choice})",
+        )
+
+    # `info`, and gated by the caller on this claim already carrying a `warn`:
+    # corroboration is reassurance, and reassurance on a clean claim is noise
+    if manifest is not None and getattr(manifest, "numbering_corroborated", False) and cited:
+        labels = _label_group(sorted(cited, key=int))
+        readings = ", ".join(manifest.corroborating_readings)
+        return Disclosure(
+            key="claim_pairing",
+            level="info",
+            token=CLAIM_PAIRING_CORROBORATED_TOKEN,
+            text=(
+                f"{labels} was {CLAIM_PAIRING_CORROBORATED_TOKEN} ({readings}). That is "
+                "evidence for this pairing, not confirmation of it — every reading read "
+                "the same document, so a reference the layout destroyed is one they may "
+                "all have missed."
+            ),
+            short=f"{labels} {CLAIM_PAIRING_CORROBORATED_TOKEN}",
+        )
     return None
 
 
@@ -1119,8 +1180,14 @@ def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
         out.append(_supplement_headline(claim))
     if manifest is not None and any(manifest.label_is_doubtful(r) for r in claim.refs):
         out.append(_claim_numbering(claim, manifest))
-    if (d := _claim_pairing(claim)) is not None:
-        out.append(d)
+    # `claim_pairing` at info level (corroboration) is reassurance, and
+    # reassurance on a claim with nothing else to say about it is noise on
+    # every row of the report — so it appends only beside an existing `warn`.
+    # A `warn`-level pairing disclosure is unconditional, `manifest` or not:
+    # `withheld` reads only `claim.withheld_refs`.
+    if (d := _claim_pairing(claim, manifest)) is not None:
+        if d.level == "warn" or any(x.level == "warn" for x in out):
+            out.append(d)
     if (d := anchor_disclosure(claim)) is not None:
         out.append(d)
     return out

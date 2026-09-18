@@ -397,3 +397,209 @@ def _numeral_gaps(nums: list[str]) -> list[str]:
         return []
     present = set(numeric)
     return [str(n) for n in range(1, max(numeric) + 1) if n not in present]
+
+
+# ---------------------------------------------------------------------------
+# resolving a disputed label — a person has already seen the disagreement
+# (`cli._write_disagreement`) and asked for a model's opinion on it
+# ---------------------------------------------------------------------------
+
+RESOLVE_PROMPT = """You are shown two readings of one printed bibliography, and a list of
+citation labels the two readings disagree about — they name different papers at
+that label.
+
+For each label, decide which paper the label actually names, using ONLY the two
+texts below. Reply with a JSON array, one object per label you can answer:
+
+[{"num": "6",
+  "title": "the paper's title, copied character for character from one of the texts",
+  "authors": "copied character for character, or omit",
+  "year": "copied character for character, or omit",
+  "journal": "copied character for character, or omit",
+  "doi": "copied character for character, or omit",
+  "seen_in": "A" or "B"}]
+
+If you cannot tell which paper a label names, reply for it with
+{"num": "6", "cannot_tell": true}. THAT IS A CORRECT ANSWER and is preferred
+over a guess: these are exactly the labels where two readings contradict each
+other, so a guess here is the error this tool exists to prevent. Answering some
+labels and abstaining on others is expected.
+
+Every value you give is checked against the two texts verbatim. A value that is
+not printed in one of them is discarded, and a title that is not printed leaves
+the label unresolved — so do not correct, expand, complete or tidy anything.
+
+LABELS IN DISPUTE: <<LABELS>>
+
+--- READING A ---
+<<A>>
+
+--- READING B ---
+<<B>>
+"""
+
+
+@dataclass
+class Resolution:
+    """What the resolution call settled, what it did not, and on whose words.
+
+    `still_disputed` is not the complement of `resolved` by arithmetic — it is
+    built by listing what came back unanswered, abstained on, or unverifiable.
+    Deriving it as `set(asked) - set(resolved)` gives the same answer today and
+    would silently start counting a dropped label as resolved the first time a
+    field-verification branch forgets to record one.
+    """
+
+    resolved: dict[str, RefEntry] = field(default_factory=dict)
+    still_disputed: list[str] = field(default_factory=list)
+    provenance: ReflistProvenance = field(default_factory=ReflistProvenance)
+
+
+def _parse_array(raw: str) -> list[dict] | None:
+    """A lenient JSON-array read for a resolution reply: `None` on anything
+    that is not a list of objects, never a raise.
+
+    `resolve_disputed` has already done useful refs-stage work by the time this
+    runs, and a reply shaped wrong must leave every label in the state the run
+    was already in, not take the stage down with it. Requiring every element to
+    be a dict — not just the outer shape to be a list — is what tells a genuine
+    reply apart from a stray bracketed numeral inside a sentence of prose:
+    `ask._parse_json_array`'s first-`[`-to-last-`]` slice reads
+    "I think maybe [6]?" as the syntactically valid one-element list `[6]`, and
+    without this check that would be believed as an answer instead of refused.
+    """
+    try:
+        items = ask._parse_json_array(raw)
+    except ValueError:
+        return None
+    if not isinstance(items, list) or not all(isinstance(x, dict) for x in items):
+        return None
+    return items
+
+
+# only fields the model is asked to copy, in the order `raw` is re-assembled —
+# "doi" is verified separately below, through `_usable_doi`, not this loop
+_RESOLVE_FIELDS = ("authors", "year", "journal")
+
+
+def resolve_disputed(
+    labels: list[str],
+    entries: dict[str, list[RefEntry]],
+    texts: tuple[str, ...],
+    *,
+    model: str | None = None,
+) -> Resolution:
+    """Ask the model which paper each disputed label names, and believe none of it on its word.
+
+    Three rules, in this order, and the second is the one that keeps this call
+    honest: **abstention is a first-class answer.** `cannot_tell` keeps the
+    label disputed and withheld. A call that must always answer will confabulate
+    on exactly the labels two readings disagree about — that is the population,
+    by construction, and it is why this returns a `Resolution` with two lists
+    rather than a dict of answers.
+
+    1. Every field is verified verbatim against `texts` through `_found` (Layer
+       E for everything, Layer O for authors and titles) and, for a DOI,
+       `_usable_doi`. An unverifiable field is discarded; an unverifiable title
+       leaves the label disputed, because the title is the only field that
+       identifies a paper.
+    2. `cannot_tell`, a label the reply never mentions, and a reply that is not
+       a JSON array of objects at all all leave their labels disputed.
+    3. Partial resolution is the normal outcome, not a degraded one. Nothing
+       downstream may require all-or-nothing.
+
+    `entries` names each candidate reading, and its sorted keys are read in the
+    same order the one caller (`cli._escalate_disputed`) builds `texts` in — so
+    a reply's `seen_in: "A"/"B"` is translated into an actual reading NAME
+    before it reaches `RefEntry.seen_in`, never stored as the bare letter.
+    `RefEntry.seen_in`'s published vocabulary is reading names (`propose`
+    enforces the same rule for its own "A"/"B"/"AB"), and a letter leaking
+    through would put two vocabularies in one wire-format key.
+    """
+    prov = ReflistProvenance(readings=list(texts))
+    if not labels:
+        return Resolution(provenance=prov)
+
+    reading_names = sorted(entries)
+    prompt = (
+        RESOLVE_PROMPT.replace("<<LABELS>>", ", ".join(f"[{n}]" for n in labels))
+        .replace("<<A>>", texts[0] if texts else "")
+        .replace("<<B>>", texts[1] if len(texts) > 1 else "")
+    )
+    with ask.for_site(ask.SITE_REFS):
+        raw = ask._ask(prompt, model)
+    prov.model = ask.model_for(ask.SITE_REFS) or ""
+
+    items = _parse_array(raw)
+    if items is None:
+        # A reply that is not a JSON array of objects has answered nothing.
+        # Every label stays in the state the run was already in — the safe
+        # one — and the reason is recorded rather than the failure being
+        # indistinguishable from an all-abstention reply.
+        prov.discarded_whole = (
+            "the reply was not a JSON array of objects, so no label was resolved"
+        )
+        return Resolution(still_disputed=list(labels), provenance=prov)
+
+    by_num = {str(o.get("num", "")).strip(): o for o in items}
+    prov.entries_proposed = len(by_num)
+    resolved: dict[str, RefEntry] = {}
+    unresolved: list[str] = []
+    for label in labels:
+        obj = by_num.get(label)
+        if obj is None or obj.get("cannot_tell"):
+            unresolved.append(label)
+            continue
+
+        title = str(obj.get("title") or "")
+        if not _found("title", title, texts):
+            # not a discarded FIELD — a discarded ANSWER: nothing else in the
+            # object can name a paper on its own, so the whole label stays
+            # disputed rather than resolving on the strength of its neighbours
+            prov.fields_discarded.append(f"[{label}].title")
+            unresolved.append(label)
+            continue
+
+        kept: dict[str, str] = {"title": title}
+        for name in _RESOLVE_FIELDS:
+            value = str(obj.get(name) or "")
+            if not value:
+                continue  # an omitted field is a gap the model was told to leave
+            if _found(name, value, texts):
+                kept[name] = value
+            else:
+                prov.fields_discarded.append(f"[{label}].{name}")
+
+        doi = _usable_doi(str(obj.get("doi") or ""))
+        if doi is not None and not _found("doi", doi, texts):
+            doi = None
+        if obj.get("doi") and doi is None:
+            # bare "doi", not "[label].doi" — a recorded gap the entry's
+            # `no_doi` resolution will independently rediscover
+            prov.fields_discarded.append("doi")
+        elif doi is not None:
+            kept["doi"] = doi
+
+        parts = [kept[k] for k in ("authors", "year", "title", "journal") if k in kept]
+        raw_text = ". ".join(parts)
+        if "doi" in kept:
+            raw_text = f"{raw_text} doi:{kept['doi']}".strip()
+
+        seen_in: list[str] = []
+        letter = obj.get("seen_in")
+        if isinstance(letter, str):
+            idx = {"A": 0, "B": 1}.get(letter.strip().upper())
+            if idx is not None and idx < len(reading_names):
+                seen_in = [reading_names[idx]]
+
+        resolved[label] = RefEntry(
+            num=label,
+            raw=raw_text,
+            doi=kept.get("doi"),
+            title=kept.get("title"),
+            year=kept.get("year"),
+            reason="a disputed label, resolved by a model reading of both texts and "
+                   "accepted by a person — a reading, not a confirmed numbering",
+            seen_in=seen_in,
+        )
+    return Resolution(resolved=resolved, still_disputed=unresolved, provenance=prov)

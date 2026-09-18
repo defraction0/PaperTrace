@@ -1008,3 +1008,22 @@ def test_folding_does_not_invent_or_merge_tokens():
         "anatomic",
         "structures",
     }
+
+
+def test_a_partial_resolution_round_trips_through_the_manifest(tmp_path):
+    """11 resolved and 3 still disputed is a representable state, and the wire
+    format is the dataclass — so this is the test that says the two lists can
+    both be non-empty at once (Gate 2 for `numbering_choice`,
+    `numbering_chosen_by` and `labels_resolved`)."""
+    from papertrace.models import RefManifest
+
+    m = RefManifest(manuscript="p.pdf", labels_resolved=["6", "7"], labels_disputed=["9"],
+                    numbering_choice="llm_resolved", numbering_chosen_by="user")
+    path = tmp_path / "refs_manifest.json"
+    m.to_json(path)
+    back = RefManifest.from_json(path)
+    assert back.labels_resolved == ["6", "7"]
+    assert back.labels_disputed == ["9"]
+    assert back.numbering_choice == "llm_resolved"
+    assert back.numbering_chosen_by == "user"
+    assert back.numbering_verified is False
