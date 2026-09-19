@@ -58,12 +58,17 @@ def test_refs_command_delegates_to_the_pipeline_function(tmp_path, monkeypatch):
 
     cli.refs(manuscript=pdf, case=None, provided=None, email=None,
              parse_only=False, backend="auto", doi=None, supplement=None, llm_refs=True,
-             max_claims=None, max_sources=None)
+             model=None, max_claims=None, max_sources=None)
 
     assert seen == {
         "manuscript": pdf, "case": None, "provided": None, "email": None,
         "parse_only": False, "backend": "auto", "doi": None, "supplement": None,
         "llm_refs": True,
+        # `--model` reaches the reference-list reading through here. Without it
+        # that call took the account default while judging used the pinned
+        # model — one demo run judged with opus and read the bibliography with
+        # haiku, which is what `--model` exists to prevent.
+        "model": None,
         "claims": None, "max_sources": None,
     }
 

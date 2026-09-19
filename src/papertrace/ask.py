@@ -108,10 +108,27 @@ def _ask(prompt: str, model: str | None = None) -> str:
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed: {proc.stderr.strip()[:400]}")
     payload = json.loads(proc.stdout)
+    # What ANSWERED, in order of how much the reply actually tells us.
+    #
+    # `modelUsage` is not one model: a real `claude -p --model claude-opus-5`
+    # reply carries `['claude-haiku-4-5-20251001', 'claude-opus-5']`, haiku
+    # first, because Claude Code bills an internal step to a cheap model
+    # alongside the one that wrote the answer. Taking `next(iter(usage))` —
+    # which this did — records whichever key a dict happens to yield first, so
+    # a run pinned to opus published haiku as its reference-list model. The
+    # wrong name is worse than none: `--model` exists so a run is reproducible,
+    # and CLAUDE.md pins it for the committed demo for exactly that reason.
+    #
+    # A model we asked for by name is the strongest evidence available — the
+    # subprocess either used it or failed — so it wins. Otherwise a top-level
+    # `model` field is the reply's own answer. A usage map naming exactly one
+    # model is unambiguous. A usage map naming several, with nothing saying
+    # which wrote the answer, records NOTHING: this codebase does not guess a
+    # value it cannot establish, and a reader seeing no model knows none was
+    # established rather than being told a plausible wrong one.
     usage = payload.get("modelUsage")
-    reported = payload.get("model") or (
-        next(iter(usage), None) if isinstance(usage, dict) else None
-    )
+    named = list(usage) if isinstance(usage, dict) else []
+    reported = model or payload.get("model") or (named[0] if len(named) == 1 else None)
     # a reply that names no model is not evidence the model changed, so the
     # recorded name stands rather than being overwritten with nothing
     if reported:

@@ -345,17 +345,27 @@ disclosure stop crying wolf on the case it was firing on wrongly: a list two
 readings agree about entry for entry, longer than the highest cited label
 because three of its references are cited only in the supplement.
 
-### Known staleness — `examples/demo/output/` predates this feature
+### Fixed — `--model` reached the judging call and not the reference-list one
 
-`--llm-refs` defaults on, so a fresh demo run now makes one extra model call
-and, on the docling backend the demo uses, emits the `reflist` disclosure in
-all four formats. The committed showcase in `examples/demo/output/` was
-generated before this feature existed and shows none of it — nor the report
-wording this release changed around disputes, resolutions and corroboration.
-That is staleness in the committed artefact, not a defect in the feature: the
-showcase needs a fresh end-to-end run (network, a logged-in `claude` CLI) to
-pick it up, and that run is **deferred by the user**, not skipped silently. It
-is a branch-level step and must happen before this version is released.
+A run pinned to opus read its bibliography with whatever the account
+default happened to be. `_refs_pipeline` had no `model` parameter at all, so
+the flag had nowhere to go; `refs` now takes `--model` too, since it makes a
+model call of its own.
+
+Underneath it, a longer-standing one that only became visible once the
+reference-list model was published in the manifest. `claude -p` reports
+**several** models in `modelUsage` — a real reply to `--model claude-opus-5`
+carries `['claude-haiku-4-5-20251001', 'claude-opus-5']`, because an internal
+step is billed to a cheap model alongside the one that wrote the answer — and
+the seam recorded `next(iter(usage))`, whichever key the dict yielded first.
+A run pinned to opus published haiku as its model. What answered is now
+resolved in order of evidence: a model asked for by name, then the reply's own
+`model` field, then a usage map naming exactly one. A usage map naming several
+with nothing saying which wrote the answer records **nothing** — a wrong name
+is worse than none, because a reader cannot tell it is wrong.
+
+Neither was reachable by the test suite, which fakes the seam in every test.
+Both were found by the end-to-end demo run this release's showcase needed.
 
 ## [0.6.0] — 2026-09-13 (beta)
 

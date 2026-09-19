@@ -38,6 +38,16 @@ _SHELLS_OUT = re.compile(
 )
 
 
+class _Usage:
+    """A reply carrying `modelUsage` and no top-level `model`, as `claude -p`
+    really answers — the shape that made the first key look authoritative."""
+
+    def __init__(self, models):
+        self.returncode = 0
+        self.stdout = json.dumps({"result": "ok", "modelUsage": {m: {} for m in models}})
+        self.stderr = ""
+
+
 def test_only_ask_py_shells_out_to_a_model():
     """One file in `src/` may start a process, and this is the test that says so.
 
@@ -164,3 +174,54 @@ def test_the_judging_retry_attempts_exactly_ask_attempts_times(monkeypatch):
     with pytest.raises(RuntimeError):
         check_mod._ask_with_retry("prompt", None)
     assert len(calls) == 3, calls
+
+
+def test_a_pinned_model_is_recorded_as_the_model_that_answered(monkeypatch):
+    """`modelUsage` is not one model, and its first key is not the answer.
+
+    A real `claude -p --model claude-opus-5` reply carries
+    `['claude-haiku-4-5-20251001', 'claude-opus-5']` and no top-level `model`
+    — Claude Code bills an internal step to a cheap model alongside the one
+    that wrote the answer, and haiku sorts first. Reading `next(iter(usage))`
+    published haiku as the model of a run pinned to opus, in a field the
+    report shows. A model we asked for by name is the strongest evidence
+    available: the subprocess either used it or failed.
+    """
+    monkeypatch.setattr(ask_mod, "_MODELS", {})
+    monkeypatch.setattr(
+        ask_mod.subprocess, "run",
+        lambda cmd, **kw: _Usage(["claude-haiku-4-5-20251001", "claude-opus-5"]),
+    )
+    with ask_mod.for_site(ask_mod.SITE_REFS):
+        ask_mod._ask("read this", "claude-opus-5")
+
+    assert ask_mod.model_for(ask_mod.SITE_REFS) == "claude-opus-5"
+
+
+def test_an_ambiguous_usage_map_records_no_model_rather_than_the_first(monkeypatch):
+    """With nothing pinned and several models billed, which one answered is
+    not established — so nothing is recorded. A wrong name is worse than none:
+    a reader seeing no model knows none was established, where a plausible
+    wrong one is indistinguishable from the truth."""
+    monkeypatch.setattr(ask_mod, "_MODELS", {})
+    monkeypatch.setattr(
+        ask_mod.subprocess, "run",
+        lambda cmd, **kw: _Usage(["claude-haiku-4-5-20251001", "claude-opus-5"]),
+    )
+    with ask_mod.for_site(ask_mod.SITE_CHECK):
+        ask_mod._ask("judge this")
+
+    assert ask_mod.model_for(ask_mod.SITE_CHECK) is None
+
+
+def test_a_usage_map_naming_one_model_is_unambiguous(monkeypatch):
+    """The tightening must not lose the case that always worked: one model
+    billed, nothing pinned, no top-level field — that is an answer."""
+    monkeypatch.setattr(ask_mod, "_MODELS", {})
+    monkeypatch.setattr(
+        ask_mod.subprocess, "run", lambda cmd, **kw: _Usage(["claude-opus-5"]),
+    )
+    with ask_mod.for_site(ask_mod.SITE_CHECK):
+        ask_mod._ask("judge this")
+
+    assert ask_mod.model_for(ask_mod.SITE_CHECK) == "claude-opus-5"

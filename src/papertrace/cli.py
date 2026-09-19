@@ -64,6 +64,16 @@ def _int(value) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _str(value) -> str | None:
+    """An option's string, or None — the `_int` rule for a text option.
+
+    `--model` reaches `_refs_pipeline` the same way the limits do, so a direct
+    call that omits it must not hand the reference-list reading Typer's
+    `OptionInfo` as a model name.
+    """
+    return value if isinstance(value, str) and value else None
+
+
 def _first_n(n) -> list[int] | None:
     """`--max-claims N` as the array the stages take: the first N claim ids.
 
@@ -825,6 +835,12 @@ def _llm_reference_reading(
     label_b: str,
     enabled: bool,
     disabled_reason: str = "",
+    # `reflist.propose` has always taken a model; this wrapper never forwarded
+    # one, so the reference-list reading took the account default while the
+    # judging used `--model`. One demo run judged with opus and read the
+    # bibliography with haiku, which is exactly the drift `--model` exists to
+    # stop — CLAUDE.md pins it so the committed showcase is reproducible.
+    model: str | None = None,
 ) -> tuple[list[RefEntry], ReflistProvenance]:
     """A model's reading of the bibliography, or a stated reason there is none.
 
@@ -866,7 +882,8 @@ def _llm_reference_reading(
             failure="claude is not on PATH, so no model read the reference list"
         )
     try:
-        entries, prov = propose(reading_a, reading_b, label_a=label_a, label_b=label_b)
+        entries, prov = propose(reading_a, reading_b, label_a=label_a, label_b=label_b,
+                                model=model)
     except Exception as e:  # noqa: BLE001 — a failed corroboration is not a failed refs stage
         # Blanket, and here specifically: `refs` has already parsed the list and
         # is about to fetch the sources, and this call is the one thing in the
@@ -1199,6 +1216,11 @@ def _refs_pipeline(
     llm_refs: bool = True,
     claims: list[int] | None = None,
     max_sources: int | None = None,
+    # the same model the judging uses, when one was pinned. `--model` exists so
+    # a run is reproducible, and a stage that quietly took the account default
+    # instead broke that for the showcase this repo commits: the judge was
+    # opus and the reference-list reading was haiku, in one run.
+    model: str | None = None,
 ) -> None:
     """Parse the References section, then retrieve open-access copies with an honest manifest.
 
@@ -1372,6 +1394,7 @@ def _refs_pipeline(
         label_a=smap.converter,
         label_b="pymupdf",
         enabled=llm_wanted and needs_flat,
+        model=model,
         # worded with no substring in common with "claude is not on PATH" —
         # the two structural reasons must never be mistaken for each other by
         # anything matching on their text
@@ -1542,7 +1565,7 @@ def _refs_pipeline(
     reading_texts: dict[str, str] = {"parsed": refs_text}
     if needs_flat:
         reading_texts["pymupdf"] = flat_text
-    entries = _escalate_disputed(case, rec, entries, others, reading_texts, model=None)
+    entries = _escalate_disputed(case, rec, entries, others, reading_texts, model=model)
     # AFTER the escalation, never before it: menu option 3 replaces the whole
     # list with one nothing stamped, so a run that computed `seen_in`
     # published `[]` for every entry — which the schema reads as "no reading
@@ -1721,6 +1744,12 @@ def refs(
              "on the numbering (one extra model call — none under --parse-only, or on a "
              "pymupdf backend, which leaves no second reading to compare)",
     ),
+    model: str = typer.Option(
+        None, "--model",
+        help="Model for the reference-list reading. Without it `claude -p` takes the "
+             "account default, which is how one run judged with opus and read the "
+             "bibliography with haiku",
+    ),
     max_claims: int = typer.Option(
         None, "--max-claims", min=1,
         help="Retrieve only the references cited by the first N extracted claims "
@@ -1736,7 +1765,7 @@ def refs(
     """Parse the References section, then retrieve open-access copies with an honest manifest."""
     _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
                     parse_only=parse_only, backend=backend, doi=doi, supplement=supplement,
-                    llm_refs=llm_refs,
+                    llm_refs=llm_refs, model=_str(model),
                     claims=_first_n(max_claims), max_sources=_int(max_sources))
 
 
@@ -2244,7 +2273,7 @@ def run(
     doi = doi or _detected_doi(manuscript)
     _refs_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
                     parse_only=False, backend=backend, doi=doi, supplement=supplement,
-                    llm_refs=llm_refs,
+                    llm_refs=llm_refs, model=model,
                     claims=selection, max_sources=cap)
     if with_scout:
         scout(case=case, doi=doi, email=email)

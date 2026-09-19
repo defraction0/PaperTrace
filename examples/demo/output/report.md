@@ -1,6 +1,6 @@
 # Fact-Check Report
 
-Checker: `claude -p · claude-opus-5` · PaperTrace · 2026-09-13
+Checker: `claude -p · claude-opus-5` · PaperTrace · 2026-09-19
 Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 **Claims:** 4 | ✅ **Supported:** 1 | ⚠️ **Partial:** 0 | ❌ **Contradicted:** 2 | ⊘ **Not retrieved:** 1
@@ -10,9 +10,13 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 
 > ⚠️ How to read that figure: attribution is the context the extractor named. Extraction is shown every place this paper cites something and returns which of them each claim came from, so the pointer is no longer a text comparison — but naming it is still a model step, and a claim can be placed on the wrong sentence. A claim that names no place at all leaves that reference's remaining places counted as NOT covered, never as covered, so the figure understates coverage there. And detection still reads bracketed numeric markers only — a citation style it cannot see contributes no occurrences at all, which makes this ratio look better than reality, not worse.
 
+> On this run two readings of the reference list agree on every cited label (parsed, pymupdf). That is corroboration, not confirmation, and it does not make the numbering verified: these are readings of one printed page, so a reference its layout destroyed is one they can all have missed in the same way. Any label they disagreed about is listed separately, and no verdict was printed for it.
+
+> Here the reference list was also read by a model (claude-opus-5), shown two extractions of the same printed bibliography and asked what numbered list it carries; every value it proposed was found in the printed text. A model agreeing with a parse is a second reading, not confirmation: it read the same document, so a reference the layout destroyed is one it may also have missed.
+
 ---
 
-## Claim 1: "Deep learning on frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94."
+## Claim 1: "A deep learning model on frontal chest radiographs detected type 2 diabetes with an external validation AUC of 0.94."
 
 **Status:** ❌ CONTRADICTED
 **Location:** Background · cites [1]
@@ -24,7 +28,7 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 ### ❌ CONTRADICTED — `pyrros-2023` (cited as [1])
 
 - **Source:** Page 4 `(block_0050)` 
-> The source reports external validation at a separate institution (Emory) yielding a ROC AUC of 0.77, not 0.94; internal prospective AUC was 0.84.
+> The source reports external validation at a distinct institution with a ROC AUC of 0.77, not 0.94; the highest AUC reported anywhere is 0.89 (BMI<25 subgroup) in the internal prospective cohort.
 
 ![evidence](evidence/claim_01_pyrros-2023_p4.png)
 *red box = matched text*
@@ -42,18 +46,18 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 ### ✅ SUPPORTED — `sudlow-2015` (cited as [2])
 
 - **Source:** Page 1 `(block_0018)` 
-> Source states UK Biobank recruited over 500,000 participants aged 40-69 years in 2006-2010, and that multimodal imaging is planned in a subset of 100,000 participants (also Table 3, block_0054: 'Multimodal imaging | 100,000').
+> The source states UK Biobank has "over 500,000 participants aged 40-69 years when recruited in 2006-2010", and elsewhere (block_0038, p.3, and Table 3, block_0054, p.5) specifies multimodal imaging in a subset of 100,000 participants.
 
 ![evidence](evidence/claim_03_sudlow-2015_p1.png)
-*red box = matched text*
+*⚠️ no anchor phrase could be boxed — none was found inside the region this crop shows, so the crop is shown for context only.*
 <br>
 
 ### ✅ SUPPORTED — `littlejohns-2020` (cited as [3])
 
-- **Source:** Page 2 `(block_0013)` 
-> The source states the enhancement aims to image 100,000 of the existing 500,000 UK Biobank participants, a cohort of half a million aged 40-69 recruited 2006-2010, matching both figures.
+- **Source:** Page 1 `(block_0008)` 
+> The source states UK Biobank is "a population-based cohort of half a million participants aged 40-69 years" and that the imaging enhancement aims to image 100,000 of the existing 500,000 participants.
 
-![evidence](evidence/claim_03_littlejohns-2020_p2.png)
+![evidence](evidence/claim_03_littlejohns-2020_p1.png)
 *red box = matched text*
 ## Claim 4: "Nearly one in five confirmed UK Biobank participants had not attended an imaging assessment centre."
 
@@ -67,7 +71,7 @@ Manuscript: `demo_manuscript.pdf` · Sources: `3 / 4` cited references available
 ### ❌ CONTRADICTED — `littlejohns-2020` (cited as [3])
 
 - **Source:** Page 3 `(block_0023)` 
-> The source reports that of those eligible who booked an appointment, 97% attended an imaging assessment centre (i.e. ~3% non-attendance), not nearly one in five; the only ~20% figure is the required attendance rate of the 500,000 cohort needed to reach 100,000 scans.
+> The source reports that of those eligible who booked an appointment, "97% have attended an imaging assessment centre" — i.e. about 3%, not nearly 20%, had not attended.
 
 ![evidence](evidence/claim_04_littlejohns-2020_p3.png)
 *the passage opens here and crosses a column or page break — 2 images below show all of it*
