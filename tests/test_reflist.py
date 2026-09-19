@@ -675,3 +675,22 @@ def test_an_oversized_resolution_input_leaves_every_label_disputed(monkeypatch):
     assert res.still_disputed == ["6"]
     assert res.provenance.outcome == "not_attempted"
     assert "too long" in res.provenance.failure
+
+
+def test_a_long_run_of_absent_numerals_is_counted_rather_than_listed(monkeypatch):
+    """The count is the finding; past a handful the list stops being one.
+
+    A reply naming only `[99]` makes every numeral below it absent, which
+    printed 98 consecutive integers — 410 characters — into
+    `reflist_numbering_findings`, a field the report shows a reader. The first
+    few locate the gap; the rest only prove the reader stopped reading. The
+    finding itself is unchanged and nothing is hidden: the total leads.
+    """
+    text = "99. Weston AD (2019) A paper. Radiology. https://doi.org/10.1148/radiol.2019181432"
+    _reply(monkeypatch, '[{"num":"99","title":"A paper","reading":"AB"}]')
+    _, prov = reflist.propose(text, text, label_a="docling", label_b="pymupdf")
+
+    gaps = next(f for f in prov.numbering_findings if "absent" in f)
+    assert gaps.startswith("98 numerals absent"), gaps
+    assert "and 92 more" in gaps, gaps
+    assert len(gaps) < 100, f"{len(gaps)} chars in a reader-facing field: {gaps}"

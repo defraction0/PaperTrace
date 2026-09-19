@@ -211,6 +211,11 @@ _VERIFIED_FIELDS = ("authors", "year", "title", "journal", "doi")
 # not one of the answers the model was given and must be dropped, not guessed
 _READING_LETTERS = ("A", "B", "AB")
 
+# How many absent numerals to name before summarising. Enough to locate the gap
+# — a reader who sees [4], [5], [6] knows where to look — and few enough that
+# the count stays the finding when a reply names one high label and nothing else.
+_GAPS_SHOWN = 6
+
 
 def propose(
     reading_a: str,
@@ -410,7 +415,17 @@ def propose(
     if twice:
         prov.numbering_findings.append("numerals proposed twice: " + ", ".join(twice))
     if gaps := _numeral_gaps(nums):
-        prov.numbering_findings.append("numerals absent from 1..max: " + ", ".join(gaps))
+        # Summarised past a handful, because the count is the finding and the
+        # list stops being one. A reply naming only [99] makes every numeral
+        # below it absent, which printed 98 consecutive integers — 410
+        # characters — into a field a reader is shown. The first few locate the
+        # gap; the rest only prove the reader stopped reading.
+        shown = ", ".join(gaps[:_GAPS_SHOWN])
+        rest = len(gaps) - _GAPS_SHOWN
+        prov.numbering_findings.append(
+            f"{len(gaps)} numerals absent from 1..max: {shown}"
+            + (f" and {rest} more" if rest > 0 else "")
+        )
     return out, prov
 
 
