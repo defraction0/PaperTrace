@@ -436,7 +436,14 @@ class SourceMap:
 # references manifest (refs output)
 # ---------------------------------------------------------------------------
 
-REF_STATUSES = ("retrieved", "provided", "paywalled", "mismatch", "no_doi", "unpublished", "error")
+# `skipped` is the one status that records a choice rather than an outcome: the
+# reference was left out on request (a claims selection that never cites it,
+# or a cap on sources reached before it) and was never attempted. It is not
+# `paywalled` and not `error` — nothing was tried — and it stays LAST so every
+# earlier value keeps its position.
+REF_STATUSES = (
+    "retrieved", "provided", "paywalled", "mismatch", "no_doi", "unpublished", "error", "skipped",
+)
 
 
 def manuscript_fingerprint(path: Path) -> str:
@@ -538,6 +545,17 @@ class RefEntry:
     # must be spottable — `["llm"]` says so; `[]` on an older manifest means
     # never computed, not "seen nowhere".
     seen_in: list[str] = field(default_factory=list)
+    # why a `skipped` entry was skipped, machine-readably: "claims" (no selected
+    # claim cites it) or "sources" (the cap on sources was already reached).
+    # `reason` says the same in prose; this is what lets the report count the
+    # two kinds of gap apart without parsing a sentence. None for every other
+    # status.
+    #
+    # Never set on a withheld label, and not by a rule that could lapse:
+    # withholding needs `status in ("retrieved", "provided")` and `skipped` is
+    # neither, so the two reasons a source yields no verdict are disjoint by
+    # construction — see `check.check_claims`.
+    skipped_by: str | None = None
 
 
 def _ref_entry_from(d: dict) -> RefEntry:
@@ -695,6 +713,14 @@ class RefManifest:
     # report names these rather than asserting "both texts", which was false
     # on every run with one printed extraction. `[]` means never recorded.
     resolution_readings: list[str] = field(default_factory=list)
+    # what `refs` was told to leave out, verbatim: `{"claims": [1, 2, 3]}` when
+    # only the references those claims cite were to be retrieved, and
+    # `{"max_sources": N}` for a cap on sources obtained. Recorded so a later
+    # `check` can tell what this manifest covers — a selection judged against a
+    # manifest resolved for a different one must say so, not read as a run of
+    # paywalls. Empty means unlimited, which is also what every older manifest
+    # says.
+    limits: dict = field(default_factory=dict)
 
     def document(self, slug: str) -> Document | None:
         """The judgeable file this slug names, article or supplement, or None."""
@@ -799,6 +825,7 @@ class RefManifest:
             },
             "entries": [asdict(e) for e in self.entries],
             "manuscript_supplements": [asdict(s) for s in self.manuscript_supplements],
+            "limits": self.limits,
         }
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
 
@@ -812,6 +839,8 @@ class RefManifest:
                 Supplement(**s) for s in data.get("manuscript_supplements", [])
             ],
             manuscript_sha256=data.get("manuscript_sha256"),
+            # absent means unlimited — the only thing an older manifest could be
+            limits=data.get("limits") or {},
             # .get: a manifest written before this field must still load
             references_resumed=bool(data.get("references_resumed", False)),
             # an older manifest carries the parser's list and never checked it,
@@ -1153,6 +1182,14 @@ class RunResults:
     # inputs the character limits cut short — text past the cut was never read,
     # so the run cannot claim to have checked it
     truncated: dict = field(default_factory=dict)
+    # what this run left out ON REQUEST — `--max-claims`, `--max-sources` — as
+    # opposed to what it could not do. `claims`: the ids asked for, the ids
+    # judged, and how many were extracted in all. `sources`: the cap, the
+    # selection references were resolved for, and the labels skipped for each
+    # reason. Empty means the whole paper was audited, which is what every
+    # older results.json means too. The report ends by stating whatever is in
+    # here; see `disclosures.SCOPE_TOKEN`.
+    scope: dict = field(default_factory=dict)
 
     def counts(self) -> dict[str, int]:
         return {v: sum(1 for c in self.claims if c.verdict == v) for v in VERDICTS}
@@ -1187,6 +1224,7 @@ class RunResults:
             "uncited": [asdict(u) for u in self.uncited],
             "coverage": self.coverage,
             "truncated": self.truncated,
+            "scope": self.scope,
         }
 
     def to_json(self, path: Path) -> None:
@@ -1208,6 +1246,88 @@ class RunResults:
             uncited=[UncitedClaim(**u) for u in data.get("uncited", [])],
             coverage=data.get("coverage", {}),
             truncated=data.get("truncated", {}),
+            # absent means the whole paper was audited
+            scope=data.get("scope") or {},
+        )
+
+
+# ---------------------------------------------------------------------------
+# claim extraction (extract output)
+# ---------------------------------------------------------------------------
+
+# the fields an extraction consists of — everything a ClaimResult holds before
+# any source has been read
+_EXTRACTED_FIELDS = ("id", "claim", "quote", "location", "ctx_ids", "refs", "own_supplement")
+
+
+@dataclass
+class ClaimExtraction:
+    """`out/claims.json`: what the extractor found, numbered in reading order,
+    before anything was judged.
+
+    A stage artifact of its own, for two reasons. `run` resolves references
+    AFTER extracting, so `--max-claims` can retrieve only what the selected
+    claims cite — and `check` then reads this list back rather than extracting
+    a second time, which would renumber the claims between retrieval and
+    judging. And the numbers are what a later cherry-pick has to refer to: a
+    selection is an array of these ids, so the list they index must hold still.
+
+    Only the extraction's own fields are written. A `ClaimResult` carries a
+    default verdict of `not_retrieved`, and writing that here would put a
+    finding on disk that nobody made.
+    """
+
+    manuscript: str
+    # the paper this list belongs to. `check` reuses the list on a match only:
+    # a case folder can hold another paper's extraction (a legacy case that was
+    # identified by file name), and judging that would judge the wrong claims
+    manuscript_sha256: str | None
+    extractor: str
+    date: str
+    claims: list[ClaimResult] = field(default_factory=list)
+    uncited: list[UncitedClaim] = field(default_factory=list)
+    # the extraction's own cuts (manuscript, citation contexts). Carried into
+    # the run that judges these claims, so the report still discloses them
+    truncated: dict = field(default_factory=dict)
+
+    SCHEMA = "claims/1"
+
+    def to_json(self, path: Path) -> None:
+        payload = {
+            "schema": self.SCHEMA,
+            "manuscript": self.manuscript,
+            "manuscript_sha256": self.manuscript_sha256,
+            "extractor": self.extractor,
+            "date": self.date,
+            "counts": {"cited": len(self.claims), "uncited": len(self.uncited)},
+            "claims": [{k: getattr(c, k) for k in _EXTRACTED_FIELDS} for c in self.claims],
+            "uncited": [asdict(u) for u in self.uncited],
+            "truncated": self.truncated,
+        }
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+    @classmethod
+    def from_json(cls, path: Path) -> ClaimExtraction:
+        data = json.loads(path.read_text())
+        return cls(
+            manuscript=data.get("manuscript", ""),
+            manuscript_sha256=data.get("manuscript_sha256"),
+            extractor=data.get("extractor", ""),
+            date=data.get("date", ""),
+            claims=[
+                ClaimResult(
+                    id=int(c["id"]),
+                    claim=str(c.get("claim", "")),
+                    quote=str(c.get("quote", "")),
+                    location=str(c.get("location", "")),
+                    ctx_ids=[str(x) for x in c.get("ctx_ids", [])],
+                    refs=[str(r) for r in c.get("refs", [])],
+                    own_supplement=bool(c.get("own_supplement", False)),
+                )
+                for c in data.get("claims", [])
+            ],
+            uncited=[UncitedClaim(**u) for u in data.get("uncited", [])],
+            truncated=data.get("truncated") or {},
         )
 
 

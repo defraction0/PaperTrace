@@ -614,6 +614,10 @@ def test_both_commands_declare_the_flag_and_run_forwards_it(tmp_path, monkeypatc
 
     seen = {}
     monkeypatch.setattr(cli, "_ingest_pipeline", lambda **kw: None)
+    # extraction is a stage of its own since `limits` landed — `run` calls it
+    # before `refs` so a claims limit can retrieve only what the selected
+    # claims cite, and an unstubbed one exits before `_refs_pipeline` is reached
+    monkeypatch.setattr(cli, "_extract_pipeline", lambda **kw: None)
     monkeypatch.setattr(cli, "_refs_pipeline", lambda **kw: seen.update(kw))
     monkeypatch.setattr(cli, "scout", lambda **kw: None)
     monkeypatch.setattr(cli, "_check_pipeline", lambda **kw: None)
@@ -624,7 +628,10 @@ def test_both_commands_declare_the_flag_and_run_forwards_it(tmp_path, monkeypatc
 
     cli.run(manuscript=pdf, case=tmp_path / "case", provided=None, email="test@example.org",
             model=None, png=False, backend="pymupdf", with_scout=False, doi=None,
-            formats=None, supplement=None, llm_refs=False)
+            formats=None, supplement=None, llm_refs=False,
+            # a direct call gets Typer's OptionInfo sentinel for anything
+            # omitted, and `run` feeds these to `_first_n`/`_int` immediately
+            max_claims=None, max_sources=None)
 
     assert seen["llm_refs"] is False
     for command in (cli.refs, cli.run):

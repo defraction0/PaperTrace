@@ -337,6 +337,7 @@ def test_run_forwards_supplements_to_refs(tmp_path, monkeypatch):
 
     seen = {}
     monkeypatch.setattr(cli, "_ingest_pipeline", lambda **kw: None)
+    monkeypatch.setattr(cli, "_extract_pipeline", lambda **kw: None)
     monkeypatch.setattr(cli, "_refs_pipeline", lambda **kw: seen.update(kw))
     monkeypatch.setattr(cli, "scout", lambda **kw: None)
     monkeypatch.setattr(cli, "_check_pipeline", lambda **kw: None)

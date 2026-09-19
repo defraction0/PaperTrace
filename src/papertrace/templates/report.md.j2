@@ -1,7 +1,7 @@
 # Fact-Check Report
 
 Checker: `{{ r.checker }}` · PaperTrace · {{ r.date }}
-Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs_total }}` cited references available
+Manuscript: `{{ r.manuscript }}` · Sources: `{{ r.refs_available }} / {{ r.refs_total }}` cited references available{% if refs_skipped %} · {{ refs_skipped }} skipped on request{% endif +%}
 
 **Claims:** {{ r.claims|length }} | ✅ **Supported:** {{ counts.supported }} | ⚠️ **Partial:** {{ counts.partial }} | ❌ **Contradicted:** {{ counts.contradicted }}{% if counts.not_addressed %} | ◌ **Does not address:** {{ counts.not_addressed }}{% endif %} | ⊘ **Not retrieved:** {{ counts.not_retrieved }}{% if counts.unchecked %} | ⚠ **Unchecked (check failed):** {{ counts.unchecked }}{% endif +%}
 {% for d in disclosures if d.key in ("coverage", "coverage_caveat") %}
@@ -230,6 +230,26 @@ proves nothing, and presence is a candidate for your judgement, not an accusatio
 | {{ e.num }} | {{ e.raw[:80] }}{% if e.raw|length > 80 %}…{% endif %} | {{ e.status }} | {{ e.resolver or "—" }} | {{ e.reason }} |
 {% endfor %}
 {% endif %}
+{# last, on purpose: a reader who skims to the end must not leave with the
+   counts of a smaller paper. The same disclosure sits with the caveats at the
+   top; here it is the closing word #}
+{% for d in disclosures if d.key == "scope" %}
+
+---
+
+## Scope of this audit
+
+⚠️ **{{ d.text }}**
+{% if d.rows %}
+
+{% for row in d.rows[:25] %}
+- {{ row }}
+{% endfor %}
+{% if d.rows|length > 25 %}
+- … {{ d.rows|length - 25 }} more in `refs_manifest.json`
+{% endif %}
+{% endif %}
+{% endfor %}
 
 ---
 

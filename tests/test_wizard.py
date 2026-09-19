@@ -431,6 +431,7 @@ def test_run_forwards_the_backend_it_was_given(tmp_path, monkeypatch):
     # on `run()`. The rest are still Typer commands called directly,
     # keyword-only by convention.
     monkeypatch.setattr(cli, "_ingest_pipeline", spy("ingest"))
+    monkeypatch.setattr(cli, "_extract_pipeline", spy("extract"))
     monkeypatch.setattr(cli, "_refs_pipeline", spy("refs"))
     monkeypatch.setattr(cli, "_report_pipeline", spy("report"))
     monkeypatch.setattr(cli, "_check_pipeline", spy("check"))
@@ -796,3 +797,81 @@ def test_the_wizard_offers_the_viewer_and_forwards_the_answer():
     cmd_call = src[src.index("equivalent_command("):]
     cmd_call = cmd_call[: cmd_call.index(")\n")]
     assert "formats=formats" in cmd_call
+
+
+# --- a slice of the audit, on request ----------------------------------------
+
+
+def test_the_equivalent_command_carries_both_limits():
+    """A replay that drops the limits would run the whole paper — and cost
+    the whole paper — after the user chose not to."""
+    import shlex
+
+    cmd = wizard.equivalent_command(
+        manuscript=Path("/tmp/paper.pdf"), case=Path("c"), doi=None, png=False,
+        with_scout=False, provided=None, max_claims=5, max_sources=6,
+    )
+    argv = shlex.split(cmd)
+    assert argv[argv.index("--max-claims") + 1] == "5"
+    assert argv[argv.index("--max-sources") + 1] == "6"
+
+    plain = wizard.equivalent_command(
+        manuscript=Path("/tmp/paper.pdf"), case=Path("c"), doi=None, png=False,
+        with_scout=False, provided=None,
+    )
+    assert "--max-claims" not in plain and "--max-sources" not in plain
+
+
+def test_a_limit_answer_is_a_positive_whole_number_or_nothing():
+    """Blank means no limit. Zero is not a limit anyone means, and "five" is
+    not a number — both are re-asked, never quietly read as unlimited."""
+    assert wizard.parse_limit("") is None
+    assert wizard.parse_limit("   ") is None
+    assert wizard.parse_limit(" 5 ") == 5
+    for junk in ("0", "-3", "five", "2.5"):
+        with pytest.raises(ValueError):
+            wizard.parse_limit(junk)
+
+
+def test_the_cost_estimate_shrinks_with_the_limits_and_never_grows(tmp_path):
+    """The wizard quotes a ceiling before the money is spent. With the first
+    N claims checked, only the first N citation places can cost anything; with
+    at most N sources obtained, at most N judging calls are made. Both stay
+    upper bounds, and neither may exceed the unlimited figure."""
+    pdf = _pdf(tmp_path / "p.pdf", [
+        "Background text with one citation [1].",
+        "Another sentence [2, 3] citing two.",
+        "A range here [7-9] citing three.",
+    ])
+    w = wizard.workload(pdf)
+    # one extraction + one reference-list reading + one per cited source. The
+    # reference-list call survives every limit — it reads the bibliography, not
+    # the claims — so it is a constant in each figure below rather than
+    # something `--max-claims` can take away.
+    assert w["model_calls"] == 1 + 1 + 6
+
+    first = wizard.apply_limits(w, max_claims=1, max_sources=None)
+    assert first["model_calls"] == 1 + 1 + 1, "the first place cites one source"
+    capped = wizard.apply_limits(w, max_claims=None, max_sources=2)
+    assert capped["model_calls"] == 1 + 1 + 2
+    both = wizard.apply_limits(w, max_claims=2, max_sources=2)
+    assert both["model_calls"] == 1 + 1 + 2
+    none = wizard.apply_limits(w, max_claims=None, max_sources=None)
+    assert (none["model_calls"], none["model_calls_max"]) == (w["model_calls"], w["model_calls_max"])
+    for limited in (first, capped, both):
+        assert limited["model_calls"] <= limited["model_calls_max"] <= w["model_calls_max"]
+
+
+def test_the_wizard_asks_for_the_limits_and_forwards_them():
+    """Both answers must reach `run` and the replay command, or a guided run
+    and its printed equivalent stop meaning the same thing."""
+    import inspect
+
+    src = inspect.getsource(wizard.run_wizard)
+    assert "_ask_limits(" in src, "the limits are never offered"
+    run_call = src[src.index("run_cmd("):]
+    run_call = run_call[: run_call.index(")\n")]
+    assert "max_claims=max_claims" in run_call and "max_sources=max_sources" in run_call
+    cmd_call = src[src.index("equivalent_command("):]
+    cmd_call = cmd_call[: cmd_call.index(")\n")]
+    assert "max_claims=max_claims" in cmd_call and "max_sources=max_sources" in cmd_call

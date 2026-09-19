@@ -62,8 +62,22 @@
               "mismatch",
               "no_doi",
               "unpublished",
-              "error"
-            ]
+              "error",
+              "skipped"
+            ],
+            "description": "How the reference fared. `skipped` (0.7.0) records a choice, not an outcome: the reference was left out on request — no selected claim cites it, or the cap on sources was already reached — and was never attempted. Distinct from every failure status, because nothing was tried; `skipped_by` says which limit did it."
+          },
+          "skipped_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claims",
+              "sources",
+              null
+            ],
+            "description": "For a `skipped` entry, which limit skipped it: `claims` (none of the claims selected for the audit cites it) or `sources` (the cap on sources obtained was reached before it). null for every other status, and absent on manifests written before 0.7.0."
           },
           "reason": {
             "type": "string"
@@ -209,6 +223,24 @@
           "items": {
             "type": "string"
           }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "description": "What `refs` was told to leave out, verbatim. `claims` is the array of claim ids whose cited references alone were retrieved (`--max-claims N` is `[1..N]`); `max_sources` is the cap on sources obtained. Recorded so a later `check` can tell what this manifest covers. Empty or absent means unlimited, which is what every manifest written before 0.7.0 means. A limit and a withheld label are different gaps and never the same one: a `skipped` entry is not `retrieved` or `provided`, so it is never a candidate for withholding.",
+      "properties": {
+        "claims": {
+          "type": "array",
+          "description": "The claim ids whose cited references alone were retrieved. Absent means no claim selection was applied.",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "max_sources": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The cap on sources successfully obtained. Absent means no cap."
         }
       }
     },

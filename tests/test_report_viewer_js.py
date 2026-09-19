@@ -423,3 +423,48 @@ def test_the_markdown_export_carries_verdicts_reviewed_marks_and_the_gap_registe
     assert "![evidence](evidence/c1.png)" in md
     assert "## Assertions without citation" in md and "[U1] W" in md
     assert "## Not verified — source not retrieved" in md and "Claim 2:" in md
+
+
+# --- the scope of a limited audit -------------------------------------------
+
+
+def _scope_payload(scope, short):
+    disc = {
+        "run": [{"key": "scope", "level": "warn", "token": "the audit was limited on request",
+                 "text": f"Scope — {short}.", "short": short, "rows": []}],
+        "claims": {}, "judgements": {},
+    }
+    payload = _payload([_claim(1, "Sentence one about X.")], disclosures=disc)
+    payload["results"]["scope"] = scope
+    return payload
+
+
+def test_a_limited_audit_reaches_the_model_with_its_skipped_references_counted():
+    """Decided in Python, carried in the payload, exposed by the model so the
+    page can state it in the header and as the last card of the summary — and
+    fold the references nobody tried into the retrieval line."""
+    short = "the audit was limited on request: at most 2 sources · 2 references skipped"
+    out = _run(
+        "const m = PT.buildModel(data.p); return {scope: m.scope, skipped: m.refsSkipped}",
+        p=_scope_payload({"sources": {"max": 2, "skipped_for_claims": ["3"], "skipped_by_cap": ["4"]}}, short),
+    )
+    assert out["scope"]["key"] == "scope" and out["scope"]["short"] == short
+    assert out["skipped"] == 2
+
+
+def test_an_unlimited_audit_has_no_scope_in_the_model():
+    out = _run(
+        "const m = PT.buildModel(data.p); return {scope: m.scope, skipped: m.refsSkipped}",
+        p=_payload([_claim(1, "Sentence one about X.")]),
+    )
+    assert out == {"scope": None, "skipped": 0}
+
+
+def test_the_markdown_export_ends_with_the_scope_when_there_is_one():
+    short = "the audit was limited on request: claims 1–2 of 9 checked (--max-claims 2)"
+    md = _run(
+        "const d = PT.buildModel(data.payload); return PT.markdownReport(d, {})",
+        payload=_scope_payload({"claims": {"requested": [1, 2], "judged": [1, 2], "extracted": 9}}, short),
+    )
+    assert "## Scope of this audit" in md
+    assert md.rindex("the audit was limited on request") > md.index("## Not verified")
