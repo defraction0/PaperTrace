@@ -4,6 +4,45 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.7.1] — 2026-09-19 (beta)
+
+Two fixes the 0.7.0 showcase run exposed, and the showcase itself.
+
+### Changed — `examples/demo/output/` is a fresh run on this release
+
+Gate 5, discharged. The committed showcase is an end-to-end run on
+`claude-opus-5` with docling 2.118.1, carrying what 0.7.0 added: the
+`reflist` disclosure in every format, and a numbering corroborated by the
+parse and the flat-text reading. The counts are the documented ones — 1
+supported, 2 contradicted, 1 not retrieved, 1 uncited — and the README's
+viewer screenshots come from the same run.
+
+One evidence crop moved page between runs (claim 3's `littlejohns-2020`
+anchor, p2 to p1). That is a live model landing an anchor elsewhere, not a
+regression, and it is why `--model` is pinned for this run at all.
+
+### Fixed — `--model` reached the judging call and not the reference-list one
+
+A run pinned to opus read its bibliography with whatever the account
+default happened to be. `_refs_pipeline` had no `model` parameter at all, so
+the flag had nowhere to go; `refs` now takes `--model` too, since it makes a
+model call of its own.
+
+Underneath it, a longer-standing one that only became visible once the
+reference-list model was published in the manifest. `claude -p` reports
+**several** models in `modelUsage` — a real reply to `--model claude-opus-5`
+carries `['claude-haiku-4-5-20251001', 'claude-opus-5']`, because an internal
+step is billed to a cheap model alongside the one that wrote the answer — and
+the seam recorded `next(iter(usage))`, whichever key the dict yielded first.
+A run pinned to opus published haiku as its model. What answered is now
+resolved in order of evidence: a model asked for by name, then the reply's own
+`model` field, then a usage map naming exactly one. A usage map naming several
+with nothing saying which wrote the answer records **nothing** — a wrong name
+is worse than none, because a reader cannot tell it is wrong.
+
+Neither was reachable by the test suite, which fakes the seam in every test.
+Both were found by the end-to-end demo run this release's showcase needed.
+
 ## [0.7.0] — 2026-09-19 (beta)
 
 ### Added — audit a slice on request: `--max-claims` and `--max-sources`
@@ -344,28 +383,6 @@ gap that does not exist.
 disclosure stop crying wolf on the case it was firing on wrongly: a list two
 readings agree about entry for entry, longer than the highest cited label
 because three of its references are cited only in the supplement.
-
-### Fixed — `--model` reached the judging call and not the reference-list one
-
-A run pinned to opus read its bibliography with whatever the account
-default happened to be. `_refs_pipeline` had no `model` parameter at all, so
-the flag had nowhere to go; `refs` now takes `--model` too, since it makes a
-model call of its own.
-
-Underneath it, a longer-standing one that only became visible once the
-reference-list model was published in the manifest. `claude -p` reports
-**several** models in `modelUsage` — a real reply to `--model claude-opus-5`
-carries `['claude-haiku-4-5-20251001', 'claude-opus-5']`, because an internal
-step is billed to a cheap model alongside the one that wrote the answer — and
-the seam recorded `next(iter(usage))`, whichever key the dict yielded first.
-A run pinned to opus published haiku as its model. What answered is now
-resolved in order of evidence: a model asked for by name, then the reply's own
-`model` field, then a usage map naming exactly one. A usage map naming several
-with nothing saying which wrote the answer records **nothing** — a wrong name
-is worse than none, because a reader cannot tell it is wrong.
-
-Neither was reachable by the test suite, which fakes the seam in every test.
-Both were found by the end-to-end demo run this release's showcase needed.
 
 ## [0.6.0] — 2026-09-13 (beta)
 
