@@ -16,7 +16,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from papertrace import check as check_mod  # noqa: E402
 from papertrace import cli  # noqa: E402
+from papertrace.models import ClaimExtraction, RefEntry, RefManifest  # noqa: E402
 
 
 def test_ingest_pipeline_rejects_a_positional_call():
@@ -55,12 +57,13 @@ def test_refs_command_delegates_to_the_pipeline_function(tmp_path, monkeypatch):
     pdf.write_bytes(b"%PDF-1.4\n")
 
     cli.refs(manuscript=pdf, case=None, provided=None, email=None,
-             parse_only=False, backend="auto", doi=None, supplement=None,
+             parse_only=False, backend="auto", doi=None, supplement=None, llm_refs=True,
              max_claims=None, max_sources=None)
 
     assert seen == {
         "manuscript": pdf, "case": None, "provided": None, "email": None,
         "parse_only": False, "backend": "auto", "doi": None, "supplement": None,
+        "llm_refs": True,
         "claims": None, "max_sources": None,
     }
 
@@ -174,6 +177,119 @@ def test_check_claims_will_not_default_its_backend():
     p = inspect.signature(check_claims).parameters["backend"]
     assert p.default is inspect.Parameter.empty, "backend must not have a default"
     assert p.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+# --- withholding a disputed label -------------------------------------------
+# The wire the `check_claims` tests cannot see for themselves. `_check_pipeline`
+# is where `RefManifest.labels_disputed` (Task 3) actually reaches
+# `check_claims`'s `disputed` parameter (Task 4); `check_claims` can only prove
+# what happens once the argument has arrived.
+
+
+def test_check_pipeline_passes_the_manifests_disputed_labels_to_check_claims(
+    tmp_path, monkeypatch
+):
+    """If this regresses, a label Task 3 marked disputed reaches judgement
+    anyway — the withholding built into `check_claims` never fires, because
+    the CLI never told it which labels to withhold."""
+    case = tmp_path / "case"
+    case.mkdir()
+    RefManifest(
+        manuscript="m.pdf",
+        entries=[RefEntry(num="9", raw="ref", status="retrieved", slug="x-2020",
+                          pdf_path="/nonexistent/x-2020.pdf")],
+        labels_disputed=["9"],
+    ).to_json(case / "refs_manifest.json")
+
+    # Patch the GATE, not the predicate behind it. `_check_pipeline` calls
+    # `cli._require_claude()`, which does `from .check import claude_available`
+    # — and `check.claude_available` is a re-export, a *separate module
+    # attribute* from `ask.claude_available` even though both name one
+    # function. Patching `ask_mod` left the one this path reads untouched, so
+    # the test passed on a machine with the CLI installed and failed all ten
+    # CI jobs, which have none. Patching `_require_claude` itself cannot
+    # drift with a future refactor of which module it imports from.
+    monkeypatch.setattr(cli, "_require_claude", lambda: None)
+    # `_check_pipeline` reads the extraction through `cli._extraction_for` now
+    # — the `limits` feature made extraction a stage of its own so a claims
+    # limit can retrieve only what the selected claims cite, and stubbing
+    # `check.extract_claims` no longer intercepts anything this path calls
+    monkeypatch.setattr(
+        cli, "_extraction_for",
+        lambda case, model: ClaimExtraction(
+            manuscript="m.pdf", manuscript_sha256=None, extractor="test", date="2026-01-01",
+        ),
+    )
+    # a realistic empty audit, not a bare `{}`: `coverage_audit` never returns
+    # a dict without `missing` — `coverage["missing"]` two lines into the
+    # summary print is unrelated to what this test is proving and must not be
+    # what breaks it
+    monkeypatch.setattr(
+        check_mod, "coverage_audit",
+        lambda *a, **kw: {"labels_in_text": [], "covered": [], "missing": []},
+    )
+    monkeypatch.setattr(check_mod, "last_model", lambda: None)
+
+    captured = {}
+
+    def fake_check_claims(claims, manifest, case_dir, model, *, progress=None,
+                          on_error=None, truncations=None, backend, disputed=None):
+        captured["disputed"] = disputed
+        return claims
+
+    monkeypatch.setattr(check_mod, "check_claims", fake_check_claims)
+
+    cli._check_pipeline(case=case, backend="pymupdf")
+
+    assert captured["disputed"] == {"9"}
+
+
+def test_check_pipeline_tolerates_a_manifest_with_nothing_disputed(tmp_path, monkeypatch):
+    """`labels_disputed` defaults to `[]` — the ordinary case, every run before
+    Task 3 shipped and every run where nothing disagreed. `set([])` must reach
+    `check_claims` rather than `None`, `set()` behaves identically either way
+    (proved in `test_check.py`), but this is the one place that constructs it."""
+    case = tmp_path / "case"
+    case.mkdir()
+    RefManifest(manuscript="m.pdf", entries=[]).to_json(case / "refs_manifest.json")
+
+    # Patch the GATE, not the predicate behind it. `_check_pipeline` calls
+    # `cli._require_claude()`, which does `from .check import claude_available`
+    # — and `check.claude_available` is a re-export, a *separate module
+    # attribute* from `ask.claude_available` even though both name one
+    # function. Patching `ask_mod` left the one this path reads untouched, so
+    # the test passed on a machine with the CLI installed and failed all ten
+    # CI jobs, which have none. Patching `_require_claude` itself cannot
+    # drift with a future refactor of which module it imports from.
+    monkeypatch.setattr(cli, "_require_claude", lambda: None)
+    # `_check_pipeline` reads the extraction through `cli._extraction_for` now
+    # — the `limits` feature made extraction a stage of its own so a claims
+    # limit can retrieve only what the selected claims cite, and stubbing
+    # `check.extract_claims` no longer intercepts anything this path calls
+    monkeypatch.setattr(
+        cli, "_extraction_for",
+        lambda case, model: ClaimExtraction(
+            manuscript="m.pdf", manuscript_sha256=None, extractor="test", date="2026-01-01",
+        ),
+    )
+    monkeypatch.setattr(
+        check_mod, "coverage_audit",
+        lambda *a, **kw: {"labels_in_text": [], "covered": [], "missing": []},
+    )
+    monkeypatch.setattr(check_mod, "last_model", lambda: None)
+
+    captured = {}
+
+    def fake_check_claims(claims, manifest, case_dir, model, *, progress=None,
+                          on_error=None, truncations=None, backend, disputed=None):
+        captured["disputed"] = disputed
+        return claims
+
+    monkeypatch.setattr(check_mod, "check_claims", fake_check_claims)
+
+    cli._check_pipeline(case=case, backend="pymupdf")
+
+    assert captured["disputed"] == set()
 
 
 # --- the extract stage, and the limits `run` hands down ----------------------

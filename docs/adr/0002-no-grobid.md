@@ -2,8 +2,13 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-05
-- **Related:** ADR [0001](0001-no-gold-benchmark.md), `src/papertrace/refs.py`,
-  README §"Two independent readings"
+- **Related:** ADR [0001](0001-no-gold-benchmark.md),
+  ADR [0003](0003-llm-reference-list.md) — which is the authorisation this ADR
+  withheld, granted once the trigger below was met with evidence —
+  `src/papertrace/refs.py`, README §"What it does — and what it does not"
+  (this pointed at §"Two independent readings" until 0.7.0 took the count from
+  two readings to four and the section was renamed; the link did not break, it
+  simply stopped naming anything)
 
 ## Context
 

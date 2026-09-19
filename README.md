@@ -125,13 +125,39 @@ source that was read flat.
   captioned as unboxed.
 - Record what it could not do: a claim whose source could not be retrieved is
   `⊘ not retrieved`, never guessed.
-- Check its own reference numbering: the tool's parse of the printed list is
-  compared with the list the publisher deposited with Crossref (`--doi`,
-  defaulting to the DOI on page 1), and the paper's own `[N]` markers
-  arbitrate. When neither reading accounts for exactly the labels the body
-  cites, the report says the numbering is unconfirmed and every affected
-  verdict carries the caveat — a list off by one is a confident audit of the
-  wrong papers.
+- **Check its own reference numbering before trusting it.** The citation label
+  is the join key between a claim and the source it is judged against, so a
+  list off by one produces a confident audit of the *wrong papers*. Up to four
+  independent readings are taken — the tool's parse of the printed list, a
+  flat-text parse of the same PDF, the reference list the publisher deposited
+  with Crossref (`refs --doi`, defaulting to the DOI printed on page 1), and a
+  structured list proposed by a model that is shown the two texts and given
+  authority over neither (`--no-llm-refs` turns it off) — and the manuscript's
+  own `[N]` markers arbitrate between them. Only the parse and the deposit can
+  be *adopted* as the list; the other two are readings that can disagree, and a
+  disagreement is all they can do on their own — the one thing that can change
+  which paper is fetched is your own answer at the prompt described below, and
+  the report records that you gave it. Every field of the model's reply is checked
+  against the text it was shown and discarded if it is not printed there, so
+  nothing it invented can name a paper. A reading is used only if it accounts
+  for exactly the labels the body cites. When neither does, the audit continues,
+  the report says the numbering is unconfirmed, and every verdict on a claim
+  citing a doubtful label carries that caveat beside it. Crossref is a second
+  reading, **not** an oracle. A deposit this tool can only partly read is set
+  aside rather than used to renumber a longer list, and the shortfall is
+  reported as the tool's own, not the publisher's. A deposit can also be
+  genuinely short — one record in this project's spread carries 2 references
+  for a paper citing about 40 — and nothing in the payload gives that away,
+  because Crossref's own count field counts what was deposited. The
+  manuscript's labels are what catch it. And the DOI is checked against the
+  paper before its record is trusted: a deposit whose Crossref record is titled
+  as some other paper is set aside. The paper's title is taken from the PDF's
+  own metadata where it states one, since the largest heading on a first page
+  is often the article-type banner rather than the title. Where the titles
+  cannot be compared, the paper's own bibliography settles it — the works the
+  publisher deposited are looked for in the reference list printed in the
+  paper — and where neither can, the list is used and the manifest says the
+  identity behind it was never confirmed.
 - Report every citation **occurrence** no extracted claim reached, and every
   assertion carrying no citation. Detection is a regex over bracketed numeric
   labels, so a citation the model skipped still surfaces. Attribution of a

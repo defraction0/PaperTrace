@@ -4,7 +4,7 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] — unreleased
 
 ### Added — audit a slice on request: `--max-claims` and `--max-sources`
 
@@ -69,6 +69,293 @@ numbers a selection names therefore hold still between retrieval and judging,
 across a `check` re-run after a failed call, and for whatever cherry-picks
 them later; delete `out/claims.json` to extract afresh. `check --max-claims`
 and `refs --max-claims` / `--max-sources` take the limits stage by stage.
+
+### Fixed — a bibliography rendered as a table was read as four fewer references
+
+Docling reads a hanging-indent numeral column as a table and emits GFM, so the
+entries arrive as `|  6. | Author A (2019) … |` rows. The marker regex cannot
+see them (`\s*` does not cross a `|`) and `_parse_bulleted` treated each row as
+a wrapped continuation of the bullet above it. **On the manuscript that
+surfaced this, 22 printed references parsed as 18, and every claim citing [6]
+or above was judged against a different paper** — the citation label is the
+join key, so the verdicts were confident and about the wrong papers.
+
+The mis-attribution was invisible to the one check that should have caught it:
+gluing five references onto one entry left `_entry` scraping the *next*
+reference's DOI onto it, and the existing title check **passed** on that DOI,
+because the glued raw string contained the words of both papers. A stronger
+check would not have helped either — the reference string really did name the
+paper that was downloaded, alongside the one the label meant.
+
+A pipe row in a bibliography is now a reference: `_unwrap_table_rows` runs
+before the marker regex, a numeral cell restores the bullet form, and a row
+with no numeral cell is emitted unmarked so the existing continuation rule
+joins it to whatever preceded it — which is what docling's promoted header row
+actually is.
+
+### Fixed — a diacritic in a reference deleted its own correct download
+
+`_title_tokens` folds a reference's words (`Küstner` → `kustner`) so that a
+surname with a diacritic contributes tokens at all. `_title_check_text` scored
+those folded tokens against a page that was only lowercased, and the score is a
+substring test — so none of them matched. Measured against a first page
+carrying the reference's own title verbatim, `7/7 verified` became `2/9
+mismatch`, and a mismatch is not a shrug: `_accept` unlinks the downloaded PDF,
+records `mismatch`, and tells the reader the reference has *"a wrong or
+mistyped DOI"*. A correct retrieval destroyed and the manuscript blamed for it,
+on German, Scandinavian, Polish, Turkish, Spanish and Portuguese references —
+the cases folding was introduced for. Both sides of the comparison are folded
+now, and `_fold`'s docstring says so.
+
+### Fixed — printed numerals that contradict their position are refused, not renumbered
+
+`_usable_printed_numerals` required the first numeral to be `1`, so a list
+whose converter stripped the early numerals and kept the later ones was refused
+wholesale — and then numbered by position anyway, which is the guess the rule
+exists to avoid. Position is now checked against every numeral that survived:
+where they agree, the positional reading *is* the printed reading, corroborated
+wherever the printing survived. Where they contradict it, something above them
+was merged or split, so neither reading is available and the entries from the
+first contradiction on refuse to resolve rather than risk a wrong paper.
+
+A refused entry keeps a positional label — it needs one to be a slug and a
+download path — so the extent check `_covers` performs was satisfied by exactly
+the labels in doubt. A five-item list refused from entry 4, against a body
+citing [1]-[5], reported *"numbering confirmed"*, fired no numbering
+disclosure and caveated no claim. `reconcile` no longer confirms a numbering
+any entry in the chosen reading refuses, which closes the same hole on the
+pre-existing duplicate-label refusal.
+
+### Added — the numbering ledger, and a second reading that disagrees is disclosed
+
+`numbering_ledger` (schema: `refs_manifest`) names which labels are duplicated
+and which are carried by no entry, instead of reporting a difference of two
+totals — which understated a real run sixfold: *"[1]-[19] vs 18 references"*
+where five references were dropped and one label duplicated. A difference of
+totals cannot reveal a duplicate at all.
+
+`numbering_contested` is now persisted and rendered in all four formats. It was
+declared with a comment saying that burying it was how a compensating parse
+error could pass unmentioned, and was then never written to the manifest and
+never shown. It fires when the two readings of the bibliography stop describing
+the same paper **at or below a label the body cites** — not merely when the
+other reading failed the extent check, which is satisfied by a deposit
+identical for every cited label and longer by two references nobody cites.
+Publishers routinely deposit those.
+
+### Changed — the unconfirmed-numbering note reads as sentences
+
+The note reaches markdown, editor, terminal and viewer verbatim, and it had
+four em-dashes in one sentence with the Crossref clause spliced into the middle
+of it — where `CROSSREF_NO_DOI` carries an em-dash *and* a full stop of its
+own, so the sentence appeared to end at *"Pass --doi if the paper does have
+one"* and then resumed at *"that does not add up"*. The ledger is its own
+sentence now, the Crossref clause is last and stands on its own, and a single
+duplicated label *appears* rather than *appear*.
+
+### Fixed — the guided wizard wrote the audit somewhere the user had not named
+
+The case-folder prompt was the one path answer that never went through
+`clean_path`. Finder's drag-and-drop quotes any path containing a space, so the
+answer began with a literal `'` — which made it a *relative* name, and the
+audit was written to a directory called `'` under wherever the user happened to
+be standing, while every line the run printed named an absolute folder that did
+not exist. The other three path prompts were immune by accident: they check
+`.exists()`, and a quoted path fails that. A case folder is *created*, so
+nothing could contradict it.
+
+All four prompts share `clean_path` now. A relative answer is still accepted —
+`-c demo_case` is in the README — but it is resolved and the resolution is
+printed on one unwrapped line, which is where a mangled path becomes visible
+before the first paid model call rather than after all of them. An answer of
+whitespace arrives as `.` and is refused, for the reason `default_case` already
+refuses the working directory: an audit needs a folder of its own.
+
+### Added — a third and fourth reading of the reference list, and a per-label verdict on the numbering
+
+`reconcile` arbitrated between two readings of the bibliography: the tool's own
+parse and the reference list the publisher deposited with Crossref. Both can be
+absent — an unpublished manuscript has no DOI to look up — and where the parse
+is the only reading, nothing can contradict it.
+
+Two more candidates now stand beside them. A flat-text (pymupdf) parse of the
+same PDF, free on a docling run and skipped on a pymupdf one because it would
+be identical. And a structured reference list proposed by a model, which is
+shown both texts and given no authority over either: **every field of its
+reply must be found verbatim in one of them or it is discarded**, one entry's
+unverifiable title discards the model's **whole reading** — a title is the
+one field that names the paper, so a reply that got one wrong cannot be
+trusted about the rest — and the model's list never becomes `reconcile`'s
+chosen reading. It is a voter. On by default, `--no-llm-refs` to turn it off,
+on both `refs` and `run`.
+
+Agreement is then computed **per printed citation label** — joined on the
+numeral the page carries, never on position — and reported as `agreed`,
+`single`, `disputed` or `absent`. A disputed label's source is **withheld**:
+dropped before any model call and named in `ClaimResult.withheld_refs`. A
+claim left with no other source is then reported `unchecked` with the label
+named, not `not_retrieved`, because the source was obtained and read; a claim
+that also cites an undisputed source is still judged on that one, with the
+withheld label named beside the verdict. `single` deliberately prints, with
+the caveat it already carried. `numbering_corroborated` is a new, independent
+axis beside `numbering_verified`, which keeps its exact meaning.
+
+Where the readings are in dispute at any label, an interactive run writes the
+full disagreement to
+`case/out/reference_disagreement.md` — every reading's fields and the verbatim
+text each was read from — **prints the path, and only then asks** what to do
+about it. There is no second condition: a run whose numbering passed the
+extent check can still have a disputed label, because extent and content are
+different questions. Four options: resolve the disputed labels with a model,
+withhold verdicts on all of them, adopt one reading whole, or abort. Whatever is
+answered is recorded as `numbering_chosen_by: "user"`; a person consenting to
+proceed is an input, not evidence, and nothing a user answers can set
+`numbering_verified`. A run that is not interactive — no terminal, output
+piped, or `CI` set — withholds the disputed labels and asks nothing.
+
+**Choosing *resolve* is the one place a model's answer reaches retrieval, and
+it is gated on that answer.** A second model call is shown the printed
+extractions and the entries that disagree, every field it returns is verified
+verbatim against the printed text, and each label it settles has its entry
+**substituted** into the list that is then downloaded and judged. Substituting
+is mandatory rather than optional: leaving the list untouched would take the
+label out of dispute while leaving the entry the resolution ruled *against* as
+the paper judged — the original wrong-paper bug, reached through the one path
+a person authorised. The call's own provenance is persisted
+(`resolution_outcome`, `resolution_model`, `resolution_fields_discarded`,
+`resolution_readings`) and reported, including which extractions it was shown
+— never "both texts", since a pymupdf-backend run has one printed span.
+
+Partial resolution is a normal, representable, reported outcome:
+`labels_resolved` and `labels_disputed` are both non-empty on a run where some
+labels were settled and some were not, and "cannot tell" from the resolution
+call is a correct answer that keeps a label withheld.
+
+### Fixed — a reading nothing could be compared with was counted as disagreeing
+
+The comparison behind agreement is three-valued now (`True | False | None`),
+the same vocabulary `titles_match` already published in the mirror direction.
+A voter it cannot compare **abstains** instead of dissenting, which can leave
+one reading standing and print `single`. Collapsing that to "disagrees" made a
+Crossref deposit of bare DOIs dispute every label it voted on while the two
+parses agreed perfectly — an audit with no verdicts in it. The one exception
+is a label where *no* reading said anything comparable at all: that stays
+disputed, because nothing establishes what the label names.
+
+A bare DOI is the documented fallback when a deposit carries no reference
+strings, and `_title_tokens` was reading the publisher slug inside it as a
+title word — `10.1148/radiol.2019181432` contributed `radiol`, and a spread of
+real DOIs showed that is common rather than exotic. DOIs are now stripped the
+way URLs already were, for the reason the URL strip was written for: an
+identifier's substrings are not words anybody wrote as a title. The same strip
+stops `jamanetworkopen` sitting in the title check's denominator against a page
+that prints "JAMA Network Open".
+
+### Added — `labels_uncomparable`, so a report can say which cause withheld a label
+
+`disputed` carries two causes a reader should act on differently: the readings
+named different papers (one of them is wrong, somebody should look), or
+nothing in them could be compared (no conflict is known, the withholding is
+precautionary). `RefManifest.labels_uncomparable` publishes the second as a
+**documented subset** of `labels_disputed` — a subset by construction, both
+read off one call — and every surface that used to name the disjunction now
+names the cause where one was measured. Behaviour is unchanged:
+`labels_disputed` remains the single list that drives withholding.
+
+Three states, not two. `null` is never computed — including every manifest
+written before the field existed — and `[]` is "computed, and every dispute
+was a contradiction". One empty list cannot mean both.
+
+### Changed — `numbering_corroborated` is `boolean | null`
+
+Its description had claimed three states for a type that held two, so "never
+computed" and "measured, not corroborated" were the same value. The type moved
+rather than the meaning: `true` and `false` mean exactly what they did, and
+`from_json` no longer coerces an absent field to `false`. Every consumer
+already treated falsy uniformly.
+
+### Fixed — a retrieval gap erased by a withholding
+
+`ClaimResult.unjudged_refs` is decided above every branch of the claim loop
+now. A claim citing one withheld label and one co-cited source that could not
+be retrieved put the unretrievable one in none of the three accounts a reader
+has — judged, withheld, unjudged. The one path it is deliberately empty on is
+a claim where nothing at all was obtained: the `not_retrieved` verdict is
+already the whole report there, and the field's published meaning is the
+*co*-cited labels a surviving verdict did not rest on.
+
+A disputed label whose source was never retrieved is also described as that,
+rather than as withheld: the report splits on the manifest entry's own status,
+the same predicate the retrieval filter applies, so it no longer asserts a
+fetch that did not happen.
+
+### Fixed — `seen_in` could name a reading the same manifest said disagreed
+
+`stamp_seen_in` matches through the agreement comparator, so only a positive
+comparison stamps and the two published fields can no longer contradict each
+other on one manifest. It runs *after* the interactive escalation, because
+adopting a reading whole replaces every entry and a stamp computed before that
+published `[]` for all of them; it merges rather than overwrites, so an entry
+the resolution substituted keeps the printed text its values were copied from.
+`[]` now means one thing: no reading was established as carrying this work.
+
+The model's reading is excluded from `corroborating_readings` entirely. It may
+only copy values out of the two extractions, and both of those vote in their
+own right, so crediting it counts one text twice. It still votes, and a
+disagreement from it is still real.
+
+### Added — `ask.py`, the one seam, with the model recorded per call site
+
+Every model call went through one `_ask` in `check.py`, which was a convention
+stated in `CLAUDE.md` with nothing enforcing it. It is now a file —
+`src/papertrace/ask.py`, the only file in `src/` that runs a subprocess — and
+`tests/test_ask.py` greps `src/` and asserts exactly that. Same flags, same
+timeout, same sandbox: `--safe-mode`, `--tools ""`, a private 0700 scratch cwd.
+
+### Fixed — a run that judged nothing could name a judge
+
+The model that judged the claims was a single module global overwritten by
+every `_ask` call, and the report's `Checker:` line rendered it. With `refs`
+also calling the seam, a run whose judging made zero calls — every cited
+source not retrieved, so nothing to judge — would have printed the
+**reference-list** model as the judge of verdicts it never saw. The model is
+now recorded per call site, and `last_model()` reads the judging site only:
+`None` where no judging happened, never the other site's answer.
+
+### Fixed — claim extraction had no retry, and the wizard's cost ceiling assumed it did
+
+`ASK_ATTEMPTS` exists so the wizard's advertised worst-case bill cannot drift
+from the real retry policy. The retry loop did not read it — it hardcoded one
+retry and matched the constant only because the constant happens to be 2 — and
+the single extraction call, whose failure fails the whole run, had no retry at
+all. Extraction now retries like everything else, and the wizard's ceiling moved
+with it.
+
+### Changed — the coverage of `unjudged_refs`, and a second axis on the numbering
+
+`ClaimResult.withheld_refs` is a new field and is **not** `unjudged_refs`. An
+entry in `unjudged_refs` means the source could not be obtained — nobody read
+it. A withheld reference **was** obtained; what is in doubt is whether it is the
+paper the label names. Putting it in `unjudged_refs` would report a retrieval
+gap that does not exist.
+
+`numbering_verified` is unchanged in meaning and unchanged in what can set it.
+`numbering_corroborated` is reported beside it, which lets the numbering
+disclosure stop crying wolf on the case it was firing on wrongly: a list two
+readings agree about entry for entry, longer than the highest cited label
+because three of its references are cited only in the supplement.
+
+### Known staleness — `examples/demo/output/` predates this feature
+
+`--llm-refs` defaults on, so a fresh demo run now makes one extra model call
+and, on the docling backend the demo uses, emits the `reflist` disclosure in
+all four formats. The committed showcase in `examples/demo/output/` was
+generated before this feature existed and shows none of it — nor the report
+wording this release changed around disputes, resolutions and corroboration.
+That is staleness in the committed artefact, not a defect in the feature: the
+showcase needs a fresh end-to-end run (network, a logged-in `claude` CLI) to
+pick it up, and that run is **deferred by the user**, not skipped silently. It
+is a branch-level step and must happen before this version is released.
 
 ## [0.6.0] — 2026-09-13 (beta)
 

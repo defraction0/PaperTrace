@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -72,10 +73,64 @@ _TITLE_STOPWORDS = frozenset(
 )
 
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
+# A DOI is the same class of thing as the URL above and fails the same way.
+# `_reference_raw`'s documented fallback for a DOI-only Crossref deposit is
+# the DOI string itself, and most publisher DOIs embed a journal or platform
+# slug: `10.1148/radiol.…` yields `radiol`, `10.1001/jamanetworkopen.…` yields
+# `jamanetworkopen`. Those are substrings of an identifier, not words from a
+# title, and they were being compared against real title words — a deposit
+# came back as naming a DIFFERENT paper from the page, which disputed every
+# label it voted on. From the other side they inflate the denominator of
+# `_title_check_text` with a token no first page carries ("JAMA Network Open"
+# is printed with spaces), which pushes a correct retrieval toward mismatch.
+# Kept as its own pattern rather than folded into `_URL_RE`: a bare DOI is not
+# a URL, and `https://doi.org/10.…` is already covered by that one.
+_DOI_IN_TEXT_RE = re.compile(r"\b10\.\d{4,9}/\S+", re.I)
+
+
+# What NFKD cannot decompose, because these are distinct letters rather than a
+# base plus a combining mark. Without them `Weiß` folds to `wei` and `Bjørnsson`
+# to `bjrnsson` — a surname that changed, not one that normalised.
+_TRANSLITERATE = str.maketrans(
+    {
+        "ß": "ss",
+        "ø": "o",
+        "æ": "ae",
+        "œ": "oe",
+        "đ": "d",
+        "ð": "d",
+        "þ": "th",
+        "ł": "l",
+        "ı": "i",
+        "ħ": "h",
+        "ŧ": "t",
+    }
+)
+
+
+def _fold(text: str) -> str:
+    """Lowercase, transliterated, diacritics decomposed away — `İnce` → `ince`.
+
+    Lives here because five call sites across `models` and `refs` need it and
+    neither module may import the other — the same reason the shared title rules
+    below it live here. `_slug` deletes non-ASCII instead (`[^A-Za-z\\-]`), which
+    is why `İnce O` slugs `nce-2023` and `Müller` slugs `mller`. Folding is what
+    a name comparison needs.
+
+    **Both sides of any comparison must be folded.** `_title_tokens` folds, so a
+    haystack that is merely lowercased matches none of the folded tokens —
+    `kustner` is not in `küstner`, which deleted correct downloads and blamed
+    the manuscript for a mistyped DOI.
+    """
+    # lowercase BEFORE translate: `_TRANSLITERATE` is keyed on lowercase letters
+    # only, so reordering these two silently stops `Ø`, `Æ` and `Ł` folding
+    lowered = (text or "").lower().translate(_TRANSLITERATE)
+    decomposed = unicodedata.normalize("NFKD", lowered)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
 def _title_tokens(raw: str) -> set[str]:
-    """The reference's own distinctive words — URLs removed first.
+    """The reference's own distinctive words — URLs and DOIs removed first.
 
     A URL is not part of a title, and a *tracking parameter* least of all:
     `?utm_source=chatgpt.com` on a cited news page contributed `chatgpt` and
@@ -84,8 +139,15 @@ def _title_tokens(raw: str) -> set[str]:
     inflating the denominator with `firstmedical`, `assuranceprogram` and
     `publications` — words no first page will carry, so they dilute the ratio
     the check is measured on.
+
+    A DOI is stripped for exactly those two reasons — see `_DOI_IN_TEXT_RE`.
+    It is the same class of thing: an identifier, whose substrings are not
+    words anybody wrote as a title.
     """
-    return set(re.findall(r"[a-z]{5,}", _URL_RE.sub(" ", raw).lower())) - _TITLE_STOPWORDS
+    # folded, not merely lowercased: `[a-z]{5,}` over raw text drops `Späth`
+    # entirely and truncates `Cristóbal` to `crist`
+    stripped = _DOI_IN_TEXT_RE.sub(" ", _URL_RE.sub(" ", raw))
+    return set(re.findall(r"[a-z]{5,}", _fold(stripped))) - _TITLE_STOPWORDS
 
 
 # Four distinct words, not three. The observed false positive cleared the 0.35
@@ -478,11 +540,21 @@ class RefEntry:
     # appendix while calling it the cited source is the laundering this
     # codebase exists to prevent.
     supplements: list[Supplement] = field(default_factory=list)
+    # which named readings of the bibliography (e.g. "parsed", "pymupdf",
+    # "llm") contributed THIS entry. An entry seen only in the model's reading
+    # must be spottable — `["llm"]` says so; `[]` on an older manifest means
+    # never computed, not "seen nowhere".
+    seen_in: list[str] = field(default_factory=list)
     # why a `skipped` entry was skipped, machine-readably: "claims" (no selected
     # claim cites it) or "sources" (the cap on sources was already reached).
     # `reason` says the same in prose; this is what lets the report count the
     # two kinds of gap apart without parsing a sentence. None for every other
     # status.
+    #
+    # Never set on a withheld label, and not by a rule that could lapse:
+    # withholding needs `status in ("retrieved", "provided")` and `skipped` is
+    # neither, so the two reasons a source yields no verdict are disjoint by
+    # construction — see `check.check_claims`.
     skipped_by: str | None = None
 
 
@@ -532,10 +604,115 @@ class RefManifest:
     # candidate, because a single unchecked reading gives no evidence about
     # *where* it went wrong
     unverified_from: int | None = None
+    # A second reading stopped naming the same paper at or below a label the body
+    # cites, even though the chosen reading matched the body's labels. `_covers`
+    # tests extent, not content, so this is worth the reader's eye even when the
+    # count checks out — and a deposit that is merely longer is not it.
+    numbering_contested: bool = False
+    # Absent means never computed, NOT "nothing was dropped".
+    numbering_ledger: dict = field(default_factory=dict)
     # the AUDITED paper's own supplementary material. Not a RefEntry: it answers
     # for no citation label, and putting it in `entries` would inflate
     # `refs_total` and let `_slug_for_ref` hand it to a claim citing a number.
     manuscript_supplements: list[Supplement] = field(default_factory=list)
+    # A second, independent axis from `numbering_verified` above: whether
+    # EVERY label the body cites was agreed by >= 2 readings. `None` means
+    # never computed — not "not corroborated" — the same three-state
+    # discipline as `reflist_entries_proposed`, and the reason this is not a
+    # plain `bool`: the docstring claimed three states for a type that holds
+    # two, so "absent" and "measured false" were the same value and every
+    # consumer had to be silent on both to stay honest.
+    numbering_corroborated: bool | None = None
+    corroborating_readings: list[str] = field(default_factory=list)
+    # Absent means never computed, NOT "none disputed" — a manifest written
+    # before this feature says nothing about disputes, it does not assert
+    # there were none.
+    labels_disputed: list[str] = field(default_factory=list)
+    # A documented SUBSET of `labels_disputed`: the labels whose dispute was
+    # that nothing in the readings could be compared, rather than that they
+    # named different papers. `labels_disputed` stays the single list that
+    # drives withholding, so behaviour is unchanged and the two cannot
+    # contradict each other — `refs.uncomparable_labels` reads this off the
+    # same call that decides the state.
+    #
+    # Three states, not two: `None` is NEVER COMPUTED — every manifest written
+    # before this field, including one from an earlier commit of this branch —
+    # and `[]` is "computed, and every dispute was a contradiction". One empty
+    # list could not mean both, and the report picks a cause only when one was
+    # actually measured.
+    labels_uncomparable: list[str] | None = None
+    labels_resolved: list[str] = field(default_factory=list)
+    # How a disputed numbering was left; "" means the interactive escalation
+    # never ran. Never set from a model's own say-so alone.
+    numbering_choice: str = ""  # "" | withheld | llm_resolved | parsed | pymupdf
+    numbering_chosen_by: str = ""  # "" | default | user
+    # Which of `reflist.REFLIST_OUTCOMES` this run's model reading reached.
+    # "" means NEVER COMPUTED — not "not_attempted" — the same three-state
+    # discipline as `numbering_ledger`; a manifest written before this field
+    # existed asserts nothing about whether a call was made. Once computed it
+    # is always one of the three real values: a boolean could not tell "never
+    # called" apart from "called and failed", which is exactly the shape of
+    # bug that produced a failed call published as a successful reading.
+    reflist_outcome: str = ""
+    # Why there is no reading, when `reflist_outcome` is not `"read"` — never
+    # a value that failed verification (`reflist_fields_discarded`'s job) and
+    # never a reading that was checked and refused whole
+    # (`reflist_fields_discarded`'s "reading discarded —" entries, which
+    # require a reply to have been obtained at all). "" when `reflist_outcome`
+    # is `"read"`, or when neither has ever been computed.
+    reflist_failure: str = ""
+    # The model that produced the LLM's structured reading of the
+    # bibliography, when --llm-refs ran, produced anything usable, AND the
+    # subprocess's own reply reported a name. "" means EITHER no such call was
+    # made OR one was made and answered but did not report which model —
+    # `reflist_outcome` is what tells those two apart; this field alone
+    # cannot.
+    reflist_model: str = ""
+    # Which fields of the LLM's proposed reading could not be found verbatim
+    # in either text it was shown, and were discarded rather than trusted.
+    reflist_fields_discarded: list[str] = field(default_factory=list)
+    # A different kind of finding, kept in its own field for that reason: the
+    # model reading's own labels did not add up — a numeral proposed twice, or a
+    # gap in 1..max. Not a value that went missing, so counting it among the
+    # discarded fields would report a number of dropped values that never
+    # dropped. Empty means none found, which on a reading that produced no
+    # entries is not the same as none present.
+    reflist_numbering_findings: list[str] = field(default_factory=list)
+    # How many entries the model's reply proposed, before verification —
+    # ALWAYS recorded when `reflist_outcome == "read"`, including 0. `None`
+    # means NEVER RECORDED, not "proposed nothing" — the same three-state
+    # discipline `table_warnings` is documented under ("a list, `[]`, and
+    # null — nobody watched"). Without the distinction, "0 fields discarded"
+    # reads identically whether a model proposed nothing at all, proposed
+    # several entries that all verified cleanly, or this manifest simply
+    # predates the field — and a normalization that settles an older
+    # manifest's `reflist_outcome` as `"read"` from `reflist_model` alone
+    # would otherwise make EVERY such manifest read as "proposed nothing".
+    reflist_entries_proposed: int | None = None
+    # The SECOND model call this feature can make: the one that settles
+    # labels the readings did not agree on, after a person asked for it.
+    # Kept in its own five fields rather than folded into the `reflist_*` set
+    # above, which describes the call that reads the whole list: a run can
+    # make either, both or neither, and on a `--backend pymupdf` run the
+    # first is never attempted while the second still happens. Folding them
+    # made the report say no model read the reference list on a run where one
+    # was asked, verified and allowed to change which papers are judged.
+    #
+    # Same vocabulary and the same three-state discipline as their
+    # counterparts: `""` means NEVER COMPUTED, not `"not_attempted"`.
+    resolution_outcome: str = ""  # "" | one of reflist.REFLIST_OUTCOMES
+    # why the call produced nothing, when `resolution_outcome` is "failed".
+    # "" when it succeeded, or when no such call was ever made.
+    resolution_failure: str = ""
+    # "" means EITHER no such call OR one that answered without naming its
+    # model — `resolution_outcome` is what tells those apart.
+    resolution_model: str = ""
+    resolution_fields_discarded: list[str] = field(default_factory=list)
+    # Which printed extractions the call was actually SHOWN — the readings
+    # whose text went into the prompt, not the readings that disagreed. The
+    # report names these rather than asserting "both texts", which was false
+    # on every run with one printed extraction. `[]` means never recorded.
+    resolution_readings: list[str] = field(default_factory=list)
     # what `refs` was told to leave out, verbatim: `{"claims": [1, 2, 3]}` when
     # only the references those claims cite were to be retrieved, and
     # `{"max_sources": N}` for a cap on sources obtained. Recorded so a later
@@ -619,6 +796,26 @@ class RefManifest:
             "numbering_verified": self.numbering_verified,
             "numbering_note": self.numbering_note,
             "unverified_from": self.unverified_from,
+            "numbering_contested": self.numbering_contested,
+            "numbering_ledger": self.numbering_ledger,
+            "numbering_corroborated": self.numbering_corroborated,
+            "corroborating_readings": self.corroborating_readings,
+            "labels_disputed": self.labels_disputed,
+            "labels_uncomparable": self.labels_uncomparable,
+            "labels_resolved": self.labels_resolved,
+            "numbering_choice": self.numbering_choice,
+            "numbering_chosen_by": self.numbering_chosen_by,
+            "reflist_outcome": self.reflist_outcome,
+            "reflist_failure": self.reflist_failure,
+            "reflist_model": self.reflist_model,
+            "reflist_fields_discarded": self.reflist_fields_discarded,
+            "reflist_numbering_findings": self.reflist_numbering_findings,
+            "reflist_entries_proposed": self.reflist_entries_proposed,
+            "resolution_outcome": self.resolution_outcome,
+            "resolution_failure": self.resolution_failure,
+            "resolution_model": self.resolution_model,
+            "resolution_fields_discarded": self.resolution_fields_discarded,
+            "resolution_readings": self.resolution_readings,
             "summary": {
                 "total": len(self.entries),
                 "available": len(self.retrieved),
@@ -652,6 +849,52 @@ class RefManifest:
             numbering_verified=bool(data.get("numbering_verified", False)),
             numbering_note=data.get("numbering_note", ""),
             unverified_from=data.get("unverified_from"),
+            numbering_contested=bool(data.get("numbering_contested", False)),
+            numbering_ledger=data.get("numbering_ledger", {}),
+            # no `bool(...)` and no default: absent and explicit `null` both
+            # read as `None` — never computed — and are never coerced to False
+            numbering_corroborated=(
+                None if data.get("numbering_corroborated") is None
+                else bool(data["numbering_corroborated"])
+            ),
+            corroborating_readings=data.get("corroborating_readings", []),
+            # absent means never computed, not "none disputed" or "none resolved"
+            labels_disputed=data.get("labels_disputed", []),
+            # `.get` with no default: absent AND explicit `null` both read as
+            # `None` — never computed — never coerced to an empty list
+            labels_uncomparable=data.get("labels_uncomparable"),
+            labels_resolved=data.get("labels_resolved", []),
+            numbering_choice=data.get("numbering_choice", ""),
+            numbering_chosen_by=data.get("numbering_chosen_by", ""),
+            reflist_outcome=data.get("reflist_outcome", ""),
+            reflist_model=data.get("reflist_model", ""),
+            reflist_fields_discarded=data.get("reflist_fields_discarded", []),
+            reflist_numbering_findings=data.get("reflist_numbering_findings", []),
+            # A case folder written mid-branch, before `reflist_outcome`
+            # replaced the boolean it carries: the key is dropped here (no
+            # field owns it), and `_reflist` then had nothing to fire on, so
+            # the required disclosure vanished for a reading that happened.
+            # Neither "read" nor "failed" is provable from a flag that was
+            # set on both paths, so neither is claimed — the reason goes in
+            # `reflist_failure`, where `_reflist`'s weakest inference picks
+            # it up and says the outcome was never recorded.
+            reflist_failure=data.get("reflist_failure", "") or (
+                "a model reading was attempted; this manifest predates "
+                "`reflist_outcome` and does not record whether the call returned"
+                if data.get("reflist_attempted") and not data.get("reflist_outcome")
+                else ""
+            ),
+            # `.get` with no default: absent AND explicit `null` both read as
+            # `None` — "never recorded" — never coerced to `0`
+            reflist_entries_proposed=data.get("reflist_entries_proposed"),
+            # absent means never computed for all five: a manifest written
+            # before the escalation existed asserts nothing about whether a
+            # resolution call was made
+            resolution_outcome=data.get("resolution_outcome", ""),
+            resolution_failure=data.get("resolution_failure", ""),
+            resolution_model=data.get("resolution_model", ""),
+            resolution_fields_discarded=data.get("resolution_fields_discarded", []),
+            resolution_readings=data.get("resolution_readings", []),
         )
 
 
@@ -781,6 +1024,17 @@ class ClaimResult:
     # not be read as having backed the verdict. Sources that WERE available are
     # in `judgements`, not here.
     unjudged_refs: list[str] = field(default_factory=list)
+    # co-cited refs whose source WAS obtained but withheld from judgement,
+    # because two or more readings of the reference list disagree about which
+    # paper this label names (`refs.label_agreement` returned "disputed" for
+    # it). NOT `unjudged_refs`: an entry here means the source was fetched and
+    # read. `unjudged_refs` means nobody could get to it at all — conflating
+    # the two would report a retrieval gap that does not exist and erase the
+    # disputed-identity gap that does. Deliberately not called a "numbering"
+    # gap: `numbering_verified` already means whether reference *positions* were
+    # confirmed, which is a different question from whether two readings name
+    # the same paper under one label.
+    withheld_refs: list[str] = field(default_factory=list)
     # False when no anchor phrase was found inside the cropped region — which is
     # one block's bbox, so this is NOT "absent from the page". The crop is still
     # written for context, but it carries no red box and must not claim one

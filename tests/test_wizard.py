@@ -140,6 +140,65 @@ def test_clean_path_expands_tilde(monkeypatch):
     assert wizard.clean_path("~/nope.pdf") == Path.home() / "nope.pdf"
 
 
+def test_the_case_folder_accepts_a_dragged_quoted_path(tmp_path, monkeypatch):
+    """The one path prompt that skipped `clean_path`.
+
+    A quoted answer made the case name start with a literal `'`, so the path was
+    relative: the audit was written under a directory named `'` beneath the cwd,
+    while every line the run printed named an absolute folder that did not
+    exist. Finder's drag-and-drop adds those quotes whenever the path holds a
+    space, so this is the default way to reach it, not an unusual one.
+
+    The other three prompts were immune only by accident — they check
+    `.exists()`, and a quoted path fails that. A case folder is *created*, so
+    nothing ever contradicted it.
+    """
+    target = tmp_path / "EuroRad Review" / "untitled folder"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wizard.Prompt, "ask", staticmethod(lambda *a, **k: f"'{target}'"))
+    assert wizard._ask_case(tmp_path / "paper.pdf") == target
+
+
+def test_a_relative_case_folder_is_accepted_as_the_path_it_resolves_to(tmp_path, monkeypatch):
+    """`-c demo_case` is in the README, so a relative answer is legitimate.
+
+    What it may not do is stay relative. The wizard prints the equivalent
+    command and hands the path to `run`, and a relative path means both of those
+    are only true from the directory the user happened to be standing in.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wizard.Prompt, "ask", staticmethod(lambda *a, **k: "demo_case"))
+    assert wizard._ask_case(tmp_path / "paper.pdf") == (tmp_path / "demo_case").resolve()
+
+
+def test_a_resolved_case_folder_is_echoed_so_a_mangled_path_is_visible(tmp_path, monkeypatch, capsys):
+    """The whole point of resolving rather than rejecting.
+
+    A quoted answer used to degrade into a *relative* name beginning with a
+    literal quote. Resolving it silently would still write the audit somewhere
+    the user did not name; printing the resolution puts the mistake on screen
+    before the first paid model call rather than after all ~32 of them.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wizard.Prompt, "ask", staticmethod(lambda *a, **k: "'a b"))
+    case = wizard._ask_case(tmp_path / "paper.pdf")
+    assert case == (tmp_path / "'a b").resolve()
+    assert str(case) in _plain(capsys.readouterr().out)
+
+
+def test_the_working_directory_is_refused_as_a_case_folder(tmp_path, monkeypatch):
+    """`default_case` already refuses it; the prompt may not be the way around.
+
+    Whitespace arrives here as `.`, so this is also the blank-answer path — and
+    a case folder that *is* the working directory cannot be told apart from
+    whatever else the user keeps there.
+    """
+    answers = iter(["   ", str(tmp_path / "case")])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wizard.Prompt, "ask", staticmethod(lambda *a, **k: next(answers)))
+    assert wizard._ask_case(tmp_path / "paper.pdf") == tmp_path / "case"
+
+
 # --- DOI detection: replacing a definition with a yes/no -------------------
 
 
@@ -604,20 +663,57 @@ def test_a_path_with_a_quote_is_still_one_argument(tmp_path):
 # --- the cost estimate must not be exceeded by the documented retry ---------
 
 
-def test_the_worst_case_call_count_includes_the_retry(tmp_path):
+def test_the_worst_case_call_count_includes_the_retry(tmp_path, monkeypatch):
     """The wizard promised "up to N model calls" from one extraction plus one
     per cited source. `_ask` retries once, so a single-source run advertised as
-    2 could issue 3. The ceiling now comes from check.py's own attempt count,
-    so the two cannot drift."""
-    from papertrace.check import ASK_ATTEMPTS
+    2 could issue 3. The ceiling now comes from ask.py's own attempt count,
+    so the two cannot drift.
 
+    Both figures also carry the reference-list reading `refs` now makes before
+    `check` ever runs, WHEN the wizard's own backend choice ("auto") would
+    actually attempt it: one un-retried call, so it adds exactly 1 to each side
+    of the estimate rather than multiplying through the retried figure — this
+    task adds that call on top of the `ASK_ATTEMPTS * (1 + cited_source_calls)`
+    shape a previous task already moved `model_calls_max` to, rather than
+    reverting it back to a flat `ASK_ATTEMPTS * cited_source_calls`.
+
+    Pinned with `resolve_backend` forced to report docling rather than left to
+    whatever this machine happens to have installed — `workload()` derives the
+    +1 from it (N5 of the Task 6 re-review: not `docling_available()`, which is
+    only a proxy for what `resolve_backend("auto")` actually resolves to), and
+    a test whose expected numbers depend on the host environment is not really
+    pinning anything.
+    """
+    from papertrace.ask import ASK_ATTEMPTS
+
+    monkeypatch.setattr(wizard, "resolve_backend", lambda backend: "docling")
+    pdf = _one_pager(tmp_path / "m.pdf",
+                     "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
+    w = wizard.workload(pdf)
+
+    assert w["model_calls"] == 3, w
+    assert w["model_calls_max"] == 1 + ASK_ATTEMPTS * (1 + 1), w
+    assert w["model_calls_max"] >= w["model_calls"]
+
+
+def test_the_worst_case_call_count_drops_the_reflist_call_on_a_pymupdf_only_install(
+    tmp_path, monkeypatch
+):
+    """`run_wizard` always requests `backend="auto"`, which resolves to pymupdf
+    when docling is not importable — and on a pymupdf run the flat second
+    reading is skipped as identical to the first, so the reference-list call
+    is never attempted either (Major 2 / Minor 3 of the Task 6 review: the
+    base estimate must not advertise a call this run's own backend cannot
+    produce)."""
+    from papertrace.ask import ASK_ATTEMPTS
+
+    monkeypatch.setattr(wizard, "resolve_backend", lambda backend: "pymupdf")
     pdf = _one_pager(tmp_path / "m.pdf",
                      "Title\nOne sentence citing [1].\nReferences\n[1] A. 2020.")
     w = wizard.workload(pdf)
 
     assert w["model_calls"] == 2, w
-    assert w["model_calls_max"] == 1 + ASK_ATTEMPTS * 1, w
-    assert w["model_calls_max"] >= w["model_calls"]
+    assert w["model_calls_max"] == ASK_ATTEMPTS * (1 + 1), w
 
 
 def test_the_printed_estimate_does_not_promise_a_ceiling_it_can_exceed():
@@ -748,14 +844,18 @@ def test_the_cost_estimate_shrinks_with_the_limits_and_never_grows(tmp_path):
         "A range here [7-9] citing three.",
     ])
     w = wizard.workload(pdf)
-    assert w["model_calls"] == 1 + 6
+    # one extraction + one reference-list reading + one per cited source. The
+    # reference-list call survives every limit — it reads the bibliography, not
+    # the claims — so it is a constant in each figure below rather than
+    # something `--max-claims` can take away.
+    assert w["model_calls"] == 1 + 1 + 6
 
     first = wizard.apply_limits(w, max_claims=1, max_sources=None)
-    assert first["model_calls"] == 1 + 1, "the first place cites one source"
+    assert first["model_calls"] == 1 + 1 + 1, "the first place cites one source"
     capped = wizard.apply_limits(w, max_claims=None, max_sources=2)
-    assert capped["model_calls"] == 1 + 2
+    assert capped["model_calls"] == 1 + 1 + 2
     both = wizard.apply_limits(w, max_claims=2, max_sources=2)
-    assert both["model_calls"] == 1 + 2
+    assert both["model_calls"] == 1 + 1 + 2
     none = wizard.apply_limits(w, max_claims=None, max_sources=None)
     assert (none["model_calls"], none["model_calls_max"]) == (w["model_calls"], w["model_calls_max"])
     for limited in (first, capped, both):

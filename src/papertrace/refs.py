@@ -8,8 +8,9 @@ fact-check step reports those claims as unverifiable instead of guessing.
 
 from __future__ import annotations
 
+import itertools
 import re
-import unicodedata
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +24,7 @@ from .models import (
     _URL_RE,
     RefEntry,
     Supplement,
+    _fold,
     _title_tokens,
     looks_like_reference,
     titles_match,
@@ -58,6 +60,53 @@ ProgressCb = Callable[[RefEntry], None]
 # parsing
 # ---------------------------------------------------------------------------
 
+# A bibliography docling rendered as a markdown table. These rows are CONTENT.
+# The opposite rule is right in the body — `cli._body_citation_labels` skips
+# table blocks because a results table's `[51, 77]` has the same syntax as a
+# citation group — and the two do not conflict because `references_span` has
+# already decided this text IS the reference list. Never call this on body text.
+_TABLE_SEP_ROW = re.compile(r"^\|[\s:|-]*\|\s*$")
+_TABLE_ROW = re.compile(r"^\|(.*)\|\s*$")
+# the numeral must be the WHOLE cell: `2017;19` begins with digits and is a
+# volume, and this module already has the `a-1061` scar from reading an issue
+# number as a year
+_NUMERAL_CELL = re.compile(r"^\(?(\d{1,3})\)?\s*[.):\]]?$")
+
+
+def _unwrap_table_rows(text: str) -> str:
+    """Rewrite a bibliography's table rows as bullets, so one reader sees one shape.
+
+    A pre-pass rather than a branch inside `_parse_bulleted`, because that
+    function runs only when the primary path found NOTHING: a list half flat
+    text and half table would keep the flat half and drop the table half with
+    nothing able to notice.
+
+    Emitting a bullet — `- 7. Weston AD, …` — is deliberate. The primary marker
+    regex cannot see it (`\\s*` cannot cross `-`), so flat-list behaviour stays
+    byte-identical and the table case routes through `_parse_bulleted`, which is
+    where the printed-numeral logic already lives.
+    """
+    out: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if _TABLE_SEP_ROW.match(s):
+            out.append("")  # layout, never content — and never glued to an entry
+            continue
+        m = _TABLE_ROW.match(s)
+        if not m:
+            out.append(line)
+            continue
+        cells = [c.strip() for c in m.group(1).split("|")]
+        if cells and (n := _NUMERAL_CELL.match(cells[0])):
+            out.append(f"- {int(n.group(1))}. " + " ".join(c for c in cells[1:] if c))
+        else:
+            # No numeral cell. Two cases, one rule: a wrapped row (`|   | doi:… |`)
+            # and a table whose first row is the tail of the bullet above it —
+            # which is what docling's header row is. Emitted with no marker, so
+            # the existing continuation rule joins it to whatever preceded.
+            out.append("  " + " ".join(c for c in cells if c))
+    return "\n".join(out)
+
 
 def parse_references(text: str) -> list[RefEntry]:
     """Split a References section into numbered entries.
@@ -77,6 +126,7 @@ def parse_references(text: str) -> list[RefEntry]:
     ordinary prose, and splitting on it would invent entries; the ascending-run
     filter is the second guard behind that.
     """
+    text = _unwrap_table_rows(text)  # a pipe row in a bibliography is a reference
     marker = re.compile(
         r"(?:(?<=\n)|\A)\s*\[?(\d{1,3})[\].:]?\s+"  # line start: `1.` `[1]` `1 `
         r"|\[(\d{1,3})\]\s+",  # bracketed, anywhere in the line
@@ -165,6 +215,37 @@ def _parse_bulleted(text: str) -> list[RefEntry]:
         # entry's identifiers often live in the half that was cut off
         return [_entry(e.num, e.raw) for e in entries]
 
+    printed = [n for n in numerals if n is not None]
+
+    if printed and _numerals_agree_with_position(numerals):
+        # positional, and corroborated by every numeral that survived
+        return [_entry(str(i), _strip_printed_numeral(raw)) for i, raw in enumerate(items, 1)]
+
+    if printed:
+        # Printed numerals exist and CONTRADICT their positions, so an entry
+        # above them was merged or split: the printed reading is unavailable and
+        # the positional one is known wrong. Refuse from the first disagreement
+        # on, reusing `boundary_ambiguous` — whose documented meaning is already
+        # "nothing derived from this raw may be trusted to name a paper", and
+        # which `resolve_entry` honours by returning `no_doi` without fetching.
+        first = next(i for i, n in enumerate(numerals, 1) if n is not None and n != i)
+        out: list[RefEntry] = []
+        for i, raw in enumerate(items, 1):
+            e = _entry(str(i), _strip_printed_numeral(raw))
+            if i >= first:
+                e.boundary_ambiguous = True
+                e.doi = None
+                e.reason = (
+                    f"printed numbering contradicts position from entry {first} on — the "
+                    f"converter kept a numeral reading [{numerals[first - 1]}] at position "
+                    f"{first}, so an entry above it was merged or split; not resolved rather "
+                    "than risk judging a claim against the wrong paper"
+                )
+            out.append(e)
+        return out
+
+    # No numeral anywhere: the Nature-family case the docstring describes, where
+    # position really is the only reading available. `reconcile` marks it unverified.
     return [_entry(str(i), _strip_printed_numeral(raw)) for i, raw in enumerate(items, 1)]
 
 
@@ -187,6 +268,21 @@ def _usable_printed_numerals(numerals: list[int | None]) -> bool:
     if any(b <= a for a, b in zip(seen, seen[1:], strict=False)):
         return False
     return len(seen) * 2 >= len(numerals)
+
+
+def _numerals_agree_with_position(numerals: list[int | None]) -> bool:
+    """Does every printed numeral equal its item's position in the list?
+
+    The one question that can be asked of a PARTLY numbered list, and a
+    generalisation of `_usable_printed_numerals`' `seen[0] == 1` rather than a
+    weakening of it: when item 1 carries a numeral, its ordinal IS 1.
+
+    Where the numerals that survived the converter sit at exactly the positions
+    they name, the positional reading is not a guess — it is the printed
+    reading, corroborated wherever the printing survived. Where they disagree,
+    something above them was merged or split and neither reading is available.
+    """
+    return all(n is None or n == i for i, n in enumerate(numerals, 1))
 
 
 # `1 . Rivara FP` and `1. Rivara FP` — the list numeral the converter turned
@@ -488,17 +584,63 @@ class Reconciliation:
 
     source: str = "parsed"  # crossref | parsed
     verified: bool = False
-    # the chosen reading matched the body's labels, but the OTHER reading
-    # disagreed. `_covers` is a test of extent, not of content, so a second
-    # independent reading calling the list wrong is worth the reader's eye even
-    # when the count checks out — burying it in a field no template renders was
-    # how a compensating parse error could pass unmentioned.
+    # The chosen reading matched the body's labels, and the two readings stop
+    # naming the same paper at or below a label the body cites. `_covers` is a
+    # test of extent, not of content, so a second independent reading calling the
+    # list wrong is worth the reader's eye even when the count checks out —
+    # burying it in a field no template renders was how a compensating parse
+    # error could pass unmentioned. It is *not* "the other reading failed
+    # `_covers`": that fires on a deposit identical for every cited label and
+    # longer by two references nobody cites.
     contested: bool = False
     note: str = ""
     unverified_from: int | None = None  # first label whose numbering is in doubt
     body_labels: int = 0
     crossref_count: int | None = None
     parsed_count: int = 0
+    # Which labels are missing and which are duplicated, by name — always about
+    # the PARSED list, whichever reading was chosen. A difference of two totals
+    # cannot reveal a duplicate at all, and a merge-plus-split keeps the count —
+    # the case `_covers` documents itself as blind to. The `numerals_*` keys keep
+    # their spelling because they are the published wire format; the values are
+    # `e.num` labels, positional on three of the four parse paths.
+    ledger: dict = field(default_factory=dict)
+    # A second, independent axis from `verified`/`contested` above: whether
+    # EVERY label the body cites was agreed by two or more readings, named.
+    # `numbering_verified` keeps its exact current meaning through this whole
+    # plan — nothing here may redefine it or be read as a substitute for it.
+    corroborated: bool = False
+    corroborating_readings: list[str] = field(default_factory=list)
+    # Citation labels the readings did not agree on — the set
+    # `label_agreement` marked `disputed`, and the set whose verdicts a
+    # downstream withholding filter must drop.
+    labels_disputed: list[str] = field(default_factory=list)
+    # A subset of the line above: those disputed because nothing in the
+    # readings could be COMPARED, rather than because they named different
+    # papers. `None` means the split was never computed.
+    labels_uncomparable: list[str] | None = None
+    # Labels that WERE in `labels_disputed` and were then settled — by a
+    # targeted model call the user accepted, or by choosing one reading whole.
+    labels_resolved: list[str] = field(default_factory=list)
+    # How a disputed numbering was left, when the interactive escalation ran.
+    # "" means the escalation never ran — nothing here has fired yet.
+    choice: str = ""  # "" | withheld | llm_resolved | parsed | pymupdf
+    # Who is responsible for `choice`. "user" is what makes an escalation
+    # honest: a person consenting to proceed is an input, never evidence that
+    # the numbering was verified.
+    chosen_by: str = ""  # "" | default | user
+    # What the RESOLUTION call — `reflist.resolve_disputed`, made only when a
+    # person asked for it — cost and produced. Carried here so
+    # `_refs_pipeline` can persist it beside the reflist call's own
+    # provenance: a model call that was made, paid for, verified field by
+    # field and allowed to change which papers are judged existed nowhere
+    # structured, while the `reflist_*` fields said no model read the list.
+    # "" / [] mean never computed, never "it produced nothing".
+    resolution_outcome: str = ""
+    resolution_failure: str = ""
+    resolution_model: str = ""
+    resolution_fields_discarded: list[str] = field(default_factory=list)
+    resolution_readings: list[str] = field(default_factory=list)
 
 
 def _covers(body: set[str], entries: list[RefEntry]) -> bool:
@@ -528,6 +670,45 @@ def _covers(body: set[str], entries: list[RefEntry]) -> bool:
         return False
     nums = {e.num for e in entries}
     return body <= nums and len(entries) == max(int(x) for x in body)
+
+
+def _label_list(labels: list[str]) -> str:
+    """`["4", "5"]` → `[4], [5]` — citation labels as the reader sees them."""
+    return "[" + "], [".join(labels) + "]"
+
+
+def _as_sentence(text: str) -> str:
+    """One of the `CROSSREF_*` notes as a sentence that can stand on its own.
+
+    They are written to be spliced after a semicolon, so they open lowercase; the
+    caller's join supplies the closing stop. Fixed here rather than in the
+    constants, which the two verified branches still splice mid-sentence.
+    """
+    text = (text or "").strip()
+    return text[:1].upper() + text[1:] if text else ""
+
+
+def _refusals_unconfirm(rec: Reconciliation, entries: list[RefEntry]) -> None:
+    """An extent check cannot confirm a numbering the parser itself refused.
+
+    `_covers` is blind to a refused entry by construction. A refusal leaves the
+    positional label in place — the entry needs one to be a dict key, a slug and
+    a download path — so `nums` is still `{1..N}`, the subset test is satisfied
+    by exactly the labels in doubt, and only the length test can bite, which a
+    refusal does not change. Both refusal routes land here: the duplicate label
+    inside its own span, and the printed numeral that contradicts its position.
+    """
+    refused = [e.num for e in entries if e.boundary_ambiguous]
+    if not refused:
+        return
+    numeric = sorted(int(n) for n in refused if n.isdigit())
+    rec.verified = False
+    rec.unverified_from = numeric[0] if numeric else 1
+    rec.note = (
+        f"{rec.note.rstrip('. ')}. But the parser refused to number "
+        f"{_label_list(refused)}, so the count cannot confirm this numbering — the labels "
+        "it counted are the ones in doubt, and each affected entry carries its own reason"
+    )
 
 
 def _same_work(x: RefEntry, y: RefEntry) -> bool:
@@ -576,6 +757,302 @@ def _first_divergence(a: list[RefEntry], b: list[RefEntry]) -> int | None:
     return None
 
 
+# Published so a consumer has something to check membership against, rather
+# than trusting a bare string a typo could silently narrow to three states.
+LABEL_AGREEMENT = ("agreed", "single", "disputed", "absent")
+
+# Why a label is `disputed`, for the one consumer that needs to tell them
+# apart. `""` is every non-disputed state. Not persisted as a per-label map:
+# the manifest publishes `labels_uncomparable`, one subset, because that is
+# the distinction that changes what a reader should do.
+DISPUTE_CAUSES = ("duplicate", "contradiction", "uncomparable")
+
+
+def _comparably_same(x: RefEntry, y: RefEntry) -> bool | None:
+    """Do these two readings name the same paper — or is there no way to tell?
+
+    Three answers, `True | False | None`, and `None` is the load-bearing one:
+    it means *cannot tell*, and it is a third answer rather than a collapsed
+    `False` for a measured reason. This is the same convention
+    `models.titles_match` publishes, for the same reason in the mirror
+    direction — the two are siblings answering opposite questions with one
+    three-valued vocabulary, so neither has to launder ignorance into an
+    answer its caller will act on.
+
+    `_same_work` is the other sibling and is deliberately untouched. It asks
+    *"is there evidence these differ?"* and answers True when there is nothing
+    comparable, which is right for `_first_divergence`: silence must not
+    manufacture a divergence. This asks *"is there evidence these agree?"*, so
+    silence must not manufacture agreement either — but it must not manufacture
+    DISAGREEMENT either, which is what returning `False` here did.
+
+    Measured, both ways round. With `_same_work` as the comparator, a garbled
+    DOI-less entry paired with `Fujita S (2023) Characterization of brain
+    volume changes…` came back True and the label was reported `agreed` — two
+    readings naming demonstrably unrelated papers corroborating each other.
+    With a two-valued `False` here, a Crossref deposit of bare DOIs (the
+    documented `_reference_raw` fallback, 49 of 52 references on the paper
+    that prompted this) disputed every label it voted on, while the parse and
+    the flat reading agreed perfectly — an audit with no verdicts in it.
+    `None` is what neither of those can say.
+    """
+    if x.doi and y.doi:
+        return x.doi.lower() == y.doi.lower()
+    if not _title_tokens(x.raw) or not _title_tokens(y.raw):
+        return None  # nothing to compare: not agreement, and not disagreement
+    return _same_work(x, y)
+
+
+def _says_something_comparable(e: RefEntry) -> bool:
+    """Does this entry carry anything a comparison could ever have used?
+
+    Per ENTRY, not per pair. A voter that carries a DOI has said something
+    comparable even where no other reading printed one; a voter with neither a
+    DOI nor a single title token has said nothing any reading could ever agree
+    or disagree with, and `label_agreement` treats a label ALL of whose voters
+    are like that as `disputed` rather than `single`.
+    """
+    return bool(e.doi) or bool(_title_tokens(e.raw))
+
+
+# Readings whose entries are COPIED, value by value, out of other readings
+# that vote here in their own right. `reflist.propose` may only reproduce what
+# text A or text B already printed — so the model agreeing with one of them is
+# one text read twice, not two readings agreeing, and naming it as
+# corroboration would make `numbering_corroborated` true on the strength of a
+# reading echoing another voter. It still votes: a DISAGREEMENT from it is
+# real, and disagreeing is the only power the safety property grants it.
+DERIVED_READINGS = ("llm",)
+
+
+def label_agreement(
+    candidates: dict[str, list[RefEntry]],
+    body: set[str],
+) -> dict[str, str]:
+    """Per cited label, do the readings that carry it still name one paper?
+
+    The join key is `e.num` — the printed numeral, a recorded fact — never
+    position. `_first_divergence` cannot be reused here: it zips two readings
+    by POSITION, so on a reading that split one entry into two, it would
+    compare reading A's 6th entry against reading B's 6th and report a
+    disagreement (or a false agreement) about the wrong label entirely. This
+    feature's whole point is the label, so the join has to be on it.
+
+    A `boundary_ambiguous` entry does not speak for its label (invariant 5):
+    it is a reading that has already refused to say what paper this label
+    names, and counting it as a vote would turn that refusal into evidence.
+    That can leave a label `single`, which is safe precisely because a refusal
+    is self-limiting — `resolve_entry` honours `boundary_ambiguous` by setting
+    `no_doi` and fetching nothing, so no verdict rests on it either way.
+
+    A **duplicate** is not self-limiting and is therefore treated harder: a
+    reading carrying one label twice makes that label `disputed` outright. Both
+    carriers have DOIs, so one of them really would be downloaded, read and
+    judged — and which one the printed numeral meant is exactly the question
+    the duplicate raises. Downgrading that to `single` on the strength of the
+    other reading would let a verdict rest on the coin-flip.
+
+    Any disagreement among the voters that remain is `disputed`, never a
+    majority (invariant 3): "a non-unique match is refused, never ranked" is
+    this codebase's own rule for exactly this shape of choice, applied here to
+    readings instead of provided files.
+
+    A voter that **cannot be compared** abstains rather than dissenting — see
+    `_label_state` for the whole rule and for the one case where it does not
+    apply.
+    """
+    return {label: _label_state(candidates, label)[0] for label in body}
+
+
+def _label_key(label: str) -> tuple[int, int, str]:
+    """Numeric labels in numeric order, anything else after them, by name.
+
+    Lives here, the lower layer, because three call sites need it —
+    `uncomparable_labels` below, `reflist.propose`'s numbering findings and
+    `cli`'s `labels_disputed` — and three inline copies of one tuple key is
+    how the same labels come to be sorted two ways in one report.
+    """
+    return (0, int(label), "") if label.isdigit() else (1, 0, label)
+
+
+def uncomparable_labels(candidates: dict[str, list[RefEntry]], body: set[str]) -> list[str]:
+    """The disputed labels whose cause was that nothing could be COMPARED.
+
+    A documented subset of what `label_agreement` calls `disputed`, and a
+    subset by construction: both are read off `_label_state`, so the pair
+    cannot contradict each other the way `seen_in` and `labels_disputed` once
+    did. It changes nothing about what is withheld — `labels_disputed` stays
+    the single list that drives withholding — and exists because the two
+    causes warrant different reader actions. "The readings named different
+    papers" means one of them is wrong and somebody should look; "nothing in
+    them could be compared" means no conflict is known and the withholding is
+    precautionary, which on a bare-DOI deposit is both common and benign.
+    """
+    return sorted(
+        (label for label in body if _label_state(candidates, label)[2] == "uncomparable"),
+        key=_label_key,
+    )
+
+
+def _label_state(
+    candidates: dict[str, list[RefEntry]], label: str
+) -> tuple[str, list[str], str]:
+    """One label's agreement state, the readings that earned an `agreed`, and why.
+
+    The single place the rule lives: `label_agreement` publishes the state and
+    `corroborating_readings` intersects the names, so the two can never drift
+    into two different definitions of what agreeing means.
+
+    The comparison is pairwise through `_comparably_same`, which has three
+    answers:
+
+    * any pair `False` — two readings actively name different papers — is
+      `disputed`, with no majority and no tie-break.
+    * a pair that is `None` is not a vote against anything. The voter is
+      EXCLUDED from the comparison rather than counted as dissent: a Crossref
+      deposit of bare DOIs can be compared with nothing, and counting that as
+      disagreement withheld every verdict in a run whose two parses agreed
+      perfectly.
+    * excluding it can leave one reading standing, which is `single` — no
+      corroboration claimed, no verdict withheld. That is the state a
+      one-reading run has always been in, and it is the honest one: one
+      reading spoke and nothing agreed or disagreed with it.
+
+    The exception, and it is one character away from the rule above: where NO
+    voter said anything comparable at all (`_says_something_comparable` false
+    for every one of them) the label is `disputed`, not `single`. `absent`
+    would be false — readings do carry it; `single` would be false — none of
+    them spoke comparably; `agreed` is the laundering this function exists to
+    refuse. Nothing establishes that these name one paper, and withholding is
+    the honest answer to that.
+
+    So `disputed` carries three causes — a duplicate, a contradiction, and
+    nothing comparable — and the THIRD returned value is which of them, from
+    `DISPUTE_CAUSES`. They warrant different reader actions: a contradiction
+    means one reading is wrong and somebody should look; nothing comparable
+    means no conflict is known and the withholding is precautionary, which on
+    a bare-DOI deposit is the benign and common case. `uncomparable_labels`
+    is the published subset built from this, and it is a subset BY
+    CONSTRUCTION because it is read off the same call that decides the state.
+
+    The second returned value is the readings credited with the agreement,
+    which is not simply the voters: `DERIVED_READINGS` are excluded, and a
+    label needs two CREDITED readings to reach `agreed`.
+    """
+    voters, duplicated = _label_voters(candidates, label)
+    if duplicated:
+        return "disputed", [], "duplicate"
+    if not voters:
+        return "absent", [], ""
+    if len(voters) == 1:
+        # nothing was compared because there was nobody to compare with — a
+        # different fact from "compared and found uncomparable" below
+        return "single", [], ""
+    concurring: set[str] = set()
+    for (name_x, x), (name_y, y) in itertools.combinations(voters, 2):
+        same = _comparably_same(x, y)
+        if same is False:
+            return "disputed", [], "contradiction"
+        if same:
+            concurring |= {name_x, name_y}
+    if not concurring:
+        if not any(_says_something_comparable(e) for _, e in voters):
+            return "disputed", [], "uncomparable"  # see this docstring's "exception"
+        return "single", [], ""
+    credited = sorted(n for n in concurring if n not in DERIVED_READINGS)
+    return ("agreed", credited, "") if len(credited) >= 2 else ("single", [], "")
+
+
+def _label_voters(
+    candidates: dict[str, list[RefEntry]], label: str
+) -> tuple[list[tuple[str, RefEntry]], bool]:
+    """The `(reading name, entry)` pairs entitled to a vote on this one label,
+    and whether any reading carried it more than once.
+
+    Factored out of `label_agreement` so `corroborating_readings` below can
+    name the readings that actually cast a vote, rather than approximating it
+    a third way. Private: the label-by-label state machine belongs to
+    `label_agreement`, and this is only its inner loop.
+    """
+    voters: list[tuple[str, RefEntry]] = []
+    duplicated = False
+    for name, entries in candidates.items():
+        carriers = [e for e in entries if e.num == label and not e.boundary_ambiguous]
+        if len(carriers) == 1:
+            voters.append((name, carriers[0]))
+        elif carriers:
+            duplicated = True  # see label_agreement's docstring: judgeable, not silent
+    return voters, duplicated
+
+
+def corroborating_readings(candidates: dict[str, list[RefEntry]], body: set[str]) -> list[str]:
+    """Which readings actually voted `agreed` on EVERY cited label — named,
+    sorted, or `[]` if any label failed to reach `agreed` on its own.
+
+    Not `sorted(candidates)`: that names every reading TAKEN, whether or not it
+    carried the label at all. Not `any(e.num in body for e in cand)` either: a
+    reading that carries only SOME cited labels — a model reading that skipped
+    an entry — is not one that agreed on all of them, and a reading whose only
+    carrier of a label is `boundary_ambiguous` cast no vote on it at all. Both
+    were measured to overstate `corroborating_readings` in exactly this
+    function's absence. This runs `_label_state` — the one place the rule
+    lives, the same call `label_agreement` makes — and intersects the readings
+    it credits across every cited label, so a reading is named only when it
+    voted, and agreed, everywhere it was asked to.
+
+    A reading that could not be COMPARED on a label is not credited with it
+    either, and neither is a `DERIVED_READINGS` one: the model's reading is
+    copied out of the other voters' own texts, so naming it here would print
+    "two readings agree" over one text read twice.
+    """
+    names: set[str] | None = None
+    for label in body:
+        state, credited, _ = _label_state(candidates, label)
+        if state != "agreed":
+            return []
+        names = set(credited) if names is None else (names & set(credited))
+    return sorted(names) if names else []
+
+
+def stamp_seen_in(chosen: list[RefEntry], candidates: dict[str, list[RefEntry]]) -> None:
+    """Record, per chosen entry, which readings also carried that work.
+
+    In place, because the entries are already the manifest's. An entry carried
+    by one reading only is the interesting case — especially `["llm"]`, which
+    means no deterministic reading found it at all.
+
+    Matched on the label AND `_comparably_same`, the SAME comparator the
+    agreement axis uses. Stamping on the shared numeral alone would turn a
+    disagreement into provenance — the extent-for-content substitution
+    `_covers` is documented as blind to — and matching through `_same_work`
+    did it anyway: that function gives the benefit of the doubt when either
+    side yields no title tokens, so one manifest published both "two readings
+    contributed this entry" and "the readings do not agree about this label"
+    for the same label in the same run. Only a `True` stamps; `None` — nothing
+    to compare — is not evidence that a reading carried this work.
+
+    Two rules keep `[]` meaning one thing (no reading was established as
+    carrying this work) rather than doubling as "never computed":
+
+    * a chosen entry that IS one of the readings' own objects is credited to
+      that reading by identity, whatever the comparator can or cannot see in
+      it. A garbled entry the parse demonstrably produced must not come back
+      with an empty provenance.
+    * an entry that already carries a `seen_in` keeps it. `cli` stamps after
+      the escalation, and an entry substituted by `reflist.resolve_disputed`
+      records which printed text its values were copied from — a fact this
+      pass cannot recompute, because the readings that disputed the label
+      carry no entry matching the resolved one.
+    """
+    for e in chosen:
+        names = {
+            name
+            for name, cand in candidates.items()
+            if any(o.num == e.num and (o is e or _comparably_same(e, o) is True) for o in cand)
+        }
+        e.seen_in = sorted(names | set(e.seen_in))
+
+
 def reconcile(
     body_labels: set[str],
     crossref: list[RefEntry] | None,
@@ -603,36 +1080,82 @@ def reconcile(
     parse_ok = _covers(body_labels, parsed)
     cited = max((int(x) for x in body_labels), default=0)
 
+    # Where the two readings stop naming the same paper — the only question that
+    # can support `contested`. "The other reading failed `_covers`" cannot:
+    # `_covers` is an extent test requiring `len == max(body)` exactly, so a
+    # deposit that agrees about every cited label and merely carries two more
+    # fails it — and publishers routinely deposit references cited only in a
+    # supplement. `_first_divergence` returns `min(len)+1` where the readings
+    # agree as far as the shorter one goes, which is what excludes a deposit that
+    # is only longer; a divergence at or below `cited` is a disagreement about an
+    # entry some claim is judged against.
+    divergence = (
+        _first_divergence(crossref, parsed) if crossref is not None and parsed else None
+    )
+    contested = divergence is not None and divergence <= cited
+
+    nums = [e.num for e in parsed]
+    counts = Counter(nums)
+    rec.ledger = {
+        "labels_detected": len(body_labels),
+        "labels_max": cited,
+        "labels_absent": sorted(
+            (str(i) for i in range(1, cited + 1) if str(i) not in body_labels), key=int
+        ),
+        "entries_parsed": len(parsed),
+        "numerals_distinct": len(counts),
+        "numerals_duplicated": sorted((n for n, c in counts.items() if c > 1), key=int),
+        "numerals_absent": sorted(
+            (str(i) for i in range(1, cited + 1) if str(i) not in counts), key=int
+        ),
+    }
+
     if cr_ok:
         # both matching is not a tie to break: prefer the deposit, whose DOIs
         # are already resolved, which skips the title search that has been this
         # module's richest source of wrong-paper bugs
         rec.source, rec.verified = "crossref", True
-        rec.contested = not parse_ok and bool(parsed)
+        rec.contested = contested
         rec.note = (
             f"the publisher's deposited list has {len(crossref)} references and the "
             f"manuscript cites [1]-[{cited}] — they agree"
-            + (f"; the parsed list has {len(parsed)}, which does not, so it was not used"
-               if rec.contested else "")
         )
+        # this clause is about extent, so it stays on the extent test: a parse
+        # that does not account for the body's labels was not used, whether or
+        # not it also diverges from the deposit
+        if not parse_ok and parsed:
+            rec.note += f"; the parsed list has {len(parsed)}, which does not, so it was not used"
+        if rec.contested:
+            rec.note += (
+                f"; and the two readings stop naming the same paper at [{divergence}], "
+                "which is an entry the body cites"
+            )
+        _refusals_unconfirm(rec, crossref)
         return list(crossref), rec
 
     if parse_ok:
         rec.source, rec.verified = "parsed", True
-        rec.contested = crossref is not None
+        rec.contested = contested
         rec.note = (
             f"the parsed list has {len(parsed)} references and the manuscript cites "
             f"[1]-[{cited}] — they agree"
         )
-        if crossref is not None:
+        if rec.contested:
             rec.note += (
-                f"; the publisher deposited {len(crossref)}, which does not. The count "
-                "checks out, but a second independent reading calls this list wrong — "
-                "and a count cannot tell a right list from one that merged two "
-                "references and split another"
+                f"; the publisher deposited {len(crossref)}, and the two readings stop "
+                f"naming the same paper at [{divergence}]. The count checks out, but a "
+                "second independent reading calls this list wrong — and a count cannot "
+                "tell a right list from one that merged two references and split another"
+            )
+        elif crossref is not None:
+            rec.note += (
+                f"; the publisher deposited {len(crossref)}, which does not match the "
+                "body's labels — but the two readings agree about every entry the body "
+                "cites, so nothing here contradicts this numbering"
             )
         elif crossref_absent:
             rec.note += f"; {crossref_absent}"
+        _refusals_unconfirm(rec, parsed)
         return list(parsed), rec
 
     # Nothing matched. Use the parse — it is at least a reading of the paper in
@@ -646,9 +1169,7 @@ def reconcile(
     # deposit have no common failure mode. Only where they diverge is the
     # numbering actually in doubt. With one reading there is no such evidence,
     # and claiming a divergence point would present unchecked entries as checked.
-    rec.unverified_from = (
-        _first_divergence(crossref, parsed) if crossref is not None and parsed else 1
-    )
+    rec.unverified_from = divergence if crossref is not None and parsed else 1
     if not body_labels:
         # A third fact, not a failure of either candidate: the arbiter does not
         # exist. Superscript-numeric styles are the common case and the numbering
@@ -678,11 +1199,37 @@ def reconcile(
         )
         return chosen, rec
 
-    detail = f"the manuscript cites [1]-[{cited}], the parsed list has {len(parsed)} references"
-    if crossref is not None:
-        detail += f" and the publisher deposited {len(crossref)}"
-    elif crossref_absent:
-        detail += f", and {crossref_absent}"
+    led = rec.ledger
+    # Sentences, not one run-on. The ledger's own em-dash, the duplicate clause's
+    # and the gap clause's used to sit in one sentence with the crossref clause
+    # spliced between them — and `CROSSREF_NO_DOI` carries an em-dash *and* a
+    # full stop of its own, so the rendered sentence appeared to end at "Pass
+    # --doi if the paper does have one" and then resume at "that does not add
+    # up". Four formats print this verbatim.
+    ledger_sentence = (
+        f"the body cites {led['labels_detected']} distinct labels up to [{cited}]; "
+        f"the parsed list holds {led['entries_parsed']} entries carrying "
+        f"{led['numerals_distinct']} distinct labels"
+    )
+    findings: list[str] = []
+    if dup := led["numerals_duplicated"]:
+        findings.append(
+            f"{_label_list(dup)} {'appears' if len(dup) == 1 else 'appear'} more than once"
+        )
+    if gaps := led["numerals_absent"]:
+        findings.append(
+            f"{_label_list(gaps)} {'is' if len(gaps) == 1 else 'are'} carried by no entry"
+        )
+    if not findings:
+        # A duplicate or a gap is only visible where the converter left the
+        # printed numerals in place. Three of `parse_references`' four return
+        # paths number by position, and a positional run is 1..N by
+        # construction — so "none found" there is not "none present".
+        findings.append(
+            "no duplicate or missing label was found, though a duplicate or a gap is "
+            "only visible where the printed numerals survived the converter"
+        )
+    ledger_sentence += " — " + ", and ".join(findings)
     scope = (
         f"Entries from [{rec.unverified_from}] on may name a different paper than the "
         "label they carry, and verdicts on claims citing them are marked accordingly"
@@ -690,9 +1237,21 @@ def reconcile(
         else "The two readings agree with each other entry for entry, so both are "
              "wrong in the same way or the body's labels were read incompletely"
     )
-    rec.note = (
-        f"{detail} — that does not add up, so the numbering could not be confirmed. "
-        + scope
+    # last, because it is about a *third* reading nobody could consult, and it
+    # answers the reader with an action rather than a count
+    if crossref is not None:
+        crossref_sentence = f"The publisher deposited {len(crossref)} references"
+    else:
+        crossref_sentence = _as_sentence(crossref_absent)
+    rec.note = ". ".join(
+        part.rstrip(". ")
+        for part in (
+            ledger_sentence,
+            "That does not add up, so the numbering could not be confirmed",
+            scope,
+            crossref_sentence,
+        )
+        if part
     )
     return chosen, rec
 
@@ -837,7 +1396,10 @@ def _title_check_text(raw: str, page_text: str) -> tuple[str, str]:
     is the same as right — collapsing the first two into the third is how a
     scanned wrong paper passes as the source.
     """
-    page = re.sub(r"\s+", " ", page_text).lower()
+    # folded, not merely lowercased: `found` below is a substring test against
+    # this string and `_title_tokens` returns folded tokens, so an unfolded page
+    # matches none of the diacritic-bearing ones — `kustner` is not in `küstner`
+    page = _fold(re.sub(r"\s+", " ", page_text))
     if not page.strip():
         return TITLE_UNVERIFIABLE, "no readable text on its first page (scanned or image-only)"
     tokens = _title_tokens(raw)
@@ -952,17 +1514,6 @@ def _provided_candidates(entry: RefEntry, provided_dir: Path | None) -> list[Pat
     slug = (entry.slug or "").lower()
     matches = [p for p in _named_for(entry, provided_dir) if not _SUPPLEMENT_RE.search(p.stem)]
     return sorted(matches, key=lambda p: (p.stem.lower() != slug, len(p.stem), p.name))
-
-
-def _fold(text: str) -> str:
-    """Lowercase, with diacritics decomposed away — `İnce` → `ince`.
-
-    `_slug` deletes non-ASCII instead (`[^A-Za-z\\-]`), which is why `İnce O`
-    slugs `nce-2023` and `Müller` slugs `mller`. Folding is what a name
-    comparison needs: a surname that vanished cannot agree with its own paper.
-    """
-    decomposed = unicodedata.normalize("NFKD", text or "")
-    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
 
 
 def _first_surname(raw: str) -> str:

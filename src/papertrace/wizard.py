@@ -25,9 +25,10 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
 from . import config
+from .ask import ASK_ATTEMPTS, claude_available
 from .brand import BANNER
-from .check import ASK_ATTEMPTS, claude_available
 from .ingest import _docling_available as docling_available
+from .ingest import resolve_backend
 from .models import _LABEL_GROUP, _expand_label_group, is_references_heading
 from .refs import DOI_RE
 
@@ -212,6 +213,13 @@ def workload(pdf: Path) -> dict:
     # one extraction call, then one per cited source. Sources are judged in
     # groups, so this is an upper bound on the judging calls, not a promise.
     cited_source_calls = sum(len(g) for g in groups)
+    # `run_wizard` always requests `backend="auto"`, which `resolve_backend`
+    # turns into docling when it is importable and pymupdf otherwise. On a
+    # pymupdf run the flat second reading is skipped as identical to the first
+    # (`cli._needs_flat_reading`'s own predicate) — so the reference-list call
+    # is never attempted either, and the estimate must not promise a call this
+    # run's own backend will not produce.
+    llm_call = 1 if resolve_backend("auto") != "pymupdf" else 0
     return {
         "pages": pages,
         "places": len(groups),
@@ -220,11 +228,22 @@ def workload(pdf: Path) -> dict:
         # how many sources each citation place cites, in reading order — what
         # `apply_limits` cuts to the first N places when the claims are capped
         "group_sizes": [len(g) for g in groups],
-        "model_calls": 1 + cited_source_calls,
-        # the retry is real spend: one extraction plus, per judging call, up to
-        # ASK_ATTEMPTS attempts. Derived from check.py rather than a local
-        # multiplier, so the estimate cannot drift from the policy.
-        "model_calls_max": 1 + ASK_ATTEMPTS * cited_source_calls,
+        # the reference-list reading, 0 or 1. Kept as its own key rather than
+        # only folded into the two totals because `apply_limits` has to add it
+        # back: a limit cuts claims and sources, and this call reads the
+        # bibliography, so no limit can remove it.
+        "reflist_calls": llm_call,
+        # one reference-list reading (when the backend leaves a second text to
+        # check it against), one extraction call, then one per cited source.
+        # The reference-list call gets no retry — `reflist.propose` asks once
+        # and reports what it got — so it adds exactly `llm_call` to the base
+        # figure and to the ceiling, on top of the retried figure below rather
+        # than inside it.
+        "model_calls": 1 + llm_call + cited_source_calls,
+        # the retry is real spend: ASK_ATTEMPTS attempts for extraction, and
+        # ASK_ATTEMPTS attempts per judging call. Derived from ask.py rather
+        # than a local multiplier, so the estimate cannot drift from the policy.
+        "model_calls_max": llm_call + ASK_ATTEMPTS * (1 + cited_source_calls),
         "style_unrecognised": len(groups) == 0,
     }
 
@@ -236,6 +255,11 @@ def apply_limits(w: dict, *, max_claims: int | None, max_sources: int | None) ->
     most N sources obtained means at most N judging calls, one per document.
     Neither figure may exceed the unlimited one, and the retry ceiling is
     derived the way `workload` derives it, so the two cannot drift.
+
+    The reference-list reading survives every limit: it reads the bibliography,
+    not the claims, so `--max-claims` and `--max-sources` cannot remove it.
+    Dropping it here would advertise a ceiling the run then exceeds, which is
+    the one thing a cost estimate may never do.
     """
     sizes = list(w.get("group_sizes") or [])
     if max_claims is not None:
@@ -243,7 +267,14 @@ def apply_limits(w: dict, *, max_claims: int | None, max_sources: int | None) ->
     judging = sum(sizes)
     if max_sources is not None:
         judging = min(judging, max_sources)
-    return {**w, "model_calls": 1 + judging, "model_calls_max": 1 + ASK_ATTEMPTS * judging}
+    reflist = w.get("reflist_calls") or 0
+    return {
+        **w,
+        "model_calls": 1 + reflist + judging,
+        # same shape as `workload`: the reference-list call is not retried, so
+        # it adds to the ceiling rather than being multiplied into it
+        "model_calls_max": reflist + ASK_ATTEMPTS * (1 + judging),
+    }
 
 
 def parse_limit(raw: str) -> int | None:
@@ -272,7 +303,7 @@ def supplement_workload(provided_dir: Path | None, supplement: list[Path]) -> in
 
     Counted from the folder rather than from the manifest because this runs
     before `refs` does. The alternative is to state a price that leaves the
-    supplements out, and check.py's own comment on ASK_ATTEMPTS is the rule
+    supplements out, and ask.py's own comment on ASK_ATTEMPTS is the rule
     here: a cost ceiling that gets exceeded is a false promise about money.
     """
     from .refs import _SUPPLEMENT_RE
@@ -353,6 +384,47 @@ def _ask_paper() -> Path:
             console.print(f"  [red]{path.suffix or 'that'} is not a PDF or DOCX.[/red]")
             continue
         return path
+
+
+def _ask_case(paper: Path) -> Path:
+    """Where the audit is written — the one path answer that creates, not finds.
+
+    Routed through `clean_path` like every other path prompt. It was not, and a
+    quoted answer — what Finder's drag-and-drop produces for any path holding a
+    space — became a *relative* name starting with a literal quote, so the case
+    landed under the cwd while every printed line named an absolute folder that
+    did not exist. The other prompts were immune only because they check
+    `.exists()`; nothing can contradict a folder that is about to be created.
+
+    `default_case` already refused the working directory as a case location for
+    this reason ("appears wherever the user happened to be standing"), so a
+    relative answer here is worth a word rather than a silent accept: it is
+    resolved and the resolution is printed. A relative answer is legitimate —
+    `-c demo_case` is in the README — but it is also what a mangled path
+    degrades into, and the resolved line is the one place the difference shows
+    before any money is spent.
+    """
+    while True:
+        raw = Prompt.ask(
+            "\n[bold]Where should I keep this audit?[/bold]\n  folder",
+            default=_suggest_case(paper),
+        )
+        case = clean_path(raw)
+        if case.is_absolute():
+            return case
+        if case == Path("."):
+            # `default_case` refuses the working directory outright, and an
+            # answer of whitespace arrives here as `.` — the one relative answer
+            # that names no folder of its own
+            console.print(
+                "  [red]That is the folder you are standing in.[/red] An audit needs "
+                "its own,\n  so it cannot be mistaken for the rest of the directory."
+            )
+            continue
+        # soft_wrap: a path broken across two lines is a path a reader skims
+        # past, which is the failure this print exists to prevent
+        console.print(f"  [dim]relative — writing the audit to[/dim] {case.resolve()}", soft_wrap=True)
+        return case.resolve()
 
 
 def _ask_sources(case: Path) -> Path | None:
@@ -539,10 +611,7 @@ def run_wizard() -> None:
             "'coverage not audited' rather than zero gaps.[/dim]"
         )
 
-    case = Path(
-        Prompt.ask("\n[bold]Where should I keep this audit?[/bold]\n  folder",
-                   default=_suggest_case(paper))
-    )
+    case = _ask_case(paper)
     provided = _ask_sources(case)
     supplement = _ask_supplements()
     doi, with_scout = _ask_doi(paper)
@@ -621,7 +690,8 @@ def run_wizard() -> None:
     run_cmd(
         manuscript=paper, case=case, provided=provided, email=email, model=None,
         png=png, backend="auto", with_scout=with_scout, doi=doi, formats=formats,
-        supplement=supplement, max_claims=max_claims, max_sources=max_sources,
+        supplement=supplement, llm_refs=True,
+        max_claims=max_claims, max_sources=max_sources,
     )
 
 

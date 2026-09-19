@@ -11,12 +11,20 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .ask import (  # noqa: F401 — CLAUDE_TIMEOUT and claude_available re-exported here
+    ASK_ATTEMPTS,
+    CLAUDE_TIMEOUT,
+    SITE_CHECK,
+    _ask,
+    _parse_json_array,
+    _parse_json_object,
+    claude_available,
+    for_site,
+    model_for,
+)
 from .models import (
     _LABEL_GROUP,
     JUDGMENT_VERDICTS,
@@ -30,20 +38,44 @@ from .models import (
     is_references_heading,
 )
 
-CLAUDE_TIMEOUT = 600
-
-# `claude -p` fails transiently, so a judging call gets one retry. Named here
-# because the wizard quotes a worst-case cost and the two must not drift:
-# a promised ceiling that the retry can exceed is a false promise about money.
-ASK_ATTEMPTS = 2
-
-# model actually used by the last `claude -p` call, when the CLI reports it —
-# stamped into results.json so the report discloses its judge
-_LAST_MODEL: str | None = None
-
 
 def last_model() -> str | None:
-    return _LAST_MODEL
+    """The model that judged the claims, for the report's `Checker:` line.
+
+    Reads the `check` site rather than one shared global: `refs` calls the same
+    seam now, and a run whose judging made zero calls — every cited source
+    `not_retrieved`, so there is nothing to judge — would otherwise report the
+    reference-list model as the judge of verdicts it never produced.
+    """
+    return model_for(SITE_CHECK)
+
+
+def _ask_with_retry(prompt: str, model: str | None = None) -> str:
+    """Every model call this module makes, attributed to the check stage.
+
+    **Both** of them: the single extraction call and each per-source judging
+    call. Extraction had no retry at all before this, which is why the wizard's
+    advertised ceiling is `ASK_ATTEMPTS * (1 + sources)` and not
+    `1 + ASK_ATTEMPTS * sources` — a reader of this module should not have to
+    find that out from the changelog.
+
+    The retry was a hardcoded second attempt that never read `ASK_ATTEMPTS` —
+    it matched only because the constant is 2. The wizard prints a worst-case
+    bill derived from that constant, and `CHANGELOG.md` records the incident
+    where the advertised ceiling drifted from the real policy, so the two are
+    wired together here rather than left agreeing by coincidence.
+    """
+    with for_site(SITE_CHECK):
+        for attempt in range(ASK_ATTEMPTS):
+            try:
+                return _ask(prompt, model)
+            except (RuntimeError, ValueError):
+                if attempt == ASK_ATTEMPTS - 1:
+                    raise
+        # reached only if ASK_ATTEMPTS < 1, i.e. a policy that forbids the call
+        # it exists to bound. Raised rather than clamped to 1: silently making
+        # one attempt would hide a nonsense setting behind a working run.
+        raise RuntimeError(f"ASK_ATTEMPTS is {ASK_ATTEMPTS} — no model call was attempted")
 
 
 # Text past these limits is never sent to the model, so it is never checked.
@@ -191,69 +223,6 @@ SOURCE (<<SLUG>>):
 """
 
 
-def claude_available() -> bool:
-    return shutil.which("claude") is not None
-
-
-_SCRATCH_CWD: str | None = None
-
-
-def _scratch_cwd() -> str:
-    # /tmp itself is shared and world-writable; a private 0700 directory (one per
-    # process, reused across calls) keeps another local user from planting
-    # anything the judging call would walk into
-    global _SCRATCH_CWD
-    if _SCRATCH_CWD is None:
-        _SCRATCH_CWD = tempfile.mkdtemp(prefix="papertrace-ask-")
-    return _SCRATCH_CWD
-
-
-def _ask(prompt: str, model: str | None = None) -> str:
-    # judging happens wherever the user ran papertrace from — never that repo's own
-    # CLAUDE.md, and never with more than the ability to read the prompt and answer
-    cmd = ["claude", "-p", "--output-format", "json", "--safe-mode", "--tools", ""]
-    if model:
-        cmd += ["--model", model]
-    try:
-        proc = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=CLAUDE_TIMEOUT,
-            cwd=_scratch_cwd(),
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"claude -p timed out after {CLAUDE_TIMEOUT}s") from None
-    if proc.returncode != 0:
-        raise RuntimeError(f"claude -p failed: {proc.stderr.strip()[:400]}")
-    payload = json.loads(proc.stdout)
-    global _LAST_MODEL
-    usage = payload.get("modelUsage")
-    _LAST_MODEL = (
-        payload.get("model")
-        or (next(iter(usage), None) if isinstance(usage, dict) else None)
-        or _LAST_MODEL
-    )
-    return payload.get("result", "")
-
-
-def _parse_json_array(text: str) -> list[dict]:
-    text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.M).strip()
-    start, end = text.find("["), text.rfind("]")
-    if start == -1 or end == -1:
-        raise ValueError(f"no JSON array in model output: {text[:200]}")
-    return json.loads(text[start : end + 1])
-
-
-def _parse_json_object(text: str) -> dict:
-    text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.M).strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1:
-        raise ValueError(f"no JSON object in model output: {text[:200]}")
-    return json.loads(text[start : end + 1])
-
-
 def _ctx_labels(claim: dict) -> list[str]:
     """The `ctx` values one returned claim carries, however it phrased them.
 
@@ -311,7 +280,7 @@ def extract_claims(
         "<<CONTEXTS>>",
         _clip(inventory or "(none found)", CONTEXT_CHAR_LIMIT, "citation contexts", truncations),
     )
-    raw = _ask(prompt + text, model)
+    raw = _ask_with_retry(prompt + text, model)
     data = _parse_json_object(raw)
     cited = [
         ClaimResult(
@@ -929,6 +898,11 @@ def check_claims(
     # honest. "auto" drags docling into an offline test run; "pymupdf" silently
     # downgrades a caller who asked for layout. So there is no default.
     backend: str,
+    # labels `refs.label_agreement` (Task 3) returned "disputed" for — two or
+    # more readings of the bibliography name different papers under this
+    # printed number. None and an empty set behave identically: nothing is
+    # withheld, matching every call site written before this parameter existed.
+    disputed: set[str] | None = None,
 ) -> list[ClaimResult]:
     """Fill verdicts in place. One model call per source that carries claims.
 
@@ -945,31 +919,96 @@ def check_claims(
     paper and not on the papers it is judged against had the asymmetry
     backwards.
     """
+    # set(), not `or set()`: the labels are membership-tested once per cited ref,
+    # and a generator handed in here would be consumed by the first test and read
+    # as empty for every claim after it — a silently partial withholding. Taking
+    # a copy makes any iterable safe and costs one pass over a handful of labels.
+    disputed = set(disputed or ())
     by_slug: dict[str, list[ClaimResult]] = {}
     for c in claims:
         pairs = [(r, _slug_for_ref(manifest, r)) for r in c.refs]
-        avail = [(r, e) for r, e in pairs if e and e.status in ("retrieved", "provided") and e.slug]
+        avail_all = [
+            (r, e) for r, e in pairs if e and e.status in ("retrieved", "provided") and e.slug
+        ]
+        # Partitioned AFTER the retrieval filter above, never before it: a
+        # withheld label must describe a source that was actually fetched and
+        # read. A disputed label that was never retrieved for the ordinary
+        # reasons (paywalled, no DOI, ...) stays exactly that — see the
+        # `avail`/`own` branch below, which never sees it as withheld.
+        #
+        # Withheld and skipped are disjoint BY CONSTRUCTION, not by a rule that
+        # could be forgotten: `skipped` is not in ("retrieved", "provided"), so
+        # a skipped entry never reaches `avail_all` and can never be withheld.
+        # The three reasons a cited source yields no verdict therefore partition
+        # cleanly — not obtainable and skipped land in `unjudged_refs` below,
+        # withheld lands in `withheld_refs`, and no label is ever in both.
+        withheld = [(r, e) for r, e in avail_all if r in disputed]
+        avail = [(r, e) for r, e in avail_all if r not in disputed]
+        c.withheld_refs = sorted({r for r, _ in withheld}, key=lambda r: int(r))
         own = manifest.manuscript_supplements if c.own_supplement else []
+        # Decided HERE, above every branch, so no path can `continue` past it.
+        # What is left after the retrieval filter could NOT be obtained — the
+        # only remaining reason a cited source goes unopened. Computed from
+        # `avail_all`, not `avail`: a withheld label WAS obtained, so it
+        # belongs in `withheld_refs` above, never here.
+        #
+        # The one state it stays empty in is the last clause: a claim where
+        # NOTHING was judged, withheld or provided is `not_retrieved`, and the
+        # verdict is already the whole report — repeating every cited label
+        # here would report the same gap twice, under a field whose published
+        # meaning is the CO-cited ones a surviving verdict did not rest on.
+        # When this assignment lived below the withheld branch's `continue`
+        # instead, a claim citing a withheld label and a paywalled one put the
+        # paywalled one in none of the three accounts a reader has — judged,
+        # withheld, unjudged — so a retrieval gap was erased by a withholding.
+        avail_all_refs = {r for r, _ in avail_all}
+        if avail or own or withheld:
+            c.unjudged_refs = [r for r in c.refs if r not in avail_all_refs]
         if not avail and not own:
-            c.verdict = "not_retrieved"
-            if c.own_supplement:
-                # the paper said exactly where its evidence was and nobody
-                # opened it. That is a retrieval gap, not an uncited assertion.
+            if withheld:
+                # NOT not_retrieved: every one of these sources WAS fetched and
+                # read. not_retrieved would falsely claim the source could not
+                # be obtained; the true reason is that the readings of the
+                # bibliography did not agree on which paper this label names, so
+                # no verdict can safely name the paper it was fetched for.
+                c.verdict = "unchecked"
+                labels = f"[{'], ['.join(c.withheld_refs)}]"
+                # WHICH cause, when the manifest recorded the split, and the
+                # disjunction when it did not: `disputed` covers both "the
+                # readings named different papers" and "nothing in them could
+                # be compared", and asserting the first over the second is the
+                # plausible-looking value this codebase exists to refuse.
+                # Phrased by `disclosures.dispute_causes`, the one producer
+                # every surface uses, so the note and the report cannot
+                # describe one label two ways.
+                from .disclosures import dispute_causes
+
                 c.note = (
-                    "points at this paper's own supplementary material, which was not "
-                    "provided — pass it with --supplement"
+                    f"withheld: at {labels}, {dispute_causes(manifest, c.withheld_refs)}, "
+                    "so the source retrieved under that label may not be the paper the "
+                    "manuscript cites — check the retrieval manifest before relying on "
+                    "this claim"
                 )
             else:
-                # a skipped source is a choice, not a retrieval failure, and the
-                # status word alone reads as one — the run-level scope note
-                # carries the limit that made the choice
-                reasons = {
-                    "skipped on request" if e.status == "skipped" else e.status
-                    for _, e in pairs if e
-                }
-                c.note = (
-                    f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
-                )
+                c.verdict = "not_retrieved"
+                if c.own_supplement:
+                    # the paper said exactly where its evidence was and nobody
+                    # opened it. That is a retrieval gap, not an uncited assertion.
+                    c.note = (
+                        "points at this paper's own supplementary material, which was not "
+                        "provided — pass it with --supplement"
+                    )
+                else:
+                    # a skipped source is a choice, not a retrieval failure, and
+                    # the status word alone reads as one — the run-level scope
+                    # note carries the limit that made the choice
+                    reasons = {
+                        "skipped on request" if e.status == "skipped" else e.status
+                        for _, e in pairs if e
+                    }
+                    c.note = (
+                        f"cited source not available ({', '.join(sorted(reasons)) or 'unknown ref'})"
+                    )
             continue
         # Co-citation is an offer of support: every source cited for this claim
         # was put forward as backing it, so every one that could be obtained is
@@ -1009,10 +1048,6 @@ def check_claims(
                 SourceJudgement(source_slug=s.slug, ref="", kind="own_supplement")
             )
             by_slug.setdefault(s.slug, []).append(c)
-        # what is left here could NOT be obtained — the only remaining reason a
-        # cited source goes unopened
-        avail_refs = {r for r, _ in avail}
-        c.unjudged_refs = [r for r in c.refs if r not in avail_refs]
 
     for slug, group in by_slug.items():
         try:
@@ -1050,10 +1085,7 @@ def check_claims(
                     _clip(annotated.read_text(), SOURCE_CHAR_LIMIT, f"source:{slug}", truncations),
                 )
             )
-            try:
-                raw = _ask(prompt, model)
-            except (RuntimeError, ValueError):
-                raw = _ask(prompt, model)  # one retry — claude -p fails transiently
+            raw = _ask_with_retry(prompt, model)
             verdicts = {v["id"]: v for v in _parse_json_array(raw)}
         except Exception as e:  # noqa: BLE001 — a failed check must never kill the run
             msg = f"{type(e).__name__}: {str(e)[:300]}"

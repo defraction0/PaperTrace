@@ -47,6 +47,66 @@ SOURCE_IDENTITY_TOKEN = "identity was never confirmed"
 REFERENCES_RESUMED_TOKEN = "reference list continued past a section break"
 NUMBERING_TOKEN = "reference numbering could not be confirmed"
 CLAIM_NUMBERING_TOKEN = "cites a reference whose numbering was never confirmed"
+NUMBERING_CONTESTED_TOKEN = "second reading of the reference list disagreed"
+# no apostrophe, matching NO_QUOTE_TOKEN's own rule above: autoescape rewrites
+# one to `&#39;` in the two HTML formats but not in markdown, so a token that
+# carries one passes here and fails the parity test that asserts it verbatim
+# in all four — "reference list's" was tried first and had to be reworded.
+LABELS_DISPUTED_TOKEN = "labels where the reference list readings disagree"
+# `claim_pairing` gains three more states in Task 7 (resolved by a model call,
+# chosen by the user, corroborated by a second agreeing reading) — each needs
+# its own token, the same way ANCHOR_LOCATED_TOKEN / ANCHOR_NOT_LOCATED_TOKEN /
+# ANCHOR_UNKNOWN_TOKEN are one Disclosure key with one token per state actually
+# reached.
+CLAIM_PAIRING_WITHHELD_TOKEN = "verdict withheld — the reference list readings disagree"
+# A DIFFERENT fact from the one above, and it needs its own words: the
+# readings disagree AND nothing was ever fetched under the label, so there is
+# no source that "may not be the paper the manuscript cites" — there is no
+# source. `check.py` keeps such a label out of `withheld_refs` for this
+# reason; this token is how the report keeps the distinction it computed.
+CLAIM_PAIRING_UNRETRIEVED_TOKEN = "the readings disagree, and no source was retrieved for it"
+# "of the printed list", never "of both texts": the call is shown the
+# extractions that HAVE a printed span, which is one on a pymupdf-backend
+# run, and the reading it rules against (the deposit, the model's own) may
+# have none at all. A token is asserted verbatim in all four formats, so it
+# has to stay true in every one of those shapes.
+CLAIM_PAIRING_RESOLVED_TOKEN = "resolved by a model reading of the printed list, accepted by you"
+CLAIM_PAIRING_CHOSEN_TOKEN = "you chose which reading of the reference list to use"
+CLAIM_PAIRING_CORROBORATED_TOKEN = "agreed by every reading of the reference list"
+# no apostrophe, `&`, `<` or `>` in either — same HTML-autoescape rule as
+# LABELS_DISPUTED_TOKEN above, since both are asserted verbatim in two formats
+# that escape and two that do not
+REFLIST_TOKEN = "the reference list was also read by a model"
+NUMBERING_CORROBORATION_TOKEN = "two readings of the reference list agree on every cited label"
+# Task 7 review, M6: without this, a run that resolved 11 of 14 disputed
+# labels says so only on the claims that happen to cite one of them — the
+# withholding disclosure below (`labels_disputed`) already has a run-level
+# counterpart, and the resolution deserves the same one.
+NUMBERING_RESOLUTION_TOKEN = "labels resolved after the reference list readings disagreed"
+# a DIFFERENT token for a DIFFERENT fact — `numbering_corroborated` is a
+# per-label property (every cited label was independently agreed by >= 2
+# readings), while `corroborating_readings` is a per-reading one (this
+# reading agreed on ALL of them). The two can now disagree: every label
+# agreed, but no single reading spans every label. Forcing
+# NUMBERING_CORROBORATION_TOKEN's literal words ("two readings … agree on
+# every cited label") to cover that state would assert something the
+# `corroborating_readings` list — 0 or 1 names — cannot back up.
+NUMBERING_NO_SPANNING_READING_TOKEN = "no single reading agreed on every cited label"
+# The keys `claim_disclosures()` can emit. Declared here, where the producers
+# live, because three of the four report formats filter claim disclosures by
+# explicit key and so drop an unlisted one without erroring. The viewer is
+# generic and would keep rendering it, which is what makes the loss silent.
+CLAIM_KEYS = frozenset(
+    {
+        "anchor",
+        "sources",
+        "unjudged_refs",
+        "no_quote",
+        "supplement_headline",
+        "claim_numbering",
+        "claim_pairing",
+    }
+)
 # no apostrophe, and no `&`, `<` or `>`: a token is asserted as a literal in the
 # HTML formats too, and autoescape would rewrite it there but not in markdown —
 # so the parity test would fail on a difference the reader never sees
@@ -459,6 +519,451 @@ def _numbering(manifest) -> Disclosure:
     )
 
 
+def _numbering_contested(manifest) -> Disclosure | None:
+    """Fires whether or not the numbering was verified.
+
+    `_numbering` is gated on `not verified`, so a contested-but-verified run
+    disclosed nothing in any format — which is the compensating-parse-error case
+    `Reconciliation.contested` was added to catch.
+
+    The text says only what the signal now carries. `contested` was the mere
+    existence of a deposit that failed the extent check, and this said "another
+    reading named different papers" over a deposit identical for every cited
+    label and longer by two references nobody cites. It is now the point where
+    the two readings stop describing one paper, and that point being at or below
+    a label the body cites — which is a disagreement about an entry some verdict
+    rests on, but can still be one reading ending where the other continues.
+    """
+    if not getattr(manifest, "numbering_contested", False):
+        return None
+    return Disclosure(
+        key="numbering_contested",
+        level="warn",
+        token=NUMBERING_CONTESTED_TOKEN,
+        text=(
+            f"A {NUMBERING_CONTESTED_TOKEN} — the reading used here accounts for exactly "
+            "the labels the body cites, but the other reading of the same bibliography "
+            "stops describing the same paper at an entry the body cites: it names a "
+            "different work there, or ends before reaching it. An extent check cannot see "
+            "a parse that merges one pair of references and splits another, so check the "
+            "retrieval manifest against the paper's own reference list before relying on "
+            "a verdict."
+        ),
+        short=f"{NUMBERING_CONTESTED_TOKEN} — the two readings diverge at a cited entry",
+    )
+
+
+def _labels_disputed(manifest) -> Disclosure | None:
+    """Run-level roll-up of every label a claim's verdict was withheld for.
+
+    A reader who stops at the top of the report should see the scope before
+    finding it claim by claim: `claim_pairing` says the same thing per claim,
+    but only for the claims that actually cite one of these labels.
+    """
+    labels = sorted(getattr(manifest, "labels_disputed", None) or [], key=lambda r: int(r))
+    if not labels:
+        return None
+    named = f"[{'], ['.join(labels)}]"
+    return Disclosure(
+        key="labels_disputed",
+        level="warn",
+        token=LABELS_DISPUTED_TOKEN,
+        text=(
+            f"{named} are {LABELS_DISPUTED_TOKEN}: {dispute_causes(manifest, labels)}. "
+            "Every claim citing one had that source withheld from judgement rather "
+            "than risk a verdict about the wrong paper. See each claim's own note "
+            "for which of its citations this affected."
+        ),
+        short=f"{named} {LABELS_DISPUTED_TOKEN}",
+    )
+
+
+def _reflist(manifest) -> Disclosure | None:
+    """The required disclosure for the model reading, across every real outcome.
+
+    Fires on a reading used, a reading discarded, a reading asked for and not
+    obtained, and a reading asked for whose call did not return — never only
+    on success, because silence about an attempt reads as no news. The token
+    is phrased AROUND in every branch, the way `SUPPLEMENT_IDENTITY_TOKEN` is:
+    it is asserted verbatim in all four formats, so a branch where it is not
+    literally true would make one format lie.
+
+    Branches on `reflist_outcome` — one of `reflist.REFLIST_OUTCOMES`, never on
+    whether `reflist_model` is set and never on a single boolean. A boolean
+    cannot tell "never called" apart from "called and failed": that shape of
+    field once sent a failed call (`outcome` would have been `True` either
+    way) down the SAME prose as a successful one, because the failure's own
+    note did not happen to start with the one prefix that branch checked for —
+    a plausible-looking "N values … discarded" in place of an admission that
+    the call never returned at all. `claude -p` also only reports a model name
+    when its own JSON does — a reply naming none is not evidence nothing was
+    asked — so a call that happened, verified cleanly and voted can still
+    leave `reflist_model == ""`; that is a SEPARATE fact from `outcome` and is
+    handled by `named` below, never by conflating the two.
+    """
+    from .reflist import REFLIST_OUTCOMES  # lazy: `.reflist` pulls in `.refs` -> `httpx`
+
+    outcome = getattr(manifest, "reflist_outcome", "") or ""
+    model = getattr(manifest, "reflist_model", "") or ""
+    failure = getattr(manifest, "reflist_failure", "") or ""
+    notes = list(getattr(manifest, "reflist_fields_discarded", []) or [])
+    # a different kind of finding, and it must reach the reader too: a reading
+    # whose own labels do not add up is worth knowing about even when every
+    # value it proposed was printed
+    numbering = list(getattr(manifest, "reflist_numbering_findings", []) or [])
+    # `None` — never `0` as a default — because `0` is a MEASURED value: a
+    # manifest that recorded a real reading (via `model` OR `notes`) without
+    # ever recording this count must not be told apart from one that measured
+    # zero. See `RefManifest.reflist_entries_proposed`'s own docstring.
+    entries_proposed = getattr(manifest, "reflist_entries_proposed", None)
+    # set only where `outcome` below is a GUESS rather than a record — see the
+    # `elif failure:` branch, which is the one inference here that cannot be
+    # backed by positive evidence
+    inferred = False
+    if not outcome:
+        # An older manifest from before `reflist_outcome` existed.
+        # `reflist_fields_discarded` used to be the ONLY slot for "why there
+        # is no reading" too, before `reflist_failure` existed — round 1's
+        # `_llm_reference_reading` stored a failed call there as
+        # `"not obtained — <Exc>: …"` and an unavailable `claude` as
+        # `"not attempted — …"`. Those two prefixes are NOT positive proof of
+        # a reply (the exact false-success shape N1 was raised about, now
+        # reachable again on the LOAD path if they were counted as discarded
+        # values); a note without either prefix — `"[2] journal"` — is.
+        failure_notes = [n for n in notes if n.startswith(("not obtained — ", "not attempted — "))]
+        value_notes = [n for n in notes if n not in failure_notes]
+        if model or value_notes:
+            # A reported model name AND a genuinely discarded VALUE are each
+            # positive proof a call happened and a reply was obtained — settle
+            # as "read" from either, not from `model` alone (a real, unnamed
+            # reading with discarded fields but no `reflist_outcome` used to
+            # lose its required disclosure entirely).
+            outcome = "read"
+        elif failure_notes:
+            old = failure_notes[0]
+            outcome = "failed" if old.startswith("not obtained") else "not_attempted"
+            failure = failure or old.split(" — ", 1)[-1]
+        elif failure:
+            # A `failure` reason alone says SOMETHING was asked for even
+            # though which state it reached was never recorded; treat it as
+            # "not_attempted" rather than manufacture a third guess. Only the
+            # inverse ("no positive evidence -> no call") would be the
+            # forbidden derivation, and that is exactly the case below that
+            # returns `None`.
+            #
+            # This is a WEAKER inference than the ones above, and worth
+            # naming as such: a bare `failure` string cannot actually
+            # distinguish "never attempted" from "attempted and failed" (both
+            # states write to the same field), so "not_attempted" here is a
+            # guess at which of the two happened, not positive proof of it —
+            # only reachable from a hand-written manifest, or from a case
+            # folder written mid-branch whose `reflist_attempted: true`
+            # `from_json` translates into exactly such a reason, since a live
+            # run always records `reflist_outcome` itself. `inferred` is what
+            # keeps the sentence below honest about which it is: "no reading
+            # was obtained" is a claim this branch has no evidence for.
+            outcome, inferred = "not_attempted", True
+        else:
+            outcome = ""
+    elif outcome not in REFLIST_OUTCOMES:
+        # A value this build's vocabulary does not recognise — a hand edit, or
+        # a manifest from a future version with a fourth outcome. Fail CLOSED:
+        # the alternative (falling through to the success branch below) would
+        # assert the token as a reading that was taken and used, which is the
+        # one claim an unrecognised state can least afford to make.
+        unknown = _resolution_clause(manifest)
+        return Disclosure(
+            key="reflist",
+            level="warn",
+            token=REFLIST_TOKEN,
+            text=(
+                f"This run recorded that {REFLIST_TOKEN}, with an outcome "
+                f"({outcome!r}) this build of papertrace does not recognise. "
+                "Treat the reference numbering as resting on the readings above this"
+                + (
+                    ", the same as an outcome that was never obtained."
+                    if unknown else
+                    " and nothing else, the same as an outcome that was never obtained."
+                )
+                + unknown
+            ),
+            short=f"{REFLIST_TOKEN}: unrecognised outcome {outcome!r}",
+        )
+    resolution = _resolution_clause(manifest)
+    if not outcome or (outcome == "not_attempted" and not failure):
+        # the second clause is the caller's own silent choice (`--no-llm-refs`,
+        # `--parse-only`): `outcome` is recorded as `"not_attempted"` either
+        # way, so `not outcome` alone cannot tell "nothing to report" apart
+        # from "asked for, and never happened" — only the absence of a reason
+        # can, the same distinction `_llm_reference_reading`'s `disabled_reason`
+        # makes when it decides whether to fill `failure` at all
+        if not resolution:
+            return None  # no model reading was asked for, and nothing to report
+        # ...but the ESCALATION is a second, separate call that runs whether
+        # or not the reading was asked for, and a run that made it is not a
+        # run where no model read the reference list. Silence here was the
+        # same false negative one rung down.
+        return Disclosure(
+            key="reflist",
+            level="info",
+            token=REFLIST_TOKEN,
+            text=(
+                f"No reading of the whole list was taken on this run, but {REFLIST_TOKEN} "
+                "to settle a disagreement. "
+                + _resolution_clause(manifest, lead="Here")
+            ),
+            short=f"{REFLIST_TOKEN} — to settle a disagreement only",
+        )
+    ceiling = (
+        "A model agreeing with a parse is a second reading, not confirmation: it read "
+        "the same document, so a reference the layout destroyed is one it may also "
+        "have missed."
+    )
+    # named even when the reply itself did not — see this function's own
+    # docstring for why `model` alone cannot stand in for "this happened".
+    # Identical wording to `cli._refs_pipeline`'s console line for the same
+    # state, so the two surfaces never describe one call two different ways.
+    named = model or "a model that did not report its own name"
+    # "and nothing else" is a claim about what the numbering rests on, and it
+    # is FALSE on a run that also made the resolution call: that call
+    # substitutes an entry. Dropped where one happened, kept where none did —
+    # it is load-bearing there, and the sentence would otherwise contradict
+    # the clause appended two lines later, inside one paragraph.
+    only = "" if resolution else " and nothing else"
+    if outcome == "not_attempted" and inferred:
+        # `outcome` here is a GUESS (see the `elif failure:` branch above), so
+        # the sentence says what is recorded and no more. "no reading was
+        # obtained" below is a claim, and this state has no evidence for it:
+        # the manifest says a reading was asked for and stops there.
+        head = (
+            f"This run asked that {REFLIST_TOKEN}, and this manifest does not record "
+            f"what came of it: {failure}. Nothing from such a reading reached the list "
+            f"below, so the reference numbering rests on the readings above this{only}."
+        )
+        short = f"{REFLIST_TOKEN}: asked for, outcome never recorded — {failure}"
+        level = "warn"
+    elif outcome == "not_attempted":
+        head = (
+            f"This run asked that {REFLIST_TOKEN}, and no reading was obtained: "
+            f"{failure}. The reference numbering therefore rests on the readings above "
+            f"it{only}."
+        )
+        short = f"{REFLIST_TOKEN}: asked for, not obtained — {failure}"
+        level = "warn"  # a structural gap, not routine information
+    elif outcome == "failed":
+        # textually distinct from the branch above on purpose: this is a call
+        # that WAS made and did not return, never "no reading was obtained" —
+        # the two must not read as the same fact
+        head = (
+            f"This run asked that {REFLIST_TOKEN}, and the call did not return an "
+            f"answer: {failure}. Nothing it might have proposed reached the list "
+            f"below, and the reference numbering rests on the readings above this{only}."
+        )
+        short = f"{REFLIST_TOKEN}: the call failed — {failure}"
+        level = "warn"  # a call that did not return is not an aside
+    elif any(n.startswith("reading discarded") for n in notes):
+        # `removeprefix`, not the raw note: the note is stored WITH the
+        # "reading discarded — " marker so the console can find it (it looks
+        # for that same prefix), but this sentence already says "was
+        # discarded rather than used" in its own words — keeping the marker
+        # here reads as "discarded … reading discarded — the model's reply …",
+        # the exact stutter the console strips and this branch used not to
+        why = next(
+            n.removeprefix("reading discarded — ")
+            for n in notes if n.startswith("reading discarded")
+        )
+        head = (
+            f"Here {REFLIST_TOKEN} ({named}), and its reading was discarded rather than "
+            f"used: {why}. Nothing it proposed contributed to the list below."
+        )
+        short = f"{REFLIST_TOKEN} ({named}) — discarded as unusable"
+        level = "info"
+    else:
+        if entries_proposed == 0:
+            # distinct from "every value it proposed was found" below: THAT
+            # sentence describes a reading that proposed something and none of
+            # it was dropped, which reads as a clean corroboration — a reply
+            # that proposed nothing at all corroborated nothing
+            dropped = "it proposed no entries at all"
+        elif notes:
+            dropped = (
+                f"{len(notes)} value{'' if len(notes) == 1 else 's'} it proposed "
+                f"{'was' if len(notes) == 1 else 'were'} not found in the printed text and "
+                f"{'was' if len(notes) == 1 else 'were'} discarded"
+            )
+        elif entries_proposed:
+            # >0 and nothing discarded — a real, positive corroboration
+            dropped = "every value it proposed was found in the printed text"
+        else:
+            # `entries_proposed is None`: never recorded, and `notes` empty is
+            # not evidence of anything either, since a manifest that never
+            # recorded the count may equally never have recorded a discard.
+            # Saying nothing about the count is the honest degradation here —
+            # "every value … was found" would claim corroboration this
+            # manifest never measured, the same overstatement `entries_proposed
+            # == 0` used to make in the other direction.
+            dropped = (
+                "no discarded values were recorded for it, though this manifest never "
+                "recorded how many entries it proposed either"
+            )
+        head = (
+            f"Here {REFLIST_TOKEN} ({named}), shown two extractions of the same printed "
+            f"bibliography and asked what numbered list it carries; {dropped}."
+        )
+        if not model:
+            # a reading was taken and voted — the gap is what the CLI could
+            # report about it, not whether anything happened at all
+            head += " The CLI did not report which model answered."
+        short = f"{REFLIST_TOKEN} ({named}) — {len(notes)} discarded"
+        level = "info"
+    if numbering and outcome not in ("not_attempted", "failed"):
+        # appended rather than folded into `dropped`: "3 values discarded" and
+        # "it numbered one entry twice" are different facts, and a reader who
+        # sees them as one number cannot tell which happened. Gated to the
+        # states where a reply actually exists to have numbered anything —
+        # `not_attempted`/`failed` provenances never carry numbering findings
+        # in a live run (`ReflistProvenance()` defaults empty), but a
+        # hand-built or forward-version manifest could combine "the call
+        # never returned" with a numbering finding that describes a reply
+        # that was never obtained.
+        head += (
+            " Its own numbering did not add up either — "
+            + "; ".join(numbering)
+            + "."
+        )
+    return Disclosure(
+        key="reflist",
+        level=level,
+        token=REFLIST_TOKEN,
+        # the OTHER call, appended in every branch: whatever became of the
+        # reading, a run that also asked a model to settle a disagreement is
+        # not a run where no model read the reference list
+        text=f"{head}{resolution} {ceiling}",
+        short=short,
+        # both kinds, numbering first: it describes the reading as a whole, and
+        # a truncated list should not lose the structural finding to six field
+        # names
+        rows=tuple((numbering + notes)[:6]),
+    )
+
+
+def _numbering_corroboration(manifest) -> Disclosure | None:
+    """Fires on agreement, and deliberately NOT gated on `numbering_verified`.
+
+    The unconfirmed-numbering warning is right to fire whenever nothing checked
+    the numbering, and on a paper whose readings all agree it is also the whole
+    of what the report says about the reference list — which is how it came to
+    read as an alarm about the 22-vs-19 case on papers where nothing was wrong.
+    This is the other half of that sentence, and it is careful not to become the
+    claim the warning is about: agreement between readings is not a checked
+    numbering.
+
+    `numbering_corroborated` is a PER-LABEL fact (every cited label was
+    independently agreed by >= 2 readings); `corroborating_readings` is a
+    PER-READING one (this reading agreed on ALL of them, computed by
+    `refs.corroborating_readings`'s intersection). The two can be true and
+    short respectively: every label agreed, but no single reading spans every
+    label — 0 or 1 names in the list. `NUMBERING_CORROBORATION_TOKEN`'s own
+    words say "two readings … agree on every cited label", so it is asserted
+    only when the list actually has two or more names to back it; the
+    `len(readings) < 2` branch says the honest, weaker thing instead, under a
+    DIFFERENT token, rather than stretch that token over a list that cannot
+    support it (the "the readings taken" fallback used to do exactly that for
+    a legitimately computed, and now reachable, empty list).
+    """
+    if not getattr(manifest, "numbering_corroborated", False):
+        return None
+    readings = list(getattr(manifest, "corroborating_readings", []) or [])
+    if len(readings) < 2:
+        return Disclosure(
+            key="numbering_corroboration",
+            level="info",
+            token=NUMBERING_NO_SPANNING_READING_TOKEN,
+            text=(
+                f"On this run {NUMBERING_NO_SPANNING_READING_TOKEN}: each label the body "
+                "cites was independently agreed by at least two readings of the "
+                "bibliography, but no reading agreed on every one of them at once. That "
+                "is short of corroboration, not a stronger version of it, and it does not "
+                "make the numbering verified."
+            ),
+            short=NUMBERING_NO_SPANNING_READING_TOKEN,
+        )
+    named = ", ".join(readings)
+    return Disclosure(
+        key="numbering_corroboration",
+        level="info",
+        token=NUMBERING_CORROBORATION_TOKEN,
+        text=(
+            f"On this run {NUMBERING_CORROBORATION_TOKEN} ({named}). That is corroboration, "
+            "not confirmation, and it does not make the numbering verified: these are "
+            "readings of one printed page, so a reference its layout destroyed is one they "
+            "can all have missed in the same way. Any label they disagreed about is listed "
+            "separately, and no verdict was printed for it."
+        ),
+        short=f"{NUMBERING_CORROBORATION_TOKEN} ({named})",
+    )
+
+
+def _numbering_resolution(manifest) -> Disclosure | None:
+    """Run-level surface for what `cli._escalate_disputed` settled.
+
+    `_labels_disputed` above is the run-level roll-up of what was withheld;
+    this is its counterpart for what was NOT — a reader who stops at the top
+    of the report should see that some verdicts below rest on a model reading
+    or a person's choice, not discover it claim by claim on only the claims
+    that happen to cite a resolved label (Task 7 review, M6).
+    """
+    choice = getattr(manifest, "numbering_choice", "") or ""
+    resolved = sorted(getattr(manifest, "labels_resolved", None) or [], key=lambda r: int(r))
+    if not resolved or choice not in ("llm_resolved", "parsed", "pymupdf"):
+        return None
+    named = f"[{'], ['.join(resolved)}]"
+    # names the model and the extractions it was SHOWN, never "both texts":
+    # the call sees the readings that have a printed span, which is one on a
+    # pymupdf-backend run, and the reading it ruled against may have no span
+    # at all. The claim was false on the first and misleading on the second.
+    model = (
+        getattr(manifest, "resolution_model", "")
+        or "a model that did not report its own name"
+    )
+    # `[]` is never recorded, and a manifest written by an earlier commit of
+    # this branch is exactly that case — its resolution call was ALSO not
+    # shown what each reading said, so neither half of the fuller sentence is
+    # true of it. Claiming either would be a report describing this build's
+    # behaviour over another build's run.
+    readings = list(getattr(manifest, "resolution_readings", []) or [])
+    by_model = (
+        f"{model}, which read {_readings_phrase(readings)} and was shown what each "
+        "reading said at those labels, verified field by field against that text, and "
+        "which you accepted"
+        if readings
+        else f"{model}, verified field by field against the printed list — this "
+             "manifest does not record which extractions it was shown — which you "
+             "accepted"
+    )
+    by = (
+        by_model
+        if choice == "llm_resolved"
+        else f"you, who chose the `{choice}` reading whole for every disputed label"
+    )
+    return Disclosure(
+        key="numbering_resolution",
+        level="warn",
+        token=NUMBERING_RESOLUTION_TOKEN,
+        text=(
+            f"{named} {NUMBERING_RESOLUTION_TOKEN}, settled by {by}. That is a reading, "
+            "not a confirmation — the numbering stays recorded as unconfirmed for these "
+            "labels, and each claim citing one carries its own note."
+        ),
+        short=f"{named} {NUMBERING_RESOLUTION_TOKEN}",
+    )
+
+
+def _label_group(labels: list[str]) -> str:
+    """`["4", "5"]` -> `[4], [5]` — a citation-label group as the reader sees it."""
+    return f"[{'], ['.join(labels)}]"
+
+
 def _claim_numbering(claim, manifest) -> Disclosure:
     """The run-level warning, said again where the verdict is read.
 
@@ -470,7 +975,7 @@ def _claim_numbering(claim, manifest) -> Disclosure:
         (r for r in claim.refs if manifest.label_is_doubtful(r)),
         key=lambda r: int(r),
     )
-    labels = f"[{'], ['.join(doubtful)}]"
+    labels = _label_group(doubtful)
     return Disclosure(
         key="claim_numbering",
         level="warn",
@@ -871,6 +1376,16 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
         # everything above it — a reader who stops reading should have read this
         if not getattr(manifest, "numbering_verified", False):
             out.append(_numbering(manifest))
+        if d := _numbering_contested(manifest):
+            out.append(d)
+        if d := _labels_disputed(manifest):
+            out.append(d)
+        if d := _numbering_resolution(manifest):
+            out.append(d)
+        if d := _numbering_corroboration(manifest):
+            out.append(d)
+        if d := _reflist(manifest):
+            out.append(d)
     return out
 
 
@@ -976,6 +1491,289 @@ def _no_quote(claim) -> Disclosure:
     )
 
 
+def dispute_causes(manifest, labels: list[str]) -> str:
+    """Why these labels are in dispute, in the reader's terms.
+
+    One producer for every surface, because `labels_disputed` carries two
+    causes and each warrants a different action: a contradiction means one
+    reading is wrong and somebody should look; nothing comparable means no
+    conflict is known and the withholding is precautionary — on a bare-DOI
+    deposit against a list that prints no DOIs, which is common, it is
+    benign.
+
+    `labels_uncomparable is None` means the split was NEVER COMPUTED — every
+    manifest written before that field — and the honest answer there is the
+    disjunction, not a cause picked for it. `[]` is a measurement: every
+    dispute was a contradiction.
+    """
+    unc = getattr(manifest, "labels_uncomparable", None)
+    if unc is None:
+        return (
+            "the readings did not agree on which paper each of them names — they "
+            "either named different papers, or nothing in them could be compared"
+        )
+    mute = [x for x in labels if x in set(unc)]
+    clashed = [x for x in labels if x not in set(unc)]
+    if mute and clashed:
+        return (
+            f"the readings named different papers at {_label_group(clashed)}, and at "
+            f"{_label_group(mute)} nothing in them could be compared"
+        )
+    if mute:
+        return (
+            "nothing in them could be compared — no reading is known to contradict "
+            "another here, and the verdict is withheld because nothing establishes "
+            "what the label names"
+        )
+    return "the readings named different papers there"
+
+
+def _resolution_clause(manifest, *, lead: str = " Separately, later in this run") -> str:
+    """What the RESOLUTION call did, as a sentence to append — or "".
+
+    `lead` is how the sentence opens, because the same facts are appended to
+    a disclosure about the OTHER call and used as a disclosure of their own
+    when there was no other call — one producer, so the two surfaces cannot
+    describe one call two ways.
+
+    Two model calls can be made in one run and they are not the same call.
+    `reflist_*` describes the one that reads the whole bibliography;
+    `resolution_*` describes the one a person asked for, to settle the labels
+    the readings did not agree on. A `--backend pymupdf` run never makes the
+    first and can still make the second, and folding them left the report
+    saying no model read the reference list on a run where one was asked,
+    verified field by field and allowed to change which papers are judged.
+    """
+    outcome = getattr(manifest, "resolution_outcome", "") or ""
+    if outcome not in ("read", "failed"):
+        return ""  # "" is never computed, and an absent call says nothing
+    if outcome == "failed":
+        why = getattr(manifest, "resolution_failure", "") or "no reason was recorded"
+        return (
+            f"{lead} a model was asked to settle the labels the readings did not agree "
+            f"on, and that call did not return: {why}."
+        )
+    named = (
+        getattr(manifest, "resolution_model", "")
+        or "a model that did not report its own name"
+    )
+    shown = _readings_phrase(getattr(manifest, "resolution_readings", []))
+    return (
+        f"{lead} {named} was asked to settle the labels the readings did not agree on, "
+        f"shown {shown}; what it settled is recorded with the numbering resolution."
+    )
+
+
+def _readings_phrase(readings) -> str:
+    """The extractions a model call was actually shown, named.
+
+    Never "both texts". The resolution call is shown the readings that have a
+    printed span of the page, which is TWO on a docling run and ONE on a
+    pymupdf one — and the reading it is ruling against can be the deposit or
+    the model's own, neither of which has a span at all. One phrase, used by
+    the note and by the report, so the two cannot describe one call two ways.
+    """
+    names = [n for n in (readings or []) if n]
+    if not names:
+        return "text this manifest does not name"
+    if len(names) == 1:
+        return f"the {names[0]} extraction"
+    return f"the {' and '.join(names)} extractions"
+
+
+def _was_obtained(manifest, label: str) -> bool:
+    """Did this manifest actually retrieve a judgeable source for this label?
+
+    The same predicate `check.py`'s retrieval filter applies before it
+    partitions the withheld from the judged, restated here rather than
+    inferred from the emptiness of `withheld_refs` — an empty list is also
+    what a `results.json` written before that field existed carries.
+    """
+    e = next((x for x in getattr(manifest, "entries", []) if x.num == label), None)
+    return bool(e and e.status in ("retrieved", "provided") and e.slug)
+
+
+def _resolution_sentence(manifest) -> str:
+    """What the resolution call was shown, claimed no more strongly than recorded.
+
+    `resolution_readings == []` means never recorded, which on this branch
+    identifies a manifest written by an earlier commit — whose call was also
+    not shown what each reading said. Asserting either half over that run
+    would be this build describing another build's behaviour.
+    """
+    readings = list(getattr(manifest, "resolution_readings", []) or [])
+    if not readings:
+        return (
+            "A model was shown the printed list — this manifest does not record which "
+            "extractions — and every field of its answer was found verbatim there."
+        )
+    return (
+        f"A model was shown {_readings_phrase(readings)} and what each reading said at "
+        "that label, and every field of its answer was found verbatim in that printed "
+        "text."
+    )
+
+
+def _also_resolved(resolved: list[str]) -> str:
+    """The sentence a claim owes about a label that WAS settled, or "".
+
+    A claim can cite a label still in dispute and one a resolution was
+    accepted for. The dispute keeps the token and the level — it is the more
+    urgent finding — but a reader who stops there must not be left thinking
+    every citation on this claim shares the same fate (m6 of the Task 7
+    review): the other label's verdict rests on a resolution, which is a
+    different caveat and still a live one. One producer, because BOTH dispute
+    states owe it and the second one was added later.
+    """
+    if not resolved:
+        return ""
+    return (
+        f" This claim also cites {_label_group(resolved)}, where the readings did not "
+        "agree either but a resolution was accepted for it — see that label's own "
+        "reason in the retrieval manifest."
+    )
+
+
+def _claim_pairing(claim, manifest=None) -> Disclosure | None:
+    """Which pairing state this claim's cited labels are in, if not a clean one.
+
+    Five states, five tokens — the same one-key-many-tokens shape `anchor`
+    uses. `withheld` reads `claim.withheld_refs` and fires with no `manifest`
+    at all (as it always has); the other four read the manifest's escalation
+    fields and are silent without one. `corroborated` is the only `info`-level
+    state, and `claim_disclosures` gates it on the claim already carrying a
+    `warn`: reassurance repeated on every clean claim is noise a reader stops
+    reading.
+
+    A disputed label is in exactly one of two of those states, and the split
+    is the manifest entry's own status: withheld (a source was retrieved and
+    set aside) or unretrieved (there is no source at all). Both withhold a
+    verdict; only one of them has a fetched paper to warn about.
+    """
+    cited = set(claim.refs)
+    disputed = sorted(cited & set(getattr(manifest, "labels_disputed", None) or []), key=int)
+    resolved = sorted(cited & set(getattr(manifest, "labels_resolved", None) or []), key=int)
+    # A disputed label splits in two, and `check.py` already computed the
+    # split once: a label whose source WAS obtained is in `withheld_refs`; one
+    # that was never retrieved is deliberately kept out of it
+    # (`check.py`'s retrieval filter, and the test that pins it). Reading only
+    # `labels_disputed` when `withheld_refs` is empty undid that care and told
+    # a reader "the source fetched under that label" about a source nobody
+    # fetched. The entry's own status is what decides, NOT the emptiness of
+    # `withheld_refs`: a `results.json` written before that field existed
+    # carries `[]` for every claim, and choosing the never-retrieved wording
+    # from that emptiness would be the same mistake in the other direction.
+    unretrieved = [r for r in disputed if not _was_obtained(manifest, r)]
+    withheld = sorted(set(claim.withheld_refs) | (set(disputed) - set(unretrieved)), key=int)
+    withheld = [r for r in withheld if r in cited]
+
+    if withheld:
+        labels = _label_group(withheld)
+        one = len(withheld) == 1
+        text = (
+            f"This claim cites {labels}, and the {CLAIM_PAIRING_WITHHELD_TOKEN} about "
+            f"{'that label' if one else 'those labels'}: "
+            f"{dispute_causes(manifest, withheld)}. So the source retrieved under "
+            f"{'that label' if one else 'those labels'} may not be the paper the "
+            f"manuscript actually cites, and no verdict was reached on "
+            f"{'it' if one else 'them'} — check the retrieval manifest before "
+            "treating this claim as checked."
+        )
+        if unretrieved:
+            # named separately, never folded into the sentence above: nothing
+            # was fetched under these, so "the source retrieved under that
+            # label" is not true of them and the reader must not read one
+            # sentence as covering both
+            text += (
+                f" It also cites {_label_group(unretrieved)}, where the readings did "
+                "not agree either and the source was never retrieved, so nothing was "
+                "judged under that label at all."
+            )
+        text += _also_resolved(resolved)
+        return Disclosure(
+            key="claim_pairing",
+            level="warn",
+            token=CLAIM_PAIRING_WITHHELD_TOKEN,
+            text=text,
+            short=f"{labels} {CLAIM_PAIRING_WITHHELD_TOKEN}",
+        )
+
+    if unretrieved:
+        # Nothing was withheld here, because nothing was obtained to withhold.
+        # Its own token and its own sentence: the withheld one asserts a
+        # source was retrieved under the label, which is the one thing that
+        # did not happen.
+        labels = _label_group(unretrieved)
+        one = len(unretrieved) == 1
+        return Disclosure(
+            key="claim_pairing",
+            level="warn",
+            token=CLAIM_PAIRING_UNRETRIEVED_TOKEN,
+            text=(
+                f"This claim cites {labels}, and {CLAIM_PAIRING_UNRETRIEVED_TOKEN}: "
+                f"{dispute_causes(manifest, unretrieved)}, and the source was never "
+                "retrieved either, so nothing was judged under "
+                f"{'that label' if one else 'those labels'} in either direction. The "
+                "disagreement is recorded, not resolved."
+                + _also_resolved(resolved)
+            ),
+            short=f"{labels} {CLAIM_PAIRING_UNRETRIEVED_TOKEN}",
+        )
+
+    if resolved and manifest is not None and manifest.numbering_choice == "llm_resolved":
+        labels = _label_group(resolved)
+        return Disclosure(
+            key="claim_pairing",
+            level="warn",
+            token=CLAIM_PAIRING_RESOLVED_TOKEN,
+            text=(
+                f"This claim cites {labels}, {CLAIM_PAIRING_RESOLVED_TOKEN}. The readings "
+                "of the bibliography did not agree there. "
+                + _resolution_sentence(manifest)
+                + " You accepted the result — so this verdict rests on a reading nobody "
+                "checked against the printed page, and you are who accepted it. The "
+                "numbering is still recorded as unconfirmed."
+            ),
+            short=f"{labels} {CLAIM_PAIRING_RESOLVED_TOKEN}",
+        )
+
+    if resolved and manifest is not None and manifest.numbering_choice in ("parsed", "pymupdf"):
+        labels = _label_group(resolved)
+        return Disclosure(
+            key="claim_pairing",
+            level="warn",
+            token=CLAIM_PAIRING_CHOSEN_TOKEN,
+            text=(
+                f"This claim cites {labels}. The readings of the bibliography did not "
+                f"agree there and {CLAIM_PAIRING_CHOSEN_TOKEN} — the "
+                f"`{manifest.numbering_choice}` "
+                "one, for every disputed label. That is an assertion about which reading "
+                "is right, not a check of it, and this verdict is about whichever paper "
+                "that reading names."
+            ),
+            short=f"{labels} {CLAIM_PAIRING_CHOSEN_TOKEN} ({manifest.numbering_choice})",
+        )
+
+    # `info`, and gated by the caller on this claim already carrying a `warn`:
+    # corroboration is reassurance, and reassurance on a clean claim is noise
+    if manifest is not None and getattr(manifest, "numbering_corroborated", False) and cited:
+        labels = _label_group(sorted(cited, key=int))
+        readings = ", ".join(manifest.corroborating_readings)
+        return Disclosure(
+            key="claim_pairing",
+            level="info",
+            token=CLAIM_PAIRING_CORROBORATED_TOKEN,
+            text=(
+                f"{labels} was {CLAIM_PAIRING_CORROBORATED_TOKEN} ({readings}). That is "
+                "evidence for this pairing, not confirmation of it — every reading read "
+                "the same document, so a reference the layout destroyed is one they may "
+                "all have missed."
+            ),
+            short=f"{labels} {CLAIM_PAIRING_CORROBORATED_TOKEN}",
+        )
+    return None
+
+
 def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
     """Every claim-level disclosure this ClaimResult owes its reader.
 
@@ -1001,6 +1799,14 @@ def claim_disclosures(claim, manifest=None) -> list[Disclosure]:
         out.append(_supplement_headline(claim))
     if manifest is not None and any(manifest.label_is_doubtful(r) for r in claim.refs):
         out.append(_claim_numbering(claim, manifest))
+    # `claim_pairing` at info level (corroboration) is reassurance, and
+    # reassurance on a claim with nothing else to say about it is noise on
+    # every row of the report — so it appends only beside an existing `warn`.
+    # A `warn`-level pairing disclosure is unconditional, `manifest` or not:
+    # `withheld` reads only `claim.withheld_refs`.
+    if (d := _claim_pairing(claim, manifest)) is not None:
+        if d.level == "warn" or any(x.level == "warn" for x in out):
+            out.append(d)
     if (d := anchor_disclosure(claim)) is not None:
         out.append(d)
     return out

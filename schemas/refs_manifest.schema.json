@@ -104,6 +104,13 @@
             "type": "boolean",
             "description": "True when the reference label occurred more than once before the next reference, so the entry's start is a guess. Such an entry is never resolved: nothing derived from its text may be trusted to name a paper."
           },
+          "seen_in": {
+            "type": "array",
+            "description": "Which named readings of the bibliography (e.g. \"parsed\", \"pymupdf\", \"llm\") contributed this entry. Absent means never computed — either an entry from a manifest written before this feature, or one whose candidate reading was never compared against others. An entry seen only in the model's reading is spottable as a list of length one.",
+            "items": {
+              "type": "string"
+            }
+          },
           "title_check": {
             "type": [
               "string",
@@ -158,7 +165,7 @@
     },
     "numbering_verified": {
       "type": "boolean",
-      "description": "True when the chosen list accounts for exactly the labels the manuscript's body cites. The label is the join key between a claim and its source, so an unverified numbering means a verdict may be about a different paper than the label names. Absent on older manifests, which never checked."
+      "description": "True when the chosen list accounts for exactly the labels the manuscript's body cites AND no entry in it refuses its own label. The second condition is not redundant: a refused entry keeps a positional label, so the extent check is satisfied by exactly the labels in doubt. The label is the join key between a claim and its source, so an unverified numbering means a verdict may be about a different paper than the label names. Absent on older manifests, which never checked."
     },
     "numbering_note": {
       "type": "string",
@@ -172,19 +179,68 @@
       "minimum": 1,
       "description": "The first citation label from which the numbering is in doubt, or null when it is not in doubt. 1 means 'from the very start', which is what a single unchecked reading warrants: one candidate gives no evidence about where it went wrong."
     },
+    "numbering_contested": {
+      "type": "boolean",
+      "description": "The two readings of the bibliography stop describing the same paper at or below a label the body cites, even though the chosen reading matched the body's labels — so the other reading either names a different work at an entry some verdict rests on, or ends before reaching it. NOT 'the other reading failed the extent check': a deposit identical for every cited label and longer by two references nobody cites fails that. Absent on manifests written before 0.7."
+    },
+    "numbering_ledger": {
+      "type": "object",
+      "description": "The labels the PARSED list carries, against the labels the body cites: which are duplicated, and which are carried by no entry. Always about the parsed list, even on a `reference_source: \"crossref\"` run where `entries` holds the deposit instead — which is exactly the case a reader inspects this for. Absent means never computed, not that nothing was dropped. Nothing is required: a reader must treat any key as possibly missing.",
+      "properties": {
+        "labels_detected": {
+          "type": "integer",
+          "description": "How many distinct bracketed numeric labels the body cites. Only that style can be read, so 0 means 'none readable', not 'none cited'."
+        },
+        "labels_max": {
+          "type": "integer",
+          "description": "The highest label the body cites. Under citation-order numbering the list should be exactly this long."
+        },
+        "labels_absent": {
+          "type": "array",
+          "description": "Labels from 1 to `labels_max` that the body never cites — a hole in the body's own citing, not in the parse.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "entries_parsed": {
+          "type": "integer",
+          "description": "How many entries the PDF parse produced."
+        },
+        "numerals_distinct": {
+          "type": "integer",
+          "description": "How many distinct labels those parsed entries carry. Lower than `entries_parsed` means at least one label is duplicated."
+        },
+        "numerals_duplicated": {
+          "type": "array",
+          "description": "Labels carried by more than one parsed entry. A difference of two totals cannot reveal a duplicate at all.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "numerals_absent": {
+          "type": "array",
+          "description": "Labels from 1 to `labels_max` carried by no parsed entry. Only visible where the printed numerals survived the converter: three of the four parse paths label by position, and a positional run has no gaps by construction.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "limits": {
       "type": "object",
-      "description": "What `refs` was told to leave out, verbatim. `claims` is the array of claim ids whose cited references alone were retrieved (`--max-claims N` is `[1..N]`); `max_sources` is the cap on sources obtained. Recorded so a later `check` can tell what this manifest covers. Empty or absent means unlimited, which is what every manifest written before 0.7.0 means.",
+      "description": "What `refs` was told to leave out, verbatim. `claims` is the array of claim ids whose cited references alone were retrieved (`--max-claims N` is `[1..N]`); `max_sources` is the cap on sources obtained. Recorded so a later `check` can tell what this manifest covers. Empty or absent means unlimited, which is what every manifest written before 0.7.0 means. A limit and a withheld label are different gaps and never the same one: a `skipped` entry is not `retrieved` or `provided`, so it is never a candidate for withholding.",
       "properties": {
         "claims": {
           "type": "array",
+          "description": "The claim ids whose cited references alone were retrieved. Absent means no claim selection was applied.",
           "items": {
             "type": "integer"
           }
         },
         "max_sources": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "description": "The cap on sources successfully obtained. Absent means no cap."
         }
       }
     },
@@ -208,6 +264,111 @@
           }
         }
       }
+    },
+    "numbering_corroborated": {
+      "type": ["boolean", "null"],
+      "description": "True when every label the manuscript cites was agreed by two or more independent readings of the bibliography, false when that was measured and did not hold. A second, independent axis from `numbering_verified`, which is about matching the body's labels, not about readings agreeing with each other — a manifest can be verified and uncorroborated, or corroborated and unverified. `null` or absent means NEVER COMPUTED, and is not the same as `false`: as a plain boolean this field could not express the third state its own description claimed, so every consumer had to stay silent on `false` to avoid asserting a measurement nobody made."
+    },
+    "corroborating_readings": {
+      "type": "array",
+      "description": "Which named readings (e.g. 'parsed', 'pymupdf', 'crossref') fed `numbering_corroborated`, named rather than merely counted. Never includes a DERIVED reading: the model reading copies its values out of the extractions that vote here in their own right, so naming it would print two agreeing readings over one text read twice. Absent means never computed.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "labels_disputed": {
+      "type": "array",
+      "description": "Citation labels where two or more readings of the bibliography did not agree on which paper the label names, so the verdict on any claim citing them was withheld rather than printed. Two causes reach this list and no field tells them apart: the readings named different papers, or nothing in them could be compared — so a reader must not take an entry here as evidence of a contradiction. Absent means never computed — NOT 'none disputed' — the same three-state discipline as `table_warnings`.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "labels_uncomparable": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "A SUBSET of `labels_disputed`: the labels whose dispute was that nothing in the readings could be compared — a Crossref deposit of bare DOIs against a printed list carrying none — rather than that the readings named different papers. Both causes withhold a verdict and `labels_disputed` remains the single list that drives withholding; this one exists because the two warrant different reader actions. Every entry here MUST also appear in `labels_disputed`. `null` or absent means NEVER COMPUTED, and is not the same as `[]`, which means the split was measured and every dispute was a contradiction."
+    },
+    "labels_resolved": {
+      "type": "array",
+      "description": "Citation labels that were in `labels_disputed` and were then settled — by a targeted model call the user accepted, or by the user choosing one reading whole. Absent means never computed, not 'none resolved'.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "numbering_choice": {
+      "type": "string",
+      "enum": [
+        "",
+        "withheld",
+        "llm_resolved",
+        "parsed",
+        "pymupdf"
+      ],
+      "description": "How a disputed numbering was left, when the interactive escalation ran. '' means the escalation never ran, which is true of most manifests. Never set from a model's own say-so alone — see `numbering_chosen_by`."
+    },
+    "numbering_chosen_by": {
+      "type": "string",
+      "enum": [
+        "",
+        "default",
+        "user"
+      ],
+      "description": "Who is responsible for `numbering_choice`: '' when no escalation ran, 'default' when nobody was actually asked, 'user' when a person consented to it. A person consenting to proceed is an input, never evidence that the numbering was verified — `numbering_verified` cannot be set from this."
+    },
+    "reflist_outcome": {
+      "type": "string",
+      "enum": ["", "not_attempted", "failed", "read"],
+      "description": "Which of the three real outcomes this run's model reading of the bibliography reached: 'not_attempted' (no subprocess call was ever made — --llm-refs off, --parse-only, the backend left no second reading to compare against, claude not on PATH, or the flat-text reading itself came back with no text to check the model's own reading against), 'failed' (a call was made and did not return an answer), or 'read' (a reply was obtained, whether or not anything in it survived verification). Absent or '' means NEVER COMPUTED, not 'not_attempted' — a manifest written before this field existed asserts nothing about whether a call was made. A two-valued flag could not tell 'never called' apart from 'called and failed', which is exactly the bug this field replaced: a failed call published as a successful reading."
+    },
+    "reflist_failure": {
+      "type": "string",
+      "description": "Why there is no reading, when `reflist_outcome` is not 'read' — never a value that failed verification (`reflist_fields_discarded`'s job). '' when `reflist_outcome` is 'read', or when neither has ever been computed."
+    },
+    "reflist_model": {
+      "type": "string",
+      "description": "The model that produced the LLM's structured reading of the bibliography, when --llm-refs ran, produced anything usable, AND the reply itself reported a model name. '' means EITHER no such call was made OR one was made, verified and voted but did not report which model answered — see `reflist_outcome` for which; this field alone cannot tell them apart, and never means the reading was rejected."
+    },
+    "reflist_fields_discarded": {
+      "type": "array",
+      "description": "Which fields of the LLM's proposed reading could not be found verbatim in either text it was shown, and were discarded rather than trusted. Absent or empty means either no LLM reading was attempted, or every field it proposed was verified.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reflist_numbering_findings": {
+      "type": "array",
+      "description": "Findings about the model reading's own labels rather than its values: a numeral it proposed twice, or a gap in 1..max. Kept apart from `reflist_fields_discarded` because nothing went missing — folding the two would report a count of discarded values that includes things no value ever lost. Empty means none were found, which on a reading that produced no entries is not the same as none being present.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reflist_entries_proposed": {
+      "type": ["integer", "null"],
+      "description": "How many entries the model's reply proposed, before verification, whenever `reflist_outcome` is 'read' — including 0. `null` (or absent) means NEVER RECORDED — either no reading happened, or this manifest was written before this field existed — and is NOT the same as `0`, which means a reading happened and measured zero proposed entries. A manifest that recorded `reflist_model` or `reflist_fields_discarded` without this field is exactly the case `null` exists for: without the distinction, a model that proposed nothing was told apart from one whose count was simply never recorded, which this field alone can settle."
+    },
+    "resolution_outcome": {
+      "type": "string",
+      "description": "Which of `reflist.REFLIST_OUTCOMES` the RESOLUTION call reached — the second model call this feature can make, asked by a person to settle the labels in `labels_disputed`. A separate fact from `reflist_outcome`, which describes the call that reads the whole list: a run can make either, both or neither, and on a pymupdf-backend run the first is never attempted while the second still can be. Absent or '' means NEVER COMPUTED — not 'not_attempted'."
+    },
+    "resolution_failure": {
+      "type": "string",
+      "description": "Why the resolution call produced nothing, when `resolution_outcome` is 'failed'. '' when it answered, or when no such call was ever made — `resolution_outcome` is what tells those apart. Absent means never computed."
+    },
+    "resolution_model": {
+      "type": "string",
+      "description": "The model that answered the resolution call, when the subprocess's own reply reported a name. '' means EITHER no such call was made OR one was made and answered without naming a model; `resolution_outcome` is what distinguishes them. Absent means never computed."
+    },
+    "resolution_fields_discarded": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Which fields of the resolution reply were not found verbatim in the printed text(s) the call was shown, and were discarded rather than trusted. Absent, or an empty array on a manifest whose `resolution_outcome` is '', means never computed — NOT 'nothing was discarded'.",
+      "default": []
+    },
+    "resolution_readings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Which printed extractions of the bibliography the resolution call was actually SHOWN, by reading name — not which readings disagreed. The report names these instead of asserting the call saw 'both texts', which is false on any run with one printed extraction. Absent or empty means never recorded.",
+      "default": []
     }
   }
 }

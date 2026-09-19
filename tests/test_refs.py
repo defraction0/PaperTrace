@@ -8,6 +8,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from papertrace import models  # noqa: E402
 from papertrace.models import RefEntry  # noqa: E402
 
 
@@ -546,6 +547,34 @@ def test_a_scanned_provided_pdf_is_not_reported_as_matched(tmp_path):
     assert "title check failed" in detail
 
 
+def test_a_reference_with_diacritics_verifies_against_its_own_first_page():
+    """The two sides of `found` have to be folded the same way.
+
+    `_title_tokens` folds (`Küstner` → `kustner`) and `found` is a substring
+    test, so a page that is only lowercased matches none of them. The old broken
+    tokeniser hid this by accident: it produced `stner`, and `"stner" in
+    "küstner"` is True. Measured on a page carrying the reference's own title
+    verbatim, folding the tokens alone turned `7/7 verified` into `2/9 mismatch`
+    — and `_accept` answers a mismatch by unlinking the downloaded PDF and
+    telling the reader the reference has a wrong or mistyped DOI. A correct
+    retrieval destroyed and the manuscript blamed for it, on every German,
+    Scandinavian, Polish, Turkish, Spanish and Portuguese reference.
+    """
+    from papertrace.refs import TITLE_VERIFIED, _title_check_text
+
+    raw = (
+        "Küstner T, Späth C, Bjørnsson B. Röntgenbefunde und Ösophagusmotilität "
+        "bei Achalasie. Radiologische Übersicht 2020;1:1-9."
+    )
+    page = (
+        "Röntgenbefunde und Ösophagusmotilität bei Achalasie\n"
+        "T. Küstner, C. Späth, B. Bjørnsson\n"
+        "Radiologische Übersicht 2020;1:1-9"
+    )
+    state, detail = _title_check_text(raw, page)
+    assert state == TITLE_VERIFIED, detail
+
+
 def test_the_provided_reason_says_which_of_the_three_happened(tmp_path):
     """The manifest reason is what a reader sees. It must distinguish verified
     from unverified-because-unreadable from an outright mismatch."""
@@ -774,6 +803,66 @@ def test_a_tracking_parameter_is_not_part_of_a_title():
     assert {"launches", "practice", "artificial"} <= tokens, "the title's own words survive"
 
 
+def test_a_doi_is_not_part_of_a_title_either():
+    """The same class of thing as the tracking parameter above, and the same
+    failure. `_reference_raw`'s documented fallback for a DOI-only deposit is
+    the DOI string itself, and most publisher DOIs embed a journal or platform
+    slug — `radiol`, `jamanetworkopen`, `neuroimage`, `bioinformatics` — which
+    `[a-z]{5,}` happily lifts out and then compares against real title words.
+    An identifier's substring is not a word from a title.
+
+    Three shapes, because only the third had no five-letter run and so was the
+    only one the earlier fix reached."""
+    from papertrace.refs import _title_tokens
+
+    for doi in ("10.1148/radiol.2019181432",
+                "10.1001/jamanetworkopen.2023.18153",
+                "10.1038/s41591-019-0673-2",
+                "10.1016/j.neuroimage.2020.117161",
+                "10.1093/bioinformatics/btaa123"):
+        assert _title_tokens(doi) == set(), doi
+        # and written the way a reference prints it, prefix and all
+        assert _title_tokens(f"doi:{doi}") == set(), doi
+
+    # the reference's own words survive a trailing DOI, and the DOI's do not
+    tokens = _title_tokens(
+        "Fujita S. Characterization of brain volume changes in aging individuals. "
+        "JAMA Netw Open. 2023. doi:10.1001/jamanetworkopen.2023.18153"
+    )
+    assert {"characterization", "changes", "individuals"} <= tokens
+    assert "jamanetworkopen" not in tokens
+
+
+def test_a_trailing_doi_no_longer_inflates_the_title_checks_denominator():
+    """The URL strip's own stated reason, applied to the identifier that
+    replaced it: a token no first page will carry sits in the denominator and
+    pushes a correct retrieval toward `mismatch`. `jamanetworkopen` is printed
+    on no page — the page says "JAMA Network Open", with spaces."""
+    from papertrace.refs import _title_check_text
+
+    raw = ("Fujita S, Mori S, Onda K. Characterization of brain volume changes in aging "
+           "individuals. JAMA Netw Open. 2023;6(6):e2318153. "
+           "doi:10.1001/jamanetworkopen.2023.18153")
+    page = ("Characterization of Brain Volume Changes in Aging Individuals\n"
+            "Fujita S, Mori S, Onda K. JAMA Network Open. 2023;6(6):e2318153\n")
+
+    state, detail = _title_check_text(raw, page)
+    assert state == "verified", detail
+    assert "6/6" in detail, detail
+
+
+def test_a_doi_only_reference_has_nothing_to_match_on_rather_than_one_word():
+    """`unverifiable` either way, but for the honest reason: a single journal
+    slug lifted out of an identifier is not "one distinctive word" of the
+    reference, and calling it that invites a future ratio to believe it."""
+    from papertrace.refs import _title_check_text
+
+    state, detail = _title_check_text("10.1148/radiol.2019181432",
+                                      "Radiology 2019 imaging study of the chest")
+    assert state == "unverifiable"
+    assert "no distinctive words" in detail, detail
+
+
 def test_three_generic_domain_words_are_not_an_identity_check():
     """The last line of defence, in case a URL-only reference reaches it by some
     other route: with the URL stripped the ACR news page still scores 3/7 =
@@ -934,3 +1023,67 @@ def test_a_truncated_but_real_reference_is_still_searched(tmp_path):
 
     assert any("crossref" in u for u in asked), "a real reference was never looked up"
     assert e.doi == "10.1177/0363546512452714"
+
+
+def test_a_surname_with_an_umlaut_still_contributes_tokens():
+    """`_title_tokens` is `[a-z]{5,}`, so a diacritic splits a word or deletes
+    it. `Späth` and `Müller` contributed NOTHING, and this set is what
+    `titles_match`, `_same_work` and `_title_check_text` all compare — a
+    surname that vanished cannot agree with its own paper.
+
+    `_fold` existed in `refs.py` and was not used here. NFKD alone is not
+    enough: it leaves ß, ø, æ, đ, ł undecomposed.
+    """
+    assert "spath" in models._title_tokens("Späth C, Makowski MR")
+    assert "muller" in models._title_tokens("Müller H")
+    assert "cristobal" in models._title_tokens("Romero-Cristóbal M")
+    assert "kustner" in models._title_tokens("Küstner T")
+    assert "bjornsson" in models._title_tokens("Bjørnsson B")
+
+
+def test_folding_lowercases_before_it_transliterates():
+    """`_TRANSLITERATE` is keyed on lowercase letters only, so the order of the
+    two steps in `_fold` is load-bearing and was neither commented nor tested:
+    translating first leaves `Ø`, `Æ` and `Ł` to NFKD, which cannot decompose
+    them — they are distinct letters, not a base plus a mark — and the surname
+    loses them entirely. An uppercase initial letter is where a surname is most
+    likely to carry one."""
+    assert models._fold("Ø") == "o"
+    assert models._fold("Ærø") == "aero"
+    assert models._fold("Łukasiewicz") == "lukasiewicz"
+    assert models._fold("İNCE") == "ince"
+
+
+def test_folding_does_not_invent_or_merge_tokens():
+    """Gate 4, the other direction: an ASCII title must tokenise exactly as
+    before, and the stopword list must still bite after folding.
+
+    Note the stopword list holds `commun`, not `communications` — so
+    "Nature Communications" keeps a token. These four are all in the list.
+    """
+    assert models._title_tokens("Nature Science volume press") == set()
+    assert models._title_tokens("Robust segmentation of anatomic structures") == {
+        "robust",
+        "segmentation",
+        "anatomic",
+        "structures",
+    }
+
+
+def test_a_partial_resolution_round_trips_through_the_manifest(tmp_path):
+    """11 resolved and 3 still disputed is a representable state, and the wire
+    format is the dataclass — so this is the test that says the two lists can
+    both be non-empty at once (Gate 2 for `numbering_choice`,
+    `numbering_chosen_by` and `labels_resolved`)."""
+    from papertrace.models import RefManifest
+
+    m = RefManifest(manuscript="p.pdf", labels_resolved=["6", "7"], labels_disputed=["9"],
+                    numbering_choice="llm_resolved", numbering_chosen_by="user")
+    path = tmp_path / "refs_manifest.json"
+    m.to_json(path)
+    back = RefManifest.from_json(path)
+    assert back.labels_resolved == ["6", "7"]
+    assert back.labels_disputed == ["9"]
+    assert back.numbering_choice == "llm_resolved"
+    assert back.numbering_chosen_by == "user"
+    assert back.numbering_verified is False

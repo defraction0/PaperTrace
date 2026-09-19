@@ -33,6 +33,26 @@ Every subsystem encodes this, and most past bugs have been breaches of it:
   with the caveats at the top. A limited run must never read as a smaller
   paper; `tests/test_audit_limits.py` is the contract.
 
+Two rules about the wire format follow from it, both learned the expensive way
+on 0.7.0:
+
+- **A published field's meaning is never widened to fix a misleading
+  sentence.** When `numbering_verified` (extent: the chosen list accounts for
+  exactly the cited labels) read as "confirmed" beside a line withholding
+  verdicts for a disputed label (content), the fix was the *sentence*, not the
+  flag — four report formats already read that boolean, and stretching it to
+  cover content would have silently changed what every one of them asserts.
+  Add a second axis (`numbering_corroborated`, `labels_uncomparable`) or
+  reword; do not redefine.
+- **A zero or an empty value must not mean both "measured zero" and "never
+  measured".** `labels_uncomparable` is `None` when nothing computed it and
+  `[]` when every dispute was measured and every one was a contradiction;
+  `numbering_corroborated` is `bool | None` for the same reason, after its
+  docstring claimed three states for a type that held two. The report picks a
+  cause only where one was actually measured, and `evals/DESIGN.md` says the
+  same thing about a rate: *"Absent is not zero, and the two must never render
+  the same way."*
+
 When you add a feature, ask what it does when it fails. If the answer is "falls
 back to something reasonable", that is a bug in this codebase.
 
@@ -139,20 +159,138 @@ ingest → extract → refs → scout → check → highlight → report
   three characters so `nce-2023`/`ma-2023`/`ren-2023` all collapse to the year.
   Do not restore token containment as an acceptance route: it is a proposal, and
   the veto behind it has no precision on a single-subject bibliography.
+  **A table row in a bibliography is a reference, not a continuation** (0.7.0).
+  Docling reads a hanging-indent numeral column as a table, so entries arrive as
+  `|  6. | Author A (2019) … |` and the marker regex cannot see them (`\s*` does
+  not cross a `|`). `_unwrap_table_rows` runs first and restores the bullet form;
+  a row with *no* numeral cell is emitted unmarked on purpose, because docling
+  promotes the table's first data row to the header row and that row is the tail
+  of the bullet above it. Treating the rows as wrapped continuations read 22
+  references as 18 and judged every claim citing [6] or above against a different
+  paper — and the title check passed, because the glued raw string held both
+  papers' words.
+  **Never restore positional numbering after a printed numeral contradicts it.**
+  `_numerals_agree_with_position` is the whole distinction: where the surviving
+  numerals sit at the positions they name, position *is* the printed reading and
+  is used; where one does not, an entry above it was merged or split, so the
+  printed reading is unavailable and the positional one is known wrong.
+  Those entries set `boundary_ambiguous` and refuse to resolve. Position remains
+  a legitimate reading in exactly one case — a list that printed no numeral at
+  all — and `reconcile` marks even that unverified. Nor may an extent check
+  confirm a refusal: a refused entry keeps its positional label, so `_covers`'
+  subset test is satisfied by exactly the labels in doubt, and
+  `_refusals_unconfirm` is what stops a matching count printing "numbering
+  confirmed" over a numbering the parser declined to stand behind.
+  **Agreement is per printed label, and disagreement is refused rather than
+  ranked** (0.7.0). `reconcile` arbitrates between the Crossref deposit and the
+  run backend's parse, unchanged; a flat-text pymupdf reading and a model
+  reading (`reflist.py`, `--llm-refs`) are **voters only** — neither reaches
+  `reconcile`'s arguments nor `resolve_all`, so on their own they cannot cause
+  a source to be resolved, downloaded or judged: they withhold a verdict, and
+  (through `stamp_seen_in`) name themselves on an entry they also carried.
+  **Do not restate that as "no model output can": one path escapes it and is
+  gated on a person.** `_escalate_disputed` menu option 1 makes a *second*
+  model call (`reflist.resolve_disputed`) and substitutes each resolved entry
+  into the chosen list, which `resolve_all` downloads and `check.py` judges.
+  The substitution is mandatory, not optional: returning `entries` untouched
+  un-disputes the label while leaving the entry the resolution ruled *against*
+  as the paper judged, which is the original wrong-paper bug reached through
+  the one path a user authorised. What keeps it honest is the gate, and the
+  gate is what may not be relaxed — an interactive run, the full disagreement
+  on disk before anything is asked, `numbering_chosen_by: "user"`, only the
+  labels actually resolved substituted, and no answer setting
+  `numbering_verified`.
+  `label_agreement` joins on `e.num`, the printed numeral, never on position:
+  `_first_divergence` zips, and would compare docling's 6th entry against
+  pymupdf's 6th and report divergence for the wrong reason. Any pair
+  `_comparably_same` answers `False` for makes the label `disputed` — no majority vote,
+  because *"a non-unique match is refused, never ranked"* — and `single`
+  deliberately **prints**, since a pymupdf-backend run whose model candidate
+  was discarded has one reading, every label would be `single`, and the audit
+  would report nothing at all. **`_same_work` is deliberately not reused here.**
+  It returns True when either side has no comparable title — right for
+  `_first_divergence`, where silence must not manufacture a divergence — and
+  here it once reported two demonstrably unrelated papers as `agreed`, which is
+  the one state that lets a verdict through. `_comparably_same` asks the mirror
+  question and is three-valued: `None` is *cannot tell*, and a voter it answers
+  `None` for **abstains** rather than dissenting. Collapsing that to `False`
+  made a Crossref deposit of bare DOIs dispute every label it voted on while
+  the two parses agreed perfectly — an audit with no verdicts in it. The one
+  exception is a label where *no* voter said anything comparable at all
+  (`_says_something_comparable`): that is `disputed`, because nothing
+  establishes what the label names. So `disputed` has three causes — duplicate,
+  contradiction, nothing comparable — `_label_state` returns which, and
+  `labels_uncomparable` publishes the third as a subset of `labels_disputed`
+  **by construction**, both read off the same call. Never compute the subset
+  from a second pass, and re-intersect it after every mutation: the escalation
+  can take a label out of `labels_disputed`, and a subset computed before it
+  then names a label the manifest no longer disputes.
+  A `boundary_ambiguous` entry does not speak for its label and neither does a
+  reading carrying that label twice: the first has said it cannot stand behind
+  the label, and for the second, which of the two it means is the question. The
+  model's reading may not **corroborate** at all (`DERIVED_READINGS`):
+  `reflist.propose` may only copy values out of the two extractions, both of
+  which vote in their own right, so crediting it is one text counted twice.
+  Every field of the model's reply must be found **verbatim** in one of the two
+  texts it was shown or it is discarded, and one entry's unverifiable title
+  discards the model's **whole reading**, never just that entry — nothing
+  invented may name a paper. `numbering_corroborated` is a second, independent
+  axis: `numbering_verified` keeps its exact meaning and stays `False` through
+  every model reply and every interactive choice, which
+  `tests/test_numbering_invariant.py` parametrises over and which is the one
+  thing in this feature that may not be relaxed for convenience.
+  `models._title_tokens` strips DOIs the way it strips URLs, and for the reason
+  the URL strip's own docstring gives: an identifier's substrings are not words
+  anybody wrote as a title. A DOI-only Crossref deposit (`_reference_raw`'s
+  documented fallback, and the majority of the deposit on the paper that
+  prompted this) was contributing `radiol` and `jamanetworkopen` as title
+  words, which disputed every label it voted on and pushed `_title_check_text`
+  toward `mismatch` on correct retrievals. Stripping it is global, not scoped
+  to the comparator: `_same_work` and `_title_check_text` both move, both
+  toward honesty, and both movements were measured before the strip landed.
+- **`ask.py`** — the **only** file in `src/` that runs a subprocess, and the
+  only place this codebase shells out to a model (`claude -p --safe-mode
+  --tools ""` in a private scratch cwd; inherits the user's Claude Code login,
+  no API key). "`check.py` is the only module that calls a model" was the rule
+  until `refs` needed a reading of the bibliography too — the rule was
+  protecting the seam, not the module, and `tests/test_ask.py` greps `src/` and
+  asserts exactly one file, which makes it enforceable rather than
+  conventional. Two callers, `check.py` and `reflist.py` (driven by the `refs`
+  stage in `cli.py` — `refs.py` itself imports neither), and no third without
+  that test going red. The model is recorded **per call
+  site** (`for_site`, `model_for`, `SITE_CHECK`, `SITE_REFS`), not in one
+  global: `_LAST_MODEL` was overwritten by every call, so a run whose judging
+  made zero calls — every cited source `not_retrieved`, nothing to judge —
+  printed the reference-list model as the `Checker:` of verdicts it never saw.
+  `_ask`'s signature is frozen at `(prompt, model=None)`; every offline test
+  that patches the seam does so with a two-argument lambda, which is why the
+  site travels out of band in a context manager instead of as a third
+  parameter. **No integer here**: the count moves with every test added or
+  removed, and `ask.py` and `reflist.py` each still carry a stale one in a
+  comment.
   **Limits** arrive as `resolve_all(only_labels=, limit=)`: a reference no
   selected claim cites, or one past the cap on sources *obtained* (successes,
   not attempts), is `_skip`ped — status `skipped`, `skipped_by`, a reason —
   and never resolved, provided file or not. The CLI passes those kwargs only
   when set, so every fake of the seam that predates them keeps working.
-- **`check.py`** — the **only** module that calls a model, and only through the
-  `_ask()` seam (`claude -p` subprocess; inherits the user's Claude Code login,
-  no API key). Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per
+- **`check.py`** — every prompt and every verdict rule, and no subprocess of
+  its own. Two prompts: `EXTRACT_PROMPT` then `CHECK_PROMPT`, one call per
   **document** so context stays small — an article, each of its supplements,
-  and each of the audited paper's own are separate calls with separate verdicts. Also holds `coverage_audit()`, which is
-  deliberately **mechanical and prompt-independent** — a regex
+  and each of the audited paper's own are separate calls with separate
+  verdicts. Call the bare name `_ask(...)`, imported `from .ask import _ask`, so
+  `monkeypatch.setattr(check_mod, "_ask", …)` still intercepts; rewriting a
+  call site as `ask._ask(...)` bypasses every patch and turns the offline suite
+  into live paid calls. `_ask_with_retry` wraps the seam and reads
+  `ASK_ATTEMPTS` rather than hardcoding one retry — the wizard prints a
+  worst-case bill derived from that constant. Also holds `coverage_audit()`,
+  which is deliberately **mechanical and prompt-independent** — a regex
   (`_LABEL_GROUP`) over bracketed numeric labels, so a citation the extractor
-  missed still surfaces. The module global `_LAST_MODEL` carries the judging
-  model out to the report; truncation travels in a per-run `Truncations`.
+  missed still surfaces. **A `disputed` label is dropped from `avail` before any
+  call is made**, so a source whose identity two readings contradict is never
+  judged; if nothing survives the claim is `unchecked` with the labels named,
+  never `not_retrieved` — that source was obtained, and `withheld_refs` is a
+  different field from `unjudged_refs` for exactly that reason. `last_model()`
+  reads the `check` site; truncation travels in a per-run `Truncations`.
 - **`highlight.py`** — the division of labour that keeps evidence trustworthy:
   the model proposes page, block and verbatim anchor phrases; **Python** locates
   them with PyMuPDF `page.search_for` and draws the boxes. Boxes are never

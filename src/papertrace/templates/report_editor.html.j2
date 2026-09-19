@@ -144,6 +144,9 @@
 {% for d in claim_disclosures(c) if d.key == "claim_numbering" %}
     <p class="cap"><span style="color:var(--amber)">⚠ {{ d.text }}</span></p>
 {% endfor %}
+{% for d in claim_disclosures(c) if d.key == "claim_pairing" %}
+    <p class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></p>
+{% endfor %}
 {% if c.judgements %}
 {% for j in c.judgements %}
     <h3><span class="hx">###</span> <span class="status {{ j.verdict }}">{{ j.label }}</span> — <span class="slug">{{ j.source_slug }}</span> <span class="cap">{{ j.origin }}</span></h3>
@@ -230,7 +233,7 @@
 {% if c.note %}
           <div class="cap">{{ c.note }}</div>
 {% endif %}
-{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs", "claim_numbering") %}
+{% for d in claim_disclosures(c) if d.key in ("sources", "unjudged_refs", "claim_numbering", "claim_pairing") %}
           <div class="cap"><span style="color:var(--{{ 'amber' if d.level == 'warn' else 'fg' }})">{{ '⚠ ' if d.level == 'warn' else '' }}{{ d.text }}</span></div>
 {% endfor %}
 {% for j in c.judgements %}

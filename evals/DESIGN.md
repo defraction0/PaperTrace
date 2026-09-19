@@ -50,6 +50,59 @@ a correct answer. A case whose labellers could not agree gets
 `gold_verdict: null`, is kept in the set, and is excluded from every
 denominator — deleting it would quietly make the set easier.
 
+### A second unit, specified elsewhere: (citation label, printed reference entry)
+
+What follows is a **pointer plus the constraints that would otherwise be
+rediscovered wrongly** — not a specification this harness implements. The
+sibling plan owns the design; the paragraphs below exist so that plan cannot
+quietly reuse `align.py`, key a gold set on position, or blend two error
+directions. Nothing here is implemented, and the Status note at the top of
+this document governs every word of it.
+
+The unit above is `(manuscript claim, cited source)` and it grades a model's
+judgement. It cannot grade the join that *chooses* the source. That join broke
+on a real manuscript — 22 printed references read as 18, and six substantive
+verdicts naming papers the manuscript never cited — and every one of them
+carried `title_check: verified`, because the glued reference string really did
+contain the downloaded paper's words alongside the cited paper's. (That count
+is an incident on one manuscript, recorded in
+`docs/superpowers/specs/2026-09-16-llm-reference-list-design.md`; the
+manuscript is not in this repository and gate 3 forbids committing it. It is
+not a measurement of anything.)
+
+So there is a second task, never folded into `judgment_accuracy`, whose unit is
+`(citation label, printed reference entry)`. Deliberately **not**
+`(label, retrieved PDF)`: that conflates the two joins, and it is exactly the
+conflation that let `verified` be printed on six wrong papers. Its gold rows
+carry the entry text **verbatim as printed** and no entry index — a gold set
+keyed on position breaks whenever parsing changes.
+
+Its two error directions are reported **separately and never blended**: labels
+the parse got wrong and the tool confirmed anyway (the safety metric), and
+labels the parse got right and the tool refused (the cost). The cost direction
+has two causes that must not be blended either — the readings contradicted
+each other, or nothing in them could be compared — because the tool now
+publishes which (`labels_uncomparable`, a subset of `labels_disputed`) and a
+precautionary withholding on a bare-DOI deposit is a different finding from a
+real contradiction. Superscript papers
+have no arbiter and cannot be scored at all; they are excluded with a reason and
+counted, never deleted.
+
+**It is specified and implemented in its own plan, not here.** It needs
+`metrics.confusion()` parameterised off `JUDGMENT_VERDICTS`, a new population in
+`scoring._populations`, its own pass in `eligibility.py`, and
+`provenance.prompt_fingerprint` extended to cover `REFLIST_PROMPT` and
+`RESOLVE_PROMPT` — hashing only `EXTRACT_PROMPT` and `CHECK_PROMPT` while two
+more prompts decide the answers is the classic eval failure. `align.py` is not
+reusable for it and must not be touched: its candidate scoring is `difflib` over
+`(normalize_claim(text), set(labels))` with a 0.60 floor, and a pairing task
+wants an exact join on the label. `missing` keeps its `list[str]` meaning byte
+for byte — a refused pairing must never be unioned into it, because a
+wrongly-paired label is a numbering fault, not an extraction gap.
+
+Nothing in this section has been measured. The Status note at the top of this
+document governs it too.
+
 ## Paired cases
 
 A pair is the same fact from the same source in two versions: one stated
@@ -499,9 +552,28 @@ it is not "fixed" later.** `EXTRACT_PROMPT` asks for claims in reading order,
 which makes zipping claim *n* to occurrence *n* tempting. The order is
 unverified, and it degrades silently: one skipped claim shifts every later
 pairing by one and the audit emits confident, wrong attributions that are
-indistinguishable from correct ones. The tool matches text instead, with a
-margin, and refuses to answer when the margin is not met — `uncertain`, which
-is never counted as covered.
+indistinguishable from correct ones.
+
+Attribution is a **lookup, not a match**. `citation_occurrences()` builds the
+inventory *before* the model call, `_render_inventory()` renders it into
+`EXTRACT_PROMPT` as `ctx_NNNN`, and each claim comes back naming the ids it was
+taken from, resolved through the map built in that same pass. A `ctx` absent
+from the inventory is **dropped**, never repaired into "the first occurrence of
+that label". Since `coverage/3`, `uncertain` has exactly one cause — a claim
+cites a label and names none of that label's contexts, so a claim reached one of
+them and nothing can say which — and it is never counted as covered.
+
+The ids are not a licence to zip after all. The labels are *assigned* in reading
+order, but they are resolved through the mapping built with them, never by
+re-deriving position later; a consumer that pairs the *n*th ctx with the *n*th
+occurrence of a freshly recomputed list has rebuilt the bug.
+
+This section described a text-similarity mechanism until `coverage/3` deleted
+it — `_attribute_label`, `_normalize_for_match`, `_ratio`, `_location_matches`,
+`OCCURRENCE_MIN_RATIO`, `OCCURRENCE_MIN_MARGIN`, none of which survives in
+`src/`. Do not reintroduce a similarity fallback for an unresolvable `ctx`:
+that is the confident-wrong-pointer failure the redesign removed, and
+`uncertain` is the honest answer instead.
 
 **The occurrence figures are not `Rate`s.** Every `Rate` in an eval record
 names a population declared in the record's `populations` block, and that block
