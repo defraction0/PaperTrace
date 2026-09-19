@@ -4,7 +4,7 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
-## [0.7.0] — unreleased
+## [0.7.0] — 2026-09-19 (beta)
 
 ### Added — audit a slice on request: `--max-claims` and `--max-sources`
 
