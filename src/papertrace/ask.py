@@ -35,9 +35,13 @@ SITE_CHECK = "check"
 SITE_REFS = "refs"
 
 # which site the next `_ask` belongs to, and what model answered at each.
-# `_ask`'s signature stays `(prompt, model=None)` deliberately: sixty-two test
-# sites monkeypatch it with a two-argument lambda, and a third parameter would
-# break every one of them in order to record something the fakes never produce.
+# `_ask`'s signature stays `(prompt, model=None)` deliberately: the test suite
+# monkeypatches it with a two-argument lambda in dozens of places, and a third
+# parameter would break every one of them in order to record something the
+# fakes never produce. No count is given on purpose — it was written as 62,
+# measured at 46, then 48, because it grows with every test that touches the
+# seam, and a number that drifts with unrelated work is a maintenance cost
+# pretending to be evidence.
 _SITE = "unknown"
 _MODELS: dict[str, str] = {}
 
