@@ -271,10 +271,14 @@ its name; `-c` picks another. Re-running the same paper into its folder is
 fine. A different paper is refused.
 
 **The model.** Checking runs on headless Claude Code (`claude -p`) in safe
-mode with no tools; `--model` chooses the model. Nothing else calls one, and
-ingest, crops and reports give the same output for the same input. Retrieval
-and the scout query live services, so a re-run months later can find a
-different set of sources.
+mode with no tools; `--model` chooses the model. One other step calls one: with
+`--llm-refs` (on by default) the `refs` stage asks a model to read the printed
+bibliography as a further opinion on the numbering, and every field it returns
+must be found verbatim in the extracted text or it is discarded. Both calls go
+through one seam, which is the only place in `src/` that runs a subprocess, and
+each records which model answered. Ingest, crops and reports give the same
+output for the same input. Retrieval and the scout query live services, so a
+re-run months later can find a different set of sources.
 
 ## Tables and figures are evidence too
 
@@ -430,7 +434,11 @@ box glyphs.
       the viewer, the README and the terminal (0.6.0)
 - [x] Audit a slice on request — `--max-claims` and `--max-sources` in the CLI
       and the wizard, every reference left out recorded as `skipped`, and the
-      scope stated at the end of every report (unreleased)
+      scope stated at the end of every report (0.7.0)
+- [x] Check the reference numbering against several readings — the parse, a
+      flat-text parse, the publisher's deposit and a model's reading; a label
+      the readings disagree about has its verdict withheld rather than printed
+      against a paper that may be the wrong one (0.7.0)
 - [ ] Cherry-pick claims by number — a "re-check these" in the viewer, on the
       array `check` already takes and the numbered `out/claims.json` it reads
 - [ ] Viewer: a single-file export with the evidence crops embedded, so an
