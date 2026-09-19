@@ -16,7 +16,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from papertrace import ask as ask_mod  # noqa: E402
 from papertrace import check as check_mod  # noqa: E402
 from papertrace import cli  # noqa: E402
 from papertrace.models import ClaimExtraction, RefEntry, RefManifest  # noqa: E402
@@ -202,11 +201,15 @@ def test_check_pipeline_passes_the_manifests_disputed_labels_to_check_claims(
         labels_disputed=["9"],
     ).to_json(case / "refs_manifest.json")
 
-    # `_check_pipeline` does `from .ask import claude_available` INSIDE the
-    # function body, so the name it calls is resolved fresh from the `ask`
-    # module at call time — patching `check_mod.claude_available` or
-    # `cli.claude_available` touches an attribute nothing ever reads.
-    monkeypatch.setattr(ask_mod, "claude_available", lambda: True)
+    # Patch the GATE, not the predicate behind it. `_check_pipeline` calls
+    # `cli._require_claude()`, which does `from .check import claude_available`
+    # — and `check.claude_available` is a re-export, a *separate module
+    # attribute* from `ask.claude_available` even though both name one
+    # function. Patching `ask_mod` left the one this path reads untouched, so
+    # the test passed on a machine with the CLI installed and failed all ten
+    # CI jobs, which have none. Patching `_require_claude` itself cannot
+    # drift with a future refactor of which module it imports from.
+    monkeypatch.setattr(cli, "_require_claude", lambda: None)
     # `_check_pipeline` reads the extraction through `cli._extraction_for` now
     # — the `limits` feature made extraction a stage of its own so a claims
     # limit can retrieve only what the selected claims cite, and stubbing
@@ -250,7 +253,15 @@ def test_check_pipeline_tolerates_a_manifest_with_nothing_disputed(tmp_path, mon
     case.mkdir()
     RefManifest(manuscript="m.pdf", entries=[]).to_json(case / "refs_manifest.json")
 
-    monkeypatch.setattr(ask_mod, "claude_available", lambda: True)
+    # Patch the GATE, not the predicate behind it. `_check_pipeline` calls
+    # `cli._require_claude()`, which does `from .check import claude_available`
+    # — and `check.claude_available` is a re-export, a *separate module
+    # attribute* from `ask.claude_available` even though both name one
+    # function. Patching `ask_mod` left the one this path reads untouched, so
+    # the test passed on a machine with the CLI installed and failed all ten
+    # CI jobs, which have none. Patching `_require_claude` itself cannot
+    # drift with a future refactor of which module it imports from.
+    monkeypatch.setattr(cli, "_require_claude", lambda: None)
     # `_check_pipeline` reads the extraction through `cli._extraction_for` now
     # — the `limits` feature made extraction a stage of its own so a claims
     # limit can retrieve only what the selected claims cite, and stubbing
