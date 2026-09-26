@@ -64,6 +64,8 @@ pytest tests/test_refs.py -q      # one module
 pytest tests/test_refs.py::test_paywalled_is_honest -q   # one test
 pytest -k coverage -q             # by name
 pytest tests/test_report_viewer_js.py -q   # the viewer's browser logic, under node (skips without it)
+pytest tests/test_mcp_server.py -q  # the MCP server, via the SDK's in-memory client + one real stdio run
+papertrace mcp                    # serve over stdio for an MCP host ([mcp] extra); nothing on stdout
 ruff check src tests scripts evals
 uv build                          # sdist + wheel (python -m build is NOT installed)
 ```
@@ -101,7 +103,9 @@ and torch with it — but never *runs* it: the ~500 MB layout models download on
 first use, not on install, and every test pins `backend="pymupdf"`
 (`check_claims` makes `backend` a required argument so none can forget).
 `playwright` must still stay out of CI; it is the `png` extra, needed only for
-`--png`, with `playwright install chromium` once.
+`--png`, with `playwright install chromium` once. The MCP SDK is the opposite
+case: the `[mcp]` extra, and in `[dev]` as well, so CI runs
+`tests/test_mcp_server.py` instead of skipping it.
 
 ## Architecture
 
@@ -262,6 +266,8 @@ ingest → extract → refs → scout → check → highlight → report
   global: `_LAST_MODEL` was overwritten by every call, so a run whose judging
   made zero calls — every cited source `not_retrieved`, nothing to judge —
   printed the reference-list model as the `Checker:` of verdicts it never saw.
+  The record assumes one command per process; `forget_models()` clears it for
+  a process that outlives one run, which the MCP server calls per audit.
   `_ask`'s signature is frozen at `(prompt, model=None)`; every offline test
   that patches the seam does so with a two-argument lambda, which is why the
   site travels out of band in a context manager instead of as a third
@@ -326,7 +332,32 @@ ingest → extract → refs → scout → check → highlight → report
   DOM-free module (parsing `annotated.md`, anchoring quotes with the claim's
   `ctx_ids` block searched first, crop sets, filters, the claim map) that
   `tests/test_report_viewer_js.py` runs under node, and `viewer_app.js`, which
-  only draws. Disclosures are never re-derived in JS.
+  only draws. Disclosures are never re-derived in JS. The MCP server is a fifth
+  reader: it serialises the same `Disclosure` objects with `_disclosure_dict`,
+  generically, and `tests/test_mcp_server.py`'s parity loops assert every
+  token reaches it.
+- **`mcp_server.py`** — `papertrace mcp`, an MCP server over stdio
+  (`mcp>=2.2,<3`, the `[mcp]` extra) with nine tools. Seven read a case folder
+  and compute nothing: every verdict and count travels with its disclosures,
+  the scope sentence first and again as the final `limited` key; a missing
+  `results.json` is a `ToolError`, never empty counts; evidence is served only
+  from inside `<case>/out/`, and no `pdf_path` leaves. `start_audit` runs
+  `cli._run_pipeline` **in-process, on one daemon thread** — never a
+  subprocess, which `tests/test_ask.py` would refuse — and `audit_status`
+  long-polls for at most 50 s, inside the 60 s a TypeScript-SDK host allows a
+  request. A server outlives many audits, which the CLI never did, so the job
+  resets what a process used to reset by exiting: `cli.console` becomes the
+  job's log (under stdio, stdout is the protocol's wire), `sys.stdin` becomes
+  an empty stream (`_interactive()` is False, so a disputed label is withheld
+  with `chosen_by: "default"` and the person-gated escalation is unreachable —
+  do not offer MCP elicitation in its place: a host may be a model), and
+  `ask.forget_models()` runs first. Those three are process-global, hence
+  **one audit at a time**, and read tools refuse a case whose audit is still
+  running. **Any new process-global state in the pipeline must be reset per
+  audit here.** In SDK v2 only a `ToolError`'s message reaches the model — any
+  other exception is a bare "Error executing tool" — so every refusal is one.
+  Return types are `typing_extensions.TypedDict` with `structured_output=True`:
+  `typing.TypedDict` silently cost every tool its output schema below 3.12.
 
 The `case/` folder is the unit of work: one case per paper, guarded by
 `_guard_case`. It is gitignored by design — manuscripts stay local.

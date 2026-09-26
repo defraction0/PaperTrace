@@ -62,7 +62,7 @@ pip install -e ".[full]"                      # layout-aware ingest — ~1.4 GB,
 export PAPERTRACE_EMAIL="you@example.org"     # Unpaywall asks for a contact address
 ```
 
-Three ways in, all producing the same case folder and reports:
+Four ways in, all producing the same case folder and reports:
 
 - **Guided** — run `papertrace` and answer the questions. It checks your setup
   first, then asks one thing at a time: the paper, where to keep the audit,
@@ -79,6 +79,10 @@ Three ways in, all producing the same case folder and reports:
   interviews you (the paper, your PDFs, your journal's reviewer form as
   screenshots), retrieves and checks with evidence as it goes, drafts the
   findings, and ends by writing the viewer.
+- **From an MCP host** — Claude Desktop, Cursor, VS Code or Claude Code, with
+  `papertrace mcp` as a server: start an audit, follow it, and read every
+  verdict with its caveats and its evidence crops. See
+  [From an MCP host](#from-an-mcp-host).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/defraction0/PaperTrace/main/docs/wizard.png" width="85%" alt="The guided audit in a terminal: a setup check, then the questions one at a time — the paper's path, the case folder, cited PDFs already to hand, the paper's own supplements, a DOI found on the first page, a contact email, whether to write the interactive viewer, whether to limit the audit — and the cost stated as a number of model calls before asking permission to start.">
@@ -94,6 +98,7 @@ Output lands in `<case>/out/`: `report.md` always, `report_viewer.html` with
 |---|---|
 | `pip install -e .` | the standard install — layout-aware ingest of the paper **and** its cited sources (docling's ~500 MB layout models download on first run) |
 | `pip install -e ".[png]"` | plus PNG rendering of the report looks |
+| `pip install -e ".[mcp]"` | plus `papertrace mcp`, the server for MCP hosts |
 | `pip install -e ".[dev]"` | the test and lint tooling, exactly what CI installs — run the suite as `python -m pytest` |
 | `pip install -e ".[dev,png]"` | everything |
 
@@ -175,6 +180,9 @@ source that was read flat.
   verdict and evidence crop, and say how each supplement was attached.
 - Audit a slice on request — `--max-claims N`, `--max-sources N` — and end
   every report by stating, in numbers, what was left out.
+- Serve the same audit to an MCP host (`papertrace mcp`): start one, follow
+  it, and read every verdict with the disclosures the reports carry and the
+  evidence crops as images. The server computes no verdict of its own.
 - Keep you responsible for interpretation: it prepares evidence and drafts;
   the conclusions are yours.
 
@@ -202,6 +210,9 @@ source that was read flat.
   on a source's supplementary table is judged against its main text alone.
 - Guarantee an exhaustive literature search — the scout is search-based, and
   absence from its lists proves nothing.
+- Settle a disputed reference label from an MCP host. Nobody is asked over
+  MCP, so verdicts on that label are withheld — the CLI's answer when no
+  terminal is attached — and `papertrace refs` in a terminal settles it.
 - Replace peer review or your research judgement.
 
 ## The viewer
@@ -279,6 +290,64 @@ through one seam, which is the only place in `src/` that runs a subprocess, and
 each records which model answered. Ingest, crops and reports give the same
 output for the same input. Retrieval and the scout query live services, so a
 re-run months later can find a different set of sources.
+
+## From an MCP host
+
+`papertrace mcp` serves PaperTrace over stdio to any
+[MCP](https://modelcontextprotocol.io) host. Install the extra, and give the
+host the command by absolute path — a host starts its servers from its own
+working directory, with its own and often minimal `PATH`:
+
+```bash
+pip install -e ".[mcp]"
+which papertrace                                  # the path the host needs
+claude mcp add papertrace -- /absolute/path/to/papertrace mcp   # Claude Code
+```
+
+Claude Desktop reads it from `claude_desktop_config.json`, and Cursor from
+`.cursor/mcp.json` in the same shape; VS Code takes the same command as a
+`"servers"` entry with `"type": "stdio"` in `.vscode/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "papertrace": {
+      "command": "/absolute/path/to/papertrace",
+      "args": ["mcp"],
+      "env": {"PAPERTRACE_EMAIL": "you@example.org"}
+    }
+  }
+}
+```
+
+| Tool | What it does |
+|---|---|
+| `start_audit` | runs the `papertrace run` pipeline in the background and returns at once |
+| `audit_status` | running, finished or failed, with the log tail; waits up to 50 s per call |
+| `audit_summary` | verdict counts, references obtained, the judging model, coverage, and every run-level disclosure |
+| `list_claims`, `get_claim` | each claim with the paper's own sentence, each source's verdict and rationale, and its caveats |
+| `get_evidence` | the red-box page crops a verdict rests on, as images |
+| `list_references` | the retrieval manifest and the numbering state — without local file paths |
+| `list_gaps`, `get_scout` | uncited assertions, citation places no claim reached, unchecked claims; the scout's registers |
+
+The read tools work on any case folder, made over MCP or by the CLI, and
+change nothing. Every verdict arrives with the caveats the reports print
+beside it, and a limited audit says so first and last. An audit takes minutes,
+longer than many hosts wait for a single request, which is why it runs as a
+job that `audit_status` follows.
+
+`start_audit` spends what `papertrace run` spends: `claude -p` calls on this
+machine's Claude login, and the open-access services. So `claude` has to be on
+the server's `PATH` — if the host's is too minimal, add its directory in
+`env` — and the contact email comes from `start_audit`'s `email`, from
+`PAPERTRACE_EMAIL`, or from the address `papertrace` saved. A missing
+manuscript, a `claude` the server cannot find, no email, or a case folder
+holding another paper is refused before anything is spent. One audit runs at a
+time per server, and a case folder the server is writing is not read until the
+audit ends. Nobody is at an MCP call to answer a question, so a reference label
+whose readings disagree is withheld, never settled — that takes you, at a
+terminal. Nothing but the protocol reaches stdout; what the pipeline prints
+comes back in `audit_status`'s log.
 
 ## Tables and figures are evidence too
 
@@ -367,8 +436,9 @@ paper.pdf ─────ingest──▶ clean.md + source_map.json       (page 
 Seven stages, each a subcommand, chained by `run`; every stage writes a file
 into the case folder and the next reads only that. The JSON contracts are
 versioned in [`schemas/`](schemas/). The two skills in
-[`.claude/skills/`](.claude/skills/) drive the same tools interactively; the
-audit craft lives in [`prompts/review_core.md`](prompts/review_core.md).
+[`.claude/skills/`](.claude/skills/) drive the same tools interactively, and
+`papertrace mcp` serves them to any MCP host; the audit craft lives in
+[`prompts/review_core.md`](prompts/review_core.md).
 
 ## Ethics & scope
 
@@ -453,7 +523,8 @@ box glyphs.
 - [ ] More scout backends (OpenAlex, Semantic Scholar)
 - [ ] Other LLM backends (local and API models alongside headless Claude Code)
 - [ ] Claude Desktop integration
-- [ ] MCP server — drive PaperTrace as a tool from any MCP-capable client
+- [x] MCP server — drive PaperTrace as a tool from any MCP-capable client:
+      `papertrace mcp` (unreleased)
 - [ ] DOCX ingest
 - [ ] Revision (R1) mode polish
 - [ ] Figure-vs-text consistency pass (batch)

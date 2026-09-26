@@ -4,6 +4,48 @@ All notable changes to PaperTrace are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added — `papertrace mcp`: an MCP server, for hosts that are not a shell
+
+The roadmap's *drive PaperTrace as a tool from any MCP-capable client*.
+`papertrace mcp` serves nine tools over stdio, behind a new `[mcp]` extra
+(`mcp>=2.2,<3`, the SDK's current major): `start_audit` and `audit_status`
+run and follow the `papertrace run` pipeline; `audit_summary`, `list_claims`,
+`get_claim`, `get_evidence`, `list_references`, `list_gaps` and `get_scout`
+read any case folder, made over MCP or by the CLI. `get_evidence` returns the
+red-box crops as images.
+
+The server is held to the reports' rules rather than given its own. It
+computes no verdict. Every count and verdict carries the disclosures
+`disclosures.py` decided for the four report formats — serialised the
+viewer's way, with a parity test extending the four-format contract to this
+fifth reader — and a limited audit says so first and last. A missing or
+unreadable `results.json` is refused with its reason, never answered with
+empty counts; `null` in the manifest's three-state fields stays `null`; no
+local PDF path is served, and no evidence image from outside `<case>/out/`.
+
+An audit takes minutes and a host built on the TypeScript SDK gives a request
+60 s, so `start_audit` returns at once and `audit_status` long-polls for at
+most 50 s. The audit runs in-process — `ask.py` stays the only file in `src/`
+that starts a process — on one thread at a time, because the pipeline's
+console, `ask`'s model record and stdin are process-global. Inside it nobody
+can be asked: a reference label whose readings disagree is withheld, as the
+CLI does without a terminal, and settling one still takes a person at a
+terminal. And each audit starts with `ask.forget_models()`: the CLI never
+cleared the model record because it ran one command per process, and a
+second audit whose judging made no calls would otherwise have named the
+first one's model as its judge. Design, rejected alternatives and the
+decision record:
+`docs/superpowers/specs/2026-09-26-mcp-server-design.md`,
+`docs/adr/0004-mcp-server.md`.
+
+### Changed — `[full]` and `[dev]` carry the MCP SDK
+
+`[full]`, the quick start's everything-install, now includes the SDK, so
+`papertrace mcp` works after it. `[dev]` — what CI installs — carries it so
+the MCP tests run on every Python in the matrix instead of skipping.
+
 ## [0.7.1] — 2026-09-19 (beta)
 
 Two fixes the 0.7.0 showcase run exposed, and the showcase itself.
