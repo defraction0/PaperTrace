@@ -1,0 +1,1018 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mcp_tools",
+  "description": "What `papertrace mcp` returns: the structured content of each tool's result, one definition per tool under $defs (named after the tool), with the shapes they share. The SDK publishes each as the tool's outputSchema in tools/list; this file is the same contract where this repository keeps its contracts, and tests/test_mcp_server.py validates every tool's output against it. get_evidence returns content blocks — a caption and images — rather than structured content, and has no definition here.",
+  "$defs": {
+    "audit_summary": {
+      "description": "The result of one audit, from out/results.json and refs_manifest.json. Never returned for a case without results.json — the call fails with the reason instead — so no count here stands for 'never measured'.",
+      "properties": {
+        "case": {
+          "type": "string"
+        },
+        "manuscript": {
+          "type": "string"
+        },
+        "checker": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "converter": {
+          "type": "string"
+        },
+        "references": {
+          "$ref": "#/$defs/RefCounts"
+        },
+        "claims": {
+          "type": "integer"
+        },
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "uncited_assertions": {
+          "type": "integer"
+        },
+        "coverage": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The coverage headline; null when the coverage audit could not run — never an empty string or a zero ratio."
+        },
+        "disclosures": {
+          "items": {
+            "$ref": "#/$defs/DisclosureOut"
+          },
+          "type": "array",
+          "description": "Every run-level disclosure, in the order the reports print them — the scope first when the audit was limited."
+        },
+        "reports": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Absolute paths of the report files present in out/."
+        },
+        "limited": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The scope sentence when the audit was limited on request, stated last as every report states it; null when the whole paper was audited."
+        }
+      },
+      "required": [
+        "case",
+        "manuscript",
+        "checker",
+        "date",
+        "converter",
+        "references",
+        "claims",
+        "counts",
+        "uncited_assertions",
+        "coverage",
+        "disclosures",
+        "reports",
+        "limited"
+      ],
+      "type": "object"
+    },
+    "list_claims": {
+      "description": "One row per checked claim, each with its claim-level caveats, and the run-level disclosures once beside them.",
+      "properties": {
+        "case": {
+          "type": "string"
+        },
+        "verdict_filter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "claims_total": {
+          "type": "integer"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/ClaimRow"
+          },
+          "type": "array"
+        },
+        "run_disclosures": {
+          "items": {
+            "$ref": "#/$defs/DisclosureOut"
+          },
+          "type": "array",
+          "description": "The caveats the reports print above every verdict, so a claim read without audit_summary still has them."
+        },
+        "limited": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "As audit_summary's: the scope sentence, or null for a whole-paper audit."
+        }
+      },
+      "required": [
+        "case",
+        "verdict_filter",
+        "claims_total",
+        "claims",
+        "run_disclosures",
+        "limited"
+      ],
+      "type": "object"
+    },
+    "get_claim": {
+      "description": "One claim in full: the paper's sentence, each cited source's judgement, and every disclosure the claim and the run owe its reader.",
+      "properties": {
+        "case": {
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "qualifier": {
+          "type": "string"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "own_supplement": {
+          "type": "boolean"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "block": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "anchor_phrases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "anchor_located": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "evidence_images": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Crop paths relative to <case>/out/; get_evidence returns the images themselves."
+        },
+        "judgements": {
+          "items": {
+            "$ref": "#/$defs/JudgementOut"
+          },
+          "type": "array"
+        },
+        "unjudged_refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Co-cited labels whose source could not be obtained — nobody read them."
+        },
+        "withheld_refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Co-cited labels whose source was obtained and withheld, because the readings of the reference list disagree about which paper the label names."
+        },
+        "disclosures": {
+          "items": {
+            "$ref": "#/$defs/DisclosureOut"
+          },
+          "type": "array",
+          "description": "The claim-level disclosures, as every report format prints them beside the claim."
+        },
+        "run_disclosures": {
+          "items": {
+            "$ref": "#/$defs/DisclosureOut"
+          },
+          "type": "array",
+          "description": "The run-level disclosures: the caveats the reports print above every verdict."
+        }
+      },
+      "required": [
+        "case",
+        "id",
+        "verdict",
+        "label",
+        "qualifier",
+        "claim",
+        "quote",
+        "location",
+        "refs",
+        "own_supplement",
+        "rationale",
+        "source",
+        "page",
+        "block",
+        "anchor_phrases",
+        "anchor_located",
+        "evidence_images",
+        "judgements",
+        "unjudged_refs",
+        "withheld_refs",
+        "disclosures",
+        "run_disclosures"
+      ],
+      "type": "object"
+    },
+    "list_references": {
+      "description": "The retrieval manifest and the state of the reference numbering. Local file paths are never included.",
+      "properties": {
+        "case": {
+          "type": "string"
+        },
+        "manuscript": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "available": {
+          "type": "integer"
+        },
+        "by_status": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "numbering": {
+          "$ref": "#/$defs/NumberingOut"
+        },
+        "limits": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "status_filter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/ReferenceRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "case",
+        "manuscript",
+        "total",
+        "available",
+        "by_status",
+        "numbering",
+        "limits",
+        "status_filter",
+        "references"
+      ],
+      "type": "object"
+    },
+    "list_gaps": {
+      "description": "What the audit could not vouch for: uncited assertions, citation places no claim reached, claims never checked.",
+      "properties": {
+        "case": {
+          "type": "string"
+        },
+        "uncited_assertions": {
+          "items": {
+            "$ref": "#/$defs/UncitedOut"
+          },
+          "type": "array"
+        },
+        "coverage": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The coverage headline; null when the coverage audit could not run."
+        },
+        "unreached_labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "Labels no extracted claim reached; null when the coverage audit did not run — not 'none unreached'."
+        },
+        "unreached_citations": {
+          "items": {
+            "$ref": "#/$defs/UnreachedOut"
+          },
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "Citation places no claim reached (uncovered) or reached ambiguously (uncertain); null when the audit did not run or recorded no occurrences."
+        },
+        "unchecked_claims": {
+          "items": {
+            "$ref": "#/$defs/UncheckedOut"
+          },
+          "type": "array"
+        },
+        "disclosures": {
+          "items": {
+            "$ref": "#/$defs/DisclosureOut"
+          },
+          "type": "array"
+        },
+        "limited": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "As audit_summary's: the scope sentence, or null for a whole-paper audit."
+        }
+      },
+      "required": [
+        "case",
+        "uncited_assertions",
+        "coverage",
+        "unreached_labels",
+        "unreached_citations",
+        "unchecked_claims",
+        "disclosures",
+        "limited"
+      ],
+      "type": "object"
+    },
+    "get_scout": {
+      "description": "out/scout.json, with the scout's own caveat. Search-based: absence from these registers proves nothing.",
+      "properties": {
+        "case": {
+          "type": "string"
+        },
+        "paper": {
+          "$ref": "#/$defs/ScoutPaperOut"
+        },
+        "query": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "newer": {
+          "items": {
+            "$ref": "#/$defs/ScoutHitOut"
+          },
+          "type": "array"
+        },
+        "overlooked": {
+          "items": {
+            "$ref": "#/$defs/ScoutHitOut"
+          },
+          "type": "array"
+        },
+        "same_year": {
+          "items": {
+            "$ref": "#/$defs/ScoutHitOut"
+          },
+          "type": "array"
+        },
+        "error": {
+          "type": "string"
+        },
+        "caveat": {
+          "type": "string",
+          "description": "The scout's caveat, led by an identity warning and the scan's own error when either applies."
+        }
+      },
+      "required": [
+        "case",
+        "paper",
+        "query",
+        "date",
+        "counts",
+        "newer",
+        "overlooked",
+        "same_year",
+        "error",
+        "caveat"
+      ],
+      "type": "object"
+    },
+    "audit_status": {
+      "description": "Where an audit an MCP server started stands. Never carries counts — they travel only with their disclosures, in audit_summary.",
+      "properties": {
+        "case": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "finished",
+            "failed",
+            "interrupted",
+            "not_started"
+          ],
+          "type": "string",
+          "description": "The last audit an MCP server started in this case. running, finished, failed: this server's own job, with its log — or another server process's record of one, with log null. A record says running only while it is being refreshed (every 15 s); one not refreshed for 60 s is interrupted: the server writing it stopped mid-run. not_started: no MCP server has audited this case."
+        },
+        "manuscript": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The audited PDF's absolute path; null when not_started."
+        },
+        "started": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": "string"
+        },
+        "log": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "This server's job's latest console lines; null when the audit is another server process's or was never started — an empty log would read as an audit that printed nothing."
+        },
+        "log_lines_total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "How many console lines this server's job printed; null when there is no log here."
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "case",
+        "state",
+        "manuscript",
+        "started",
+        "ended",
+        "error",
+        "log",
+        "log_lines_total",
+        "next"
+      ],
+      "type": "object"
+    },
+    "ClaimRow": {
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "qualifier": {
+          "type": "string"
+        },
+        "refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "location": {
+          "type": "string"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "caveats": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "verdict",
+        "label",
+        "qualifier",
+        "refs",
+        "location",
+        "claim",
+        "quote",
+        "caveats"
+      ],
+      "type": "object"
+    },
+    "DisclosureOut": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string",
+          "description": "The short literal every report format carries verbatim for this disclosure."
+        },
+        "text": {
+          "type": "string"
+        },
+        "short": {
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "level",
+        "token",
+        "text",
+        "short",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "JudgementOut": {
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "page": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "block": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "anchor_phrases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "anchor_located": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "evidence_images": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "disclosures": {
+          "items": {
+            "$ref": "#/$defs/DisclosureOut"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "source",
+        "origin",
+        "kind",
+        "verdict",
+        "label",
+        "rationale",
+        "page",
+        "block",
+        "anchor_phrases",
+        "anchor_located",
+        "evidence_images",
+        "disclosures"
+      ],
+      "type": "object"
+    },
+    "NumberingOut": {
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "numbering_verified: the chosen list accounts for exactly the cited labels — extent, not content."
+        },
+        "note": {
+          "type": "string"
+        },
+        "unverified_from": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "contested": {
+          "type": "boolean"
+        },
+        "corroborated": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "null: never computed. false: computed, and some cited label was not agreed by two readings."
+        },
+        "corroborating_readings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "labels_disputed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "labels_uncomparable": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "The subset of labels_disputed where nothing comparable was said. null: never computed. []: computed, and every dispute was a contradiction."
+        },
+        "labels_resolved": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "choice": {
+          "type": "string"
+        },
+        "chosen_by": {
+          "type": "string",
+          "description": "'' when no escalation ran; 'default' when nobody was asked — always so for an audit started over MCP; 'user' for a person at a terminal."
+        }
+      },
+      "required": [
+        "source",
+        "verified",
+        "note",
+        "unverified_from",
+        "contested",
+        "corroborated",
+        "corroborating_readings",
+        "labels_disputed",
+        "labels_uncomparable",
+        "labels_resolved",
+        "choice",
+        "chosen_by"
+      ],
+      "type": "object"
+    },
+    "RefCounts": {
+      "properties": {
+        "total": {
+          "type": "integer"
+        },
+        "available": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "available"
+      ],
+      "type": "object"
+    },
+    "ReferenceRow": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "resolver": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "doi": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "year": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slug": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title_check": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skipped_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why a skipped reference was skipped: 'claims' (no selected claim cites it) or 'sources' (the cap was reached); null for every other status."
+        },
+        "boundary_ambiguous": {
+          "type": "boolean"
+        },
+        "seen_in": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "supplements": {
+          "items": {
+            "$ref": "#/$defs/SupplementOut"
+          },
+          "type": "array"
+        },
+        "raw": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "status",
+        "reason",
+        "resolver",
+        "doi",
+        "title",
+        "year",
+        "slug",
+        "title_check",
+        "skipped_by",
+        "boundary_ambiguous",
+        "seen_in",
+        "supplements",
+        "raw"
+      ],
+      "type": "object"
+    },
+    "ScoutHitOut": {
+      "properties": {
+        "year": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "doi": {
+          "type": "string"
+        },
+        "via": {
+          "type": "string"
+        },
+        "journal": {
+          "type": "string"
+        },
+        "authors": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "year",
+        "doi",
+        "via",
+        "journal",
+        "authors"
+      ],
+      "type": "object"
+    },
+    "ScoutPaperOut": {
+      "properties": {
+        "doi": {
+          "type": "string"
+        },
+        "year": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resolved_via": {
+          "type": "string"
+        },
+        "identity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "doi",
+        "year",
+        "resolved_via",
+        "identity"
+      ],
+      "type": "object"
+    },
+    "SupplementOut": {
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "slug",
+        "verified"
+      ],
+      "type": "object"
+    },
+    "UncheckedOut": {
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "location": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "verdict",
+        "label",
+        "refs",
+        "location",
+        "note"
+      ],
+      "type": "object"
+    },
+    "UncitedOut": {
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "claim",
+        "quote",
+        "location"
+      ],
+      "type": "object"
+    },
+    "UnreachedOut": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "section": {
+          "type": "string"
+        },
+        "sentence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "status",
+        "section",
+        "sentence"
+      ],
+      "type": "object"
+    }
+  }
+}
