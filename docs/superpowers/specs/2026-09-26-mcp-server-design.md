@@ -95,11 +95,15 @@ pipeline wrote. `start_audit` is the only tool that spends — model calls throu
     the manifest and die before `check`, leaving one run's references beside
     another's verdicts. The job writes `<case>/mcp_audit.json` — `running`
     before the pipeline starts, the outcome when it ends — and read tools
-    refuse a case whose last MCP audit failed or never finished. A server
-    stopped mid-audit leaves `running` behind, which a later server reports as
-    `interrupted`. An optional stage's file the latest audit did not write — a
-    `scout.json` from before a run without the scout — is refused as an
-    earlier run's.
+    refuse a case whose last MCP audit failed or never finished. The job
+    refreshes the record every 15 s, so `running` is measured rather than
+    assumed: fresh, the audit is live in some server process — perhaps another
+    host's own `papertrace mcp` — and the folder is neither read nor audited
+    again; unrefreshed for 60 s, the server stopped mid-run and the audit is
+    `interrupted`. The record on disk decides, not a server's memory: a failed
+    audit is superseded by a `results.json` written after it, and one run
+    without the scout by a `scout.json` written after it, so a case completed
+    since by other means reads again.
 
 ## Long runs: a job, not a blocking call
 
@@ -118,7 +122,9 @@ is not another paper's — and then returns at once. `audit_status` reports
 **One audit at a time per server process.** The pipeline's console, `ask`'s
 per-site model record and `sys.stdin` are process-global; two audits sharing
 them would interleave logs and misattribute models. A second `start_audit` is
-refused, naming the audit in progress.
+refused, naming the audit in progress. Across processes the record is the
+guard: a fresh `running` record is another server's live audit, and
+`start_audit` refuses that folder too.
 
 **Read tools refuse a case whose audit is running, failed or never finished.**
 The files on disk then belong to an earlier run, are half-written, or mix the
@@ -169,8 +175,10 @@ what rule 2 forbids, so a finished job points at `audit_summary`.
   the record left saying `running` marks the case incomplete.
 - A job's log is not persisted; its outcome is, in `mcp_audit.json`, and an
   earlier server's audit reports `log: null` rather than an empty log.
-- Two server processes auditing one case at once are not detected: one audit
-  at a time is a per-process rule, and the CLI has no such guard either.
+- Liveness across processes is a heartbeat window, not a lock. A server whose
+  refreshes stop for 60 s — a machine that slept — reads as stopped: its case
+  is refused rather than read, the safe side, but a second audit started in
+  that window is not refused. The CLI takes no part in the record at all.
 - A CLI run that fails midway writes no record, so the server reads that case
   as the reports would.
 

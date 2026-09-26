@@ -155,3 +155,22 @@ straight through.
       with validation tests.
 - [x] `disclosures.coverage_audited` and `cli.SCOUT_CAVEAT`: one rule and one
       sentence each, not two copies.
+
+## Task 8 — the second review pass
+
+The review round's own diff, reviewed again: ten findings, all of which held
+up, each fixed test-first.
+
+- [x] A `running` record is measured by a heartbeat: fresh is another
+      process's live audit (refused; never started over), stale is
+      `interrupted`. `audit_status` waits on another process's record too.
+- [x] The disk record decides; later `results.json` / `scout.json` supersede
+      a failure or a run without the scout.
+- [x] A named source's crop carries only its own anchor state.
+- [x] `unreached_labels` is null unless the label audit read `clean.md`.
+- [x] `manuscript` is the absolute path, from this server and from a record.
+- [x] Recorded states never send the host to a log that was not kept.
+- [x] The record is validated before anything is decided on it.
+- [x] A 2.x SDK's import failure keeps its traceback.
+- [x] The schema describes record-derived states, validated for each; the
+      prose timings are held to the constants.

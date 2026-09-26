@@ -27,7 +27,10 @@ local PDF path is served, and no evidence image from outside `<case>/out/`. A
 verdict read on its own — `get_claim`, the evidence caption — carries the
 run-level caveats too. Each audit leaves `<case>/mcp_audit.json`: a case whose
 last MCP audit failed or never finished is refused rather than read, because
-its files may mix two runs. The tools' outputs and that record are published in
+its files may mix two runs. The job refreshes the record every 15 s, so a
+second host's server can tell a live audit from an abandoned one and will not
+start another in the same folder. The tools' outputs and that record are
+published in
 `schemas/mcp_tools.schema.json` and `schemas/mcp_audit.schema.json`.
 
 An audit takes minutes and a host built on the TypeScript SDK gives a request

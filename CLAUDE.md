@@ -353,10 +353,14 @@ ingest → extract → refs → scout → check → highlight → report
   do not offer MCP elicitation in its place: a host may be a model), and
   `ask.forget_models()` runs first. Those three are process-global, hence
   **one audit at a time**. The job writes `<case>/mcp_audit.json` (`running`,
-  then the outcome), and read tools refuse a case whose last MCP audit is
-  running, failed, or never finished (a `running` record no live job owns is
-  `interrupted`): a failed rerun leaves one run's manifest beside another's
-  verdicts. A verdict read alone — `get_claim`, the evidence caption — carries
+  refreshed every `HEARTBEAT_SECONDS`, then the outcome), and read tools refuse
+  a case whose last MCP audit is running, failed, or never finished: a failed
+  rerun leaves one run's manifest beside another's verdicts. `running` is a
+  measurement — fresh is another process's live audit (refused, never started
+  over), unrefreshed for `STALE_AFTER_SECONDS` is `interrupted` — and never
+  say a cause the record's age does not show. The record on disk decides, not
+  a server's memory: a later `results.json`/`scout.json` supersedes a failure
+  or a run without the scout. A verdict read alone — `get_claim`, the evidence caption — carries
   the run-level disclosures as well as its own. Outputs are published in
   `schemas/mcp_tools.schema.json`, each definition's keys held equal to its
   `TypedDict`'s by a test. **Any new process-global state in the pipeline
