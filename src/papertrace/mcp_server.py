@@ -10,14 +10,23 @@ design and what it rejected: `docs/superpowers/specs/2026-09-26-mcp-server-desig
 # SDK builds each tool's input and output schema from its annotations when the
 # tool is registered, and live types are what it reads without guessing.
 
+import datetime
+import io
+import sys
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+import typer
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import TextContent, ToolAnnotations
 from pydantic import Field
+from rich.console import Console
 
 # Not `typing.TypedDict`: below Python 3.12 pydantic cannot build a schema from
 # it, and the SDK then drops the tool to unvalidated text without a word — every
@@ -25,7 +34,8 @@ from pydantic import Field
 # `structured_output=True` on each tool turns any repeat into an error at start.
 from typing_extensions import TypedDict
 
-from . import __version__
+from . import __version__, cli
+from .ask import forget_models
 from .disclosures import (
     anchor_disclosure,
     claim_disclosures,
@@ -47,7 +57,7 @@ from .models import (
 
 # the viewer's serialisation of a disclosure, reused rather than restated: one
 # shape for every reader that receives disclosures as data
-from .report import _disclosure_dict
+from .report import FORMATS, _disclosure_dict
 
 INSTRUCTIONS = """\
 PaperTrace checks what a scientific paper claims against what its cited sources say.
@@ -75,11 +85,24 @@ SCOUT_CAVEAT = (
 
 # read tools change nothing and consult nothing outside the case folder
 _READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+# The one tool that spends says all of it, because a host decides on these
+# whether to ask first: it rewrites the case folder, queries the network and
+# calls a model, and no two runs of a model are the same run.
+_SPEND = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True
+)
 
-# The vocabularies `models.py` defines, not copies of them. `Literal` over the
-# tuple is the same type as the values spelled out.
+# The vocabularies `models.py` and `report.py` define, not copies of them.
+# `Literal` over the tuple is the same type as the values spelled out.
 Verdict = Literal[VERDICTS]
 RefStatus = Literal[REF_STATUSES]
+Format = Literal[FORMATS]
+# No constant holds this one; `ingest.resolve_backend` refuses anything else,
+# and a test holds the two together.
+Backend = Literal["auto", "docling", "pymupdf"]
+
+# A TypeScript-SDK host gives a request 60 s; a status call waits for less.
+MAX_WAIT_SECONDS = 50
 
 CaseArg = Annotated[
     str,
@@ -301,6 +324,21 @@ class ScoutOut(TypedDict):
     caveat: str
 
 
+class AuditStatus(TypedDict):
+    """Where an audit this server started stands. Never its counts: those travel
+    only with the disclosures that qualify them, in audit_summary."""
+
+    case: str
+    state: Literal["running", "finished", "failed", "not_started"]
+    manuscript: str | None
+    started: str | None
+    ended: str | None
+    error: str
+    log: list[str]
+    log_lines_total: int
+    next: str
+
+
 # --------------------------------------------------------------------------
 # reading a case folder — every failure is a sentence, never an empty result
 # --------------------------------------------------------------------------
@@ -508,6 +546,202 @@ def _scout_caveat(scout: ScoutResults) -> str:
 
 
 # --------------------------------------------------------------------------
+# the audit job — the pipeline, in this process, with nobody to ask
+# --------------------------------------------------------------------------
+
+
+def _now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+class _Lines(io.TextIOBase):
+    """A text stream kept as whole lines — the file the pipeline's console writes to."""
+
+    def __init__(self, lines: list[str]):
+        self._lines = lines
+        self._open = ""
+        self._lock = threading.Lock()
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, s: str) -> int:
+        with self._lock:
+            *whole, self._open = (self._open + s).split("\n")
+            self._lines.extend(whole)
+        return len(s)
+
+    def close(self) -> None:
+        with self._lock:
+            if self._open:  # a last line printed without its newline is still said
+                self._lines.append(self._open)
+                self._open = ""
+        super().close()
+
+
+@contextmanager
+def _console_into(lines: list[str]) -> Iterator[list[str]]:
+    """What the pipeline prints, as lines of text instead of output on stdout.
+
+    Every stage prints through the module global `cli.console`, which writes to
+    stdout — under stdio, the protocol's own wire. Swapped for the length of one
+    call and handed back, so a job's log is exactly what the CLI would have shown.
+    """
+    sink = _Lines(lines)
+    saved = cli.console
+    cli.console = Console(file=sink, force_terminal=False, no_color=True, soft_wrap=True)
+    try:
+        yield lines
+    finally:
+        cli.console = saved
+        sink.close()
+
+
+@contextmanager
+def _nobody_to_ask() -> Iterator[None]:
+    """Nobody is at an MCP call to answer a question, so nothing may wait for one.
+
+    With stdin an empty stream, `cli._interactive()` is False and any prompt
+    reads end-of-file at once. A disputed reference label is then withheld with
+    `numbering_chosen_by: "default"` — the CLI's own answer when no terminal is
+    attached — and the gate on settling it, which is a person shown the
+    disagreement, is never reached by a host that may be a model.
+    """
+    saved = sys.stdin
+    sys.stdin = io.StringIO()
+    try:
+        yield
+    finally:
+        sys.stdin = saved
+
+
+def _last_said(lines: list[str], n: int = 4) -> str:
+    """The last lines a stage printed — where the CLI says why it stopped."""
+    return " ".join(line.strip() for line in [x for x in lines if x.strip()][-n:])
+
+
+@dataclass
+class _Job:
+    """One audit this server process started."""
+
+    case: Path
+    manuscript: Path
+    started: str
+    state: str = "running"  # running | finished | failed
+    ended: str | None = None
+    error: str = ""
+    log: list[str] = field(default_factory=list)
+    done: threading.Event = field(default_factory=threading.Event)
+
+
+class _Jobs:
+    """The audits this server process started — at most one running at a time.
+
+    One, because what a run touches is process-global: `cli.console`, `ask`'s
+    per-site model record and `sys.stdin`. Two audits sharing them would
+    interleave their logs and name each other's models.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()  # held across refuse, prepare and launch
+        self._running: _Job | None = None
+        self._by_case: dict[Path, _Job] = {}
+
+    def last(self, case: Path) -> _Job | None:
+        return self._by_case.get(case)
+
+    def refuse_running(self, case: Path) -> None:
+        """A case whose audit is running has nothing on disk that belongs to it."""
+        job = self._running
+        if job is not None and job.case == case:
+            raise ToolError(
+                f"an audit of {case} is running now (started {job.started}) — what is on "
+                "disk belongs to an earlier run or is half-written, so nothing is read from "
+                "it until the audit ends. Call audit_status."
+            )
+
+    def start(self, prepare: Callable[[], tuple[Path, Path, dict]]) -> _Job:
+        """Run `prepare` — every check that can refuse before anything is spent —
+        then the pipeline on its own thread, and return without waiting for it."""
+        with self._lock:
+            if (running := self._running) is not None:
+                raise ToolError(
+                    f"an audit is already running in this server: {running.case} (started "
+                    f"{running.started}). One audit runs at a time — follow it with "
+                    "audit_status, and start this one when it has ended."
+                )
+            case, manuscript, kwargs = prepare()
+            job = _Job(case=case, manuscript=manuscript, started=_now())
+            self._running = self._by_case[case] = job
+            # daemon: when the host stops the server, the audit stops with it
+            # rather than spending on for a client that has gone
+            threading.Thread(
+                target=self._run, args=(job, kwargs), name="papertrace-audit", daemon=True
+            ).start()
+            return job
+
+    def _run(self, job: _Job, kwargs: dict) -> None:
+        state, error = "failed", ""
+        try:
+            with _console_into(job.log), _nobody_to_ask():
+                # the process outlives one audit: a model an earlier audit
+                # recorded must not be reported as this one's judge
+                forget_models()
+                cli._run_pipeline(**kwargs)
+            state = "finished"
+        except typer.Exit as e:
+            if e.exit_code == 0:
+                state = "finished"
+            else:
+                error = _last_said(job.log) or f"the pipeline stopped (exit {e.exit_code})"
+        except Exception as e:
+            # Broad on purpose, and recorded rather than swallowed: an exception
+            # leaving a tool reaches a model as a bare "Error executing tool", and
+            # one leaving this thread would leave the job "running" forever. The
+            # type and message are the finding, so the job keeps both.
+            error = f"{type(e).__name__}: {str(e)[:400]}"
+        finally:
+            if state == "failed" and not error:
+                error = "the audit was interrupted before it could finish"
+            job.state, job.error, job.ended = state, error, _now()
+            with self._lock:
+                if self._running is job:
+                    self._running = None
+            job.done.set()  # last: whoever wakes on it sees the final state
+
+
+_NEXT = {
+    "running": "call audit_status again, with wait_seconds up to 50, until the audit has ended",
+    "finished": "call audit_summary for the result — its counts travel with the caveats that "
+                "qualify them",
+    "failed": "read `error` and the log, fix what they name, and call start_audit again",
+    "not_started": "no audit of this case was started by this server process — audit_summary "
+                   "reads whatever an earlier run left on disk",
+}
+
+
+def _status(case: Path, job: _Job | None, log_lines: int) -> AuditStatus:
+    if job is None:
+        return {
+            "case": str(case), "state": "not_started", "manuscript": None, "started": None,
+            "ended": None, "error": "", "log": [], "log_lines_total": 0,
+            "next": _NEXT["not_started"],
+        }
+    log = list(job.log)
+    return {
+        "case": str(job.case),
+        "state": job.state,
+        "manuscript": str(job.manuscript),
+        "started": job.started,
+        "ended": job.ended,
+        "error": job.error,
+        "log": log[-log_lines:] if log_lines else [],
+        "log_lines_total": len(log),
+        "next": _NEXT[job.state],
+    }
+
+
+# --------------------------------------------------------------------------
 # the server
 # --------------------------------------------------------------------------
 
@@ -515,13 +749,20 @@ def _scout_caveat(scout: ScoutResults) -> str:
 def build_server() -> MCPServer:
     """A fresh server with every tool registered. Nothing is served until `run()`."""
     server = MCPServer("papertrace", instructions=INSTRUCTIONS, version=__version__)
+    jobs = _Jobs()
+
+    def _open(case: str) -> Path:
+        """A case folder to read — unless this server is writing it right now."""
+        root = _case_dir(case)
+        jobs.refuse_running(root)
+        return root
 
     @server.tool(title="Audit summary", annotations=_READ, structured_output=True)
     def audit_summary(case: CaseArg) -> AuditSummary:
         """The result of one audit: verdict counts, references obtained, the model that
         judged, coverage, and every run-level disclosure — relay those with the counts.
         `limited` is set when the audit was cut short on request."""
-        root = _case_dir(case)
+        root = _open(case)
         results = _results(root)
         manifest = _manifest(root, required=False)
         fired = run_disclosures(results, manifest)
@@ -553,7 +794,7 @@ def build_server() -> MCPServer:
         """Every checked claim, one row each: its headline verdict, the paper's own
         sentence, the labels it cites, and its caveats. A claim citing several sources is
         headlined by the most adverse verdict; get_claim shows each source's."""
-        root = _case_dir(case)
+        root = _open(case)
         results = _results(root)
         manifest = _manifest(root, required=False)
         rows = [_claim_row(c, manifest) for c in results.claims if verdict in (None, c.verdict)]
@@ -570,7 +811,7 @@ def build_server() -> MCPServer:
         """One claim in full: the paper's sentence, each cited source's verdict with its
         rationale, page, block and anchor phrases, and every disclosure the claim owes its
         reader. get_evidence shows the passage itself."""
-        root = _case_dir(case)
+        root = _open(case)
         results = _results(root)
         manifest = _manifest(root, required=False)
         c = _find_claim(results, claim_id)
@@ -611,7 +852,7 @@ def build_server() -> MCPServer:
         """The page crop a verdict rests on, as images, with the matched text boxed in red.
         The boxes were drawn by code finding the model's anchor phrases in the PDF, not
         placed by the model; the caption says whether the phrase was found."""
-        root = _case_dir(case)
+        root = _open(case)
         claim = _find_claim(_results(root), claim_id)
         target = _evidence_target(claim, source)
         rels = _images_of(target)
@@ -644,7 +885,7 @@ def build_server() -> MCPServer:
         not, and the state of the reference numbering — the label is what joins a claim to
         its source, so an unconfirmed or disputed numbering is a caveat on every verdict
         that rests on it. Local file paths are not included."""
-        root = _case_dir(case)
+        root = _open(case)
         m = _manifest(root, required=True)
         rows: list[ReferenceRow] = [
             {
@@ -701,7 +942,7 @@ def build_server() -> MCPServer:
         places no extracted claim reached, and claims never checked (source not retrieved,
         or no verdict reached). `null` means that audit did not run — not that it found
         nothing."""
-        root = _case_dir(case)
+        root = _open(case)
         results = _results(root)
         manifest = _manifest(root, required=False)
         coverage = results.coverage or {}
@@ -740,7 +981,7 @@ def build_server() -> MCPServer:
         """Literature around the paper from Europe PMC: work published since, work that
         existed before it and went uncited, and work from the same year. Search-based:
         candidates for a person's judgement, and absence proves nothing."""
-        root = _case_dir(case)
+        root = _open(case)
         path = root / "out" / "scout.json"
         if not path.is_file():
             raise ToolError(
@@ -749,5 +990,113 @@ def build_server() -> MCPServer:
             )
         scout = _read(path, ScoutResults.from_json, "scout")
         return {"case": str(root), **scout.to_dict(), "caveat": _scout_caveat(scout)}
+
+    @server.tool(title="Start an audit", annotations=_SPEND, structured_output=True)
+    def start_audit(
+        manuscript: Annotated[str, Field(description="The paper to audit, a PDF — by absolute path.")],
+        case: Annotated[str | None, Field(description=(
+            "Case folder to write the audit into. Default: a folder named after the paper, "
+            "beside it; an earlier audit of the same paper there is amended."))] = None,
+        email: Annotated[str | None, Field(description=(
+            "Contact email Unpaywall requires. Default: PAPERTRACE_EMAIL, or the address "
+            "`papertrace` saved."))] = None,
+        model: Annotated[str | None, Field(description=(
+            "Model for `claude -p`, e.g. claude-opus-5. Pin one for a reproducible audit; "
+            "default: the account's default model."))] = None,
+        backend: Annotated[Backend, Field(description=(
+            "How PDFs are read: docling is layout-aware (tables stay tables), pymupdf is flat "
+            "text; auto prefers docling."))] = "auto",
+        scout: Annotated[bool, Field(description=(
+            "Also scan Europe PMC for literature published since, or uncited."))] = True,
+        doi: Annotated[str | None, Field(description=(
+            "DOI of the paper itself. Default: the one printed on page 1."))] = None,
+        formats: Annotated[list[Format] | None, Field(description=(
+            "Report looks to write beside report.md; `viewer` is the interactive page."))] = None,
+        provided: Annotated[str | None, Field(description=(
+            "Folder of cited PDFs already at hand; each is identified by its own DOI or "
+            "title."))] = None,
+        supplements: Annotated[list[str] | None, Field(description=(
+            "The paper's own supplementary PDFs, by absolute path."))] = None,
+        llm_refs: Annotated[bool, Field(description=(
+            "Also have a model read the printed reference list as a further check on its "
+            "numbering (one more model call)."))] = True,
+        max_claims: Annotated[int | None, Field(ge=1, description=(
+            "Check only the first N claims; only the references they cite are fetched. The "
+            "result says what was left out."))] = None,
+        max_sources: Annotated[int | None, Field(ge=1, description=(
+            "Obtain and judge against at most N cited sources. The result says what was left "
+            "out."))] = None,
+    ) -> AuditStatus:
+        """Start a full audit of one paper and return at once; follow it with audit_status.
+
+        The pipeline `papertrace run` runs: read the PDF, extract its citation-backed
+        claims, fetch the cited sources through legal open-access routes, scout the
+        literature, judge each claim against its cited pages, crop the evidence and write
+        the reports. It SPENDS: `claude -p` model calls on this machine's logged-in Claude
+        account (one to extract, one to read the reference list, one per cited source
+        judged, each retried on failure), and queries to Crossref, Unpaywall, Europe PMC
+        and arXiv. It takes minutes. One audit runs at a time per server.
+
+        A reference label whose readings disagree is withheld, never settled here: that
+        needs a person shown the disagreement, at a terminal (`papertrace refs`)."""
+        pdf = _case_dir(manuscript)
+        if not pdf.is_file():
+            raise ToolError(f"no manuscript at {pdf} — pass the paper's PDF by absolute path")
+        own = [_case_dir(s) for s in supplements or []]
+        if absent := [str(s) for s in own if not s.is_file()]:
+            raise ToolError(f"no supplement at {', '.join(absent)}")
+        pdfs = _case_dir(provided) if provided else None
+        if pdfs is not None and not pdfs.is_dir():
+            raise ToolError(f"`provided` must be a folder of PDFs, and {pdfs} is not one")
+
+        def prepare() -> tuple[Path, Path, dict]:
+            # everything that can refuse, refused before a model or a network is touched
+            from .check import claude_available
+
+            if not claude_available():
+                raise ToolError(
+                    "the `claude` CLI is not on this server's PATH, and every claim is "
+                    "judged with `claude -p` — install Claude Code and log in. If it is "
+                    "installed, the host started this server with a PATH that does not "
+                    "reach it: set PATH in the server's configuration."
+                )
+            said: list[str] = []
+            try:
+                with _console_into(said):
+                    root = (_case_dir(case) if case else cli.default_case(pdf)).resolve()
+                    address = cli._email(email)
+                    cli._guard_case(root, pdf)  # one case folder per paper
+            except typer.Exit:
+                raise ToolError(
+                    "refused before anything was spent — " + _last_said(said, n=8)
+                ) from None
+            return root, pdf, {
+                "manuscript": pdf, "case": root, "provided": pdfs, "email": address,
+                "model": model, "png": False, "backend": backend, "with_scout": scout,
+                "doi": doi, "formats": list(formats or []), "supplement": own,
+                "llm_refs": llm_refs, "max_claims": max_claims, "max_sources": max_sources,
+            }
+
+        job = jobs.start(prepare)
+        return _status(job.case, job, log_lines=40)
+
+    @server.tool(title="Audit status", annotations=_READ, structured_output=True)
+    def audit_status(
+        case: CaseArg,
+        wait_seconds: Annotated[int, Field(ge=0, le=MAX_WAIT_SECONDS, description=(
+            "Wait up to this many seconds for a running audit to end before answering "
+            "(at most 50, inside the 60 s a host allows a request)."))] = 0,
+        log_lines: Annotated[int, Field(ge=0, le=1000, description=(
+            "How many of the audit's latest console lines to include."))] = 40,
+    ) -> AuditStatus:
+        """Where an audit this server started stands — running, finished or failed — with
+        the last lines it printed, which carry its warnings as it goes. Poll with
+        wait_seconds rather than in a tight loop. A finished audit's result is
+        audit_summary; this never repeats its counts without their caveats."""
+        root = _case_dir(case)
+        job = jobs.last(root)
+        if job is not None and wait_seconds:
+            job.done.wait(wait_seconds)
+        return _status(root, job, log_lines)
 
     return server

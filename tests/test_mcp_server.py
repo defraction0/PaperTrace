@@ -23,9 +23,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 pytest.importorskip("mcp", reason="pip install -e '.[dev]' supplies the MCP SDK")
 
 import anyio  # noqa: E402
+import typer  # noqa: E402
 from mcp import Client  # noqa: E402
 
-from papertrace import mcp_server  # noqa: E402
+from papertrace import ask as ask_mod  # noqa: E402
+from papertrace import check as check_mod  # noqa: E402
+from papertrace import cli, mcp_server  # noqa: E402
 from papertrace.disclosures import (  # noqa: E402
     SCOPE_TOKEN,
     claim_disclosures,
@@ -625,3 +628,354 @@ def test_get_scout_without_a_scan_is_refused(tmp_path):
 
     assert result.is_error
     assert "scout.json" in _text(result)
+
+
+# --------------------------------------------------------------------------
+# start_audit and audit_status — the one tool that spends, run as a job
+# --------------------------------------------------------------------------
+
+
+def test_the_server_lists_nine_tools_and_marks_the_one_that_spends():
+    tools = _tools()
+
+    assert set(tools) == READ_TOOLS | {"start_audit", "audit_status"}
+    status = tools["audit_status"].annotations
+    assert status.read_only_hint is True and status.open_world_hint is False
+    # a host decides whether to ask before calling on these hints: the one tool
+    # that spends model calls, queries the network and rewrites a case folder
+    # must say all three
+    spend = tools["start_audit"].annotations
+    assert spend.read_only_hint is False
+    assert spend.destructive_hint is True
+    assert spend.open_world_hint is True
+
+
+def test_every_backend_start_audit_offers_is_one_ingest_accepts():
+    """The backend vocabulary has no constant to reuse, so the offer is checked
+    against the rule that enforces it: `resolve_backend` refuses anything else."""
+    from papertrace.ingest import resolve_backend
+
+    offered = _enum(_tools()["start_audit"].input_schema["properties"]["backend"])
+    assert offered == ["auto", "docling", "pymupdf"]
+    for backend in offered:
+        resolve_backend(backend)
+
+
+@pytest.fixture
+def ready(monkeypatch, tmp_path):
+    """Everything start_audit checks before it spends, satisfied offline — and
+    never read from the machine: `_email` falls back to a SAVED CONFIG in the
+    developer's home, which is how a CLI test once passed locally and failed on
+    every CI python."""
+    monkeypatch.setattr(check_mod, "claude_available", lambda: True)
+    monkeypatch.setenv("PAPERTRACE_EMAIL", "t@example.org")
+    monkeypatch.delenv("MANUSCRIPTAGENT_EMAIL", raising=False)
+    monkeypatch.setenv("PAPERTRACE_CONFIG", str(tmp_path / "no-saved-config.json"))
+
+
+def _paper(tmp_path, name="paper.pdf") -> Path:
+    pdf = tmp_path / name
+    pdf.write_bytes(b"%PDF-1.4\n% never parsed: the pipeline is faked\n" + name.encode())
+    return pdf
+
+
+def _fake_pipeline(monkeypatch, body=None) -> list[dict]:
+    calls: list[dict] = []
+
+    def fake(**kw):
+        calls.append(kw)
+        if body is not None:
+            body(kw)
+
+    monkeypatch.setattr(cli, "_run_pipeline", fake)
+    return calls
+
+
+def _start(server, **args) -> dict:
+    return _json(_call("start_audit", {k: str(v) if isinstance(v, Path) else v
+                                       for k, v in args.items()}, server))
+
+
+def _await(server, case: str) -> dict:
+    return _json(_call("audit_status", {"case": case, "wait_seconds": 20}, server))
+
+
+def test_start_audit_refuses_a_manuscript_that_is_not_there(ready, monkeypatch, tmp_path):
+    calls = _fake_pipeline(monkeypatch)
+
+    result = _call("start_audit", {"manuscript": str(tmp_path / "absent.pdf")})
+
+    assert result.is_error
+    assert "absent.pdf" in _text(result)
+    assert calls == []
+
+
+def test_start_audit_refuses_when_claude_is_not_on_its_path(ready, monkeypatch, tmp_path):
+    """A host starts the server with a PATH of its own choosing. Finding that
+    out after ingest has run would be finding it out late."""
+    calls = _fake_pipeline(monkeypatch)
+    monkeypatch.setattr(check_mod, "claude_available", lambda: False)
+
+    result = _call("start_audit", {"manuscript": str(_paper(tmp_path))})
+
+    assert result.is_error
+    assert "claude" in _text(result) and "PATH" in _text(result)
+    assert calls == []
+
+
+def test_start_audit_refuses_without_a_contact_email(ready, monkeypatch, tmp_path):
+    calls = _fake_pipeline(monkeypatch)
+    monkeypatch.delenv("PAPERTRACE_EMAIL")
+
+    result = _call("start_audit", {"manuscript": str(_paper(tmp_path))})
+
+    assert result.is_error
+    assert "email" in _text(result).lower()
+    assert calls == []
+
+
+def test_start_audit_refuses_a_case_folder_holding_another_paper(ready, monkeypatch, tmp_path):
+    """One case folder per paper — `_guard_case`'s rule, applied before anything
+    is spent rather than after ingest and extraction already were."""
+    calls = _fake_pipeline(monkeypatch)
+    case = tmp_path / "case"
+    case.mkdir()
+    RefManifest(manuscript="other.pdf", manuscript_sha256="f" * 64).to_json(
+        case / "refs_manifest.json")
+
+    result = _call("start_audit", {"manuscript": str(_paper(tmp_path)), "case": str(case)})
+
+    assert result.is_error
+    assert "other.pdf" in _text(result)
+    assert calls == []
+
+
+def test_the_job_hands_the_pipeline_every_parameter(ready, monkeypatch, tmp_path):
+    import inspect
+
+    params = set(inspect.signature(cli._run_pipeline).parameters)
+    calls = _fake_pipeline(monkeypatch)
+    pdf = _paper(tmp_path)
+    own = _paper(tmp_path, "paper-supplement.pdf")
+    provided = tmp_path / "my_pdfs"
+    provided.mkdir()
+    server = mcp_server.build_server()
+
+    started = _start(server, manuscript=pdf, case=tmp_path / "case", model="claude-opus-5",
+                     backend="pymupdf", scout=False, doi="10.1/x", formats=["viewer"],
+                     provided=provided, supplements=[str(own)], llm_refs=False,
+                     max_claims=3, max_sources=2)
+    assert _await(server, started["case"])["state"] == "finished"
+
+    assert calls == [{
+        "manuscript": pdf.resolve(), "case": (tmp_path / "case").resolve(),
+        "provided": provided.resolve(), "email": "t@example.org", "model": "claude-opus-5",
+        "png": False, "backend": "pymupdf", "with_scout": False, "doi": "10.1/x",
+        "formats": ["viewer"], "supplement": [own.resolve()], "llm_refs": False,
+        "max_claims": 3, "max_sources": 2,
+    }]
+    assert set(calls[0]) == params, "a pipeline parameter the job never decides on"
+
+
+def test_start_audit_defaults_are_papertrace_runs(ready, monkeypatch, tmp_path):
+    """No case named: beside the paper, named after it, as `papertrace run`
+    does. Every other default is the CLI's own."""
+    calls = _fake_pipeline(monkeypatch)
+    pdf = _paper(tmp_path)
+    server = mcp_server.build_server()
+
+    started = _start(server, manuscript=pdf)
+    _await(server, started["case"])
+
+    assert started["case"] == str((tmp_path / "paper").resolve())
+    assert calls[0] | {"manuscript": None, "case": None} == {
+        "manuscript": None, "case": None, "provided": None, "email": "t@example.org",
+        "model": None, "png": False, "backend": "auto", "with_scout": True, "doi": None,
+        "formats": [], "supplement": [], "llm_refs": True, "max_claims": None,
+        "max_sources": None,
+    }
+
+
+class _Terminal:
+    """A stream that says it is a terminal — what `_interactive()` looks for."""
+
+    def __init__(self):
+        self.written = []
+
+    def isatty(self):
+        return True
+
+    def write(self, s):
+        self.written.append(s)
+        return len(s)
+
+    def flush(self):
+        pass
+
+    def readline(self):
+        return "1\n"  # a person answering the first menu, were one asked
+
+
+def test_inside_the_job_nobody_can_be_asked_and_no_old_model_lingers(
+    ready, monkeypatch, tmp_path
+):
+    """Three things the job guarantees, observed from inside it.
+
+    A terminal on both streams and no `CI`: outside the job, `_interactive()`
+    would be True here, and a disputed label would be put to a person who is
+    not there. Inside it, nobody can be asked — a prompt reads end-of-file.
+
+    A model left behind by an earlier audit in this process is gone, so a run
+    whose judging makes no calls cannot report that model as its judge.
+
+    The pipeline's console lands in the job's log, never on stdout, which
+    under stdio is the protocol's own wire.
+    """
+    terminal_in, terminal_out = _Terminal(), _Terminal()
+    monkeypatch.setattr(sys, "stdin", terminal_in)
+    monkeypatch.setattr(sys, "stdout", terminal_out)
+    monkeypatch.delenv("CI", raising=False)
+    assert cli._interactive(), "the fixture must look like a terminal, or this proves nothing"
+    monkeypatch.setattr(ask_mod, "_MODELS", {ask_mod.SITE_CHECK: "claude-haiku-4-5"})
+    seen = {}
+
+    def body(kw):
+        seen["interactive"] = cli._interactive()
+        try:
+            seen["answer"] = input()
+        except EOFError:
+            seen["answer"] = "end of file"
+        seen["model"] = ask_mod.model_for(ask_mod.SITE_CHECK)
+        cli.console.print("[green]✓[/green] said by the pipeline")
+
+    _fake_pipeline(monkeypatch, body)
+    console = cli.console
+    server = mcp_server.build_server()
+
+    status = _await(server, _start(server, manuscript=_paper(tmp_path))["case"])
+
+    assert status["state"] == "finished", status
+    assert seen == {"interactive": False, "answer": "end of file", "model": None}
+    assert "✓ said by the pipeline" in status["log"]
+    assert not any("said by the pipeline" in s for s in terminal_out.written)
+    assert cli.console is console, "the console must be handed back when the job ends"
+
+
+def test_a_pipeline_that_stops_is_failed_with_the_reason_it_printed(ready, monkeypatch, tmp_path):
+    def body(kw):
+        cli.console.print("[red]refs_manifest.json not found[/red] — run `papertrace refs` first")
+        raise typer.Exit(1)
+
+    _fake_pipeline(monkeypatch, body)
+    server = mcp_server.build_server()
+
+    status = _await(server, _start(server, manuscript=_paper(tmp_path))["case"])
+
+    assert status["state"] == "failed"
+    assert "refs_manifest.json not found" in status["error"]
+
+
+def test_an_unexpected_exception_is_failed_with_its_type_and_message(
+    ready, monkeypatch, tmp_path
+):
+    """In SDK v2 an exception escaping a tool reaches the model as a bare
+    `Error executing tool`. A job records its reason instead of losing it."""
+    def body(kw):
+        raise RuntimeError("the layout models could not be loaded")
+
+    _fake_pipeline(monkeypatch, body)
+    server = mcp_server.build_server()
+
+    status = _await(server, _start(server, manuscript=_paper(tmp_path))["case"])
+
+    assert status["state"] == "failed"
+    assert status["error"] == "RuntimeError: the layout models could not be loaded"
+
+
+def test_a_second_audit_is_refused_while_one_runs(ready, monkeypatch, tmp_path):
+    """The console, the model record and stdin are process-global: two audits
+    sharing them would interleave logs and misattribute models."""
+    import threading
+
+    gate = threading.Event()
+    _fake_pipeline(monkeypatch, lambda kw: gate.wait(20))
+    server = mcp_server.build_server()
+    first = _start(server, manuscript=_paper(tmp_path), case=tmp_path / "first")
+
+    try:
+        refused = _call("start_audit", {"manuscript": str(_paper(tmp_path, "other.pdf")),
+                                        "case": str(tmp_path / "second")}, server)
+        assert refused.is_error
+        assert first["case"] in _text(refused)
+    finally:
+        gate.set()
+    assert _await(server, first["case"])["state"] == "finished"
+
+    # and the slot is free again once it has ended
+    second = _start(server, manuscript=_paper(tmp_path, "other.pdf"), case=tmp_path / "second")
+    assert _await(server, second["case"])["state"] == "finished"
+
+
+def test_read_tools_refuse_the_case_whose_audit_is_running(ready, monkeypatch, tmp_path):
+    """The results.json on disk then belongs to the previous run, or is half
+    written. Presenting it as this run's would be the silent failure."""
+    import threading
+
+    gate = threading.Event()
+    _fake_pipeline(monkeypatch, lambda kw: gate.wait(20))
+    case = _case(tmp_path)
+    server = mcp_server.build_server()
+    RefManifest(manuscript="paper.pdf").to_json(case / "refs_manifest.json")
+    started = _start(server, manuscript=_paper(tmp_path), case=case)
+
+    try:
+        for tool, args in (("audit_summary", {}), ("list_claims", {}), ("get_claim", {"claim_id": 1}),
+                           ("get_evidence", {"claim_id": 1}), ("list_references", {}),
+                           ("list_gaps", {}), ("get_scout", {})):
+            result = _call(tool, {"case": started["case"], **args}, server)
+            assert result.is_error, tool
+            assert "running" in _text(result), tool
+    finally:
+        gate.set()
+    _await(server, started["case"])
+    assert not _call("audit_summary", {"case": started["case"]}, server).is_error
+
+
+def test_audit_status_waits_for_the_end_and_no_longer(ready, monkeypatch, tmp_path):
+    import time
+
+    _fake_pipeline(monkeypatch, lambda kw: time.sleep(0.3))
+    server = mcp_server.build_server()
+    started = _start(server, manuscript=_paper(tmp_path))
+
+    t0 = time.monotonic()
+    status = _json(_call("audit_status", {"case": started["case"], "wait_seconds": 15}, server))
+
+    assert status["state"] == "finished"
+    assert time.monotonic() - t0 < 10
+    # under the 60 s a TypeScript-SDK host allows a request, by schema
+    too_long = _call("audit_status", {"case": started["case"], "wait_seconds": 51}, server)
+    assert too_long.is_error
+
+
+def test_a_finished_status_points_at_the_summary_and_carries_no_counts(
+    ready, monkeypatch, tmp_path
+):
+    """A count without its disclosures is what every reader here is protected
+    from, so the status says where the result is rather than quoting it."""
+    _fake_pipeline(monkeypatch)
+    server = mcp_server.build_server()
+
+    status = _await(server, _start(server, manuscript=_paper(tmp_path))["case"])
+
+    assert "counts" not in status
+    assert "audit_summary" in status["next"]
+
+
+def test_the_status_of_a_case_this_server_never_ran_says_so(tmp_path):
+    case = _case(tmp_path)
+
+    status = _json(_call("audit_status", {"case": str(case)}))
+
+    assert status["state"] == "not_started"
+    assert "this server" in status["next"]
