@@ -48,6 +48,15 @@ decision record:
 `docs/superpowers/specs/2026-09-26-mcp-server-design.md`,
 `docs/adr/0004-mcp-server.md`.
 
+The README's *From an MCP host* names the apps that can start it — Claude
+Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI, Codex CLI — and
+the ones that cannot: ChatGPT and Claude in a browser reach MCP servers over
+the internet only. Whichever app drives the tools, the audit is judged through
+`claude -p`, so Claude Code must be installed and signed in. The server
+installs from GitHub with `uv tool install`, no clone needed. Claude Code has
+been seen connecting to that install; the other apps' configurations follow
+their documentation and have not each been run.
+
 ### Changed — `[full]` and `[dev]` carry the MCP SDK
 
 `[full]`, the quick start's everything-install, now includes the SDK, so
