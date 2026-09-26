@@ -450,6 +450,26 @@ def init(
         console.print(f"  [dim]hand this folder to every step: [cyan]-c {case}[/cyan][/dim]")
 
 
+@app.command("mcp", rich_help_panel="Utilities")
+def mcp_command() -> None:
+    """Serve PaperTrace to an MCP host over stdio — Claude Desktop, Cursor, VS Code, Claude Code."""
+    # Nothing may reach stdout from here: under stdio it is the protocol's wire,
+    # and a banner or a warning printed before serving begins corrupts it.
+    try:
+        from .mcp_server import serve
+    except ModuleNotFoundError as e:
+        # only the SDK's absence earns the install line; any other missing
+        # module is a real fault and says so with its own traceback
+        if (e.name or "").split(".")[0] != "mcp":
+            raise
+        # rich eats [mcp] as a style tag; escaping it is what prints the extra
+        Console(stderr=True).print(
+            r"[red]the MCP server needs the MCP SDK[/red] — pip install 'papertrace\[mcp]'"
+        )
+        raise typer.Exit(2) from None
+    serve()
+
+
 def _ingest_pipeline(
     *,
     pdf: Path,

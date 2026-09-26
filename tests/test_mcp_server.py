@@ -979,3 +979,67 @@ def test_the_status_of_a_case_this_server_never_ran_says_so(tmp_path):
 
     assert status["state"] == "not_started"
     assert "this server" in status["next"]
+
+
+# --------------------------------------------------------------------------
+# `papertrace mcp` — the command a host launches, over real stdio
+# --------------------------------------------------------------------------
+
+SRC = str(Path(__file__).resolve().parent.parent / "src")
+
+
+def test_papertrace_mcp_writes_nothing_to_stdout_when_its_stdin_closes(tmp_path):
+    """Under stdio, stdout IS the protocol. A banner, a warning or a stray print
+    before serving begins lands on the wire and corrupts the first message, and
+    no in-memory test can see it — only a real process can."""
+    import os
+    import subprocess
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "papertrace", "mcp"],
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=120,
+        env={**os.environ, "PYTHONPATH": SRC,
+             "PAPERTRACE_CONFIG": str(tmp_path / "no-saved-config.json")},
+    )
+
+    assert proc.returncode == 0, proc.stderr.decode()[-2000:]
+    assert proc.stdout == b"", proc.stdout[:500]
+
+
+def test_a_host_lists_the_tools_and_reads_a_case_over_real_stdio(tmp_path):
+    """The whole path a host takes: launch the command, speak MCP over its
+    pipes, read an audit. The in-memory client skips exactly this."""
+    from mcp import StdioServerParameters
+
+    case = _case(tmp_path)
+    params = StdioServerParameters(
+        command=sys.executable, args=["-m", "papertrace", "mcp"],
+        env={"PYTHONPATH": SRC, "PAPERTRACE_CONFIG": str(tmp_path / "no-saved-config.json")},
+    )
+
+    async def go(client):
+        names = {t.name for t in (await client.list_tools()).tools}
+        return names, await client.call_tool("audit_summary", {"case": str(case)})
+
+    names, summary = _session(params, go)
+
+    assert names == READ_TOOLS | {"start_audit", "audit_status"}
+    assert _json(summary)["counts"] == _results().counts()
+
+
+def test_without_the_sdk_papertrace_mcp_says_how_to_install_it(monkeypatch, capsys):
+    """On stderr, and nothing on stdout — a host reading the wire would take
+    even an error message for a malformed protocol message."""
+    # every cached `mcp.*`, not only `mcp`: an import finds a cached submodule
+    # without consulting its parent, so masking the package alone hides nothing
+    for name in [n for n in sys.modules if n == "mcp" or n.startswith("mcp.")]:
+        monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.delitem(sys.modules, "papertrace.mcp_server", raising=False)
+
+    with pytest.raises(typer.Exit) as stop:
+        cli.mcp_command()
+
+    out, err = capsys.readouterr()
+    assert stop.value.exit_code == 2
+    assert out == ""
+    assert "pip install 'papertrace[mcp]'" in err

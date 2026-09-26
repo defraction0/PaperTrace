@@ -1100,3 +1100,12 @@ def build_server() -> MCPServer:
         return _status(root, job, log_lines)
 
     return server
+
+
+def serve() -> None:
+    """Serve over stdio until the host closes the connection.
+
+    stdio only: a case folder stays on the machine that made it, and the host
+    that launched this process is the one client it answers.
+    """
+    build_server().run("stdio")
