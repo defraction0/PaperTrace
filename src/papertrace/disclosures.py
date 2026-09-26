@@ -307,6 +307,20 @@ def _converter(name: str) -> Disclosure:
     )
 
 
+def coverage_audited(coverage: dict) -> bool:
+    """Did the coverage audit run at all? One rule, because two readers need it.
+
+    The reports decide on it whether to print a ratio or `coverage not audited`,
+    and the MCP server whether a gap list is a measurement or `null`. Were the
+    two copies to disagree, one reader would call "never measured" what the
+    other calls "measured, nothing missing".
+
+    Occurrences without labels means `clean.md` was missing while the source
+    map was not: the audit ran, so it must not read as "not audited".
+    """
+    return bool(coverage.get("labels_in_text") or (coverage.get("occurrences") or {}).get("total"))
+
+
 def coverage_headline(coverage: dict) -> str:
     """The one sentence the coverage audit is allowed to be summarised as.
 
@@ -1348,9 +1362,7 @@ def run_disclosures(results, manifest=None) -> list[Disclosure]:
         out.append(_supplement_identity(checked_sup, named_sup))
     coverage = results.coverage or {}
     if coverage:
-        # occurrences without labels means clean.md was missing while the source
-        # map was not: the audit ran, so it must not read as "not audited"
-        if coverage.get("labels_in_text") or (coverage.get("occurrences") or {}).get("total"):
+        if coverage_audited(coverage):
             out.append(_coverage(coverage))
             # only occurrence-level coverage owes the attribution caveat: the
             # label-level audit it replaces could not make that mistake

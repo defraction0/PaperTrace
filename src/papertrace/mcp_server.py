@@ -12,6 +12,8 @@ design and what it rejected: `docs/superpowers/specs/2026-09-26-mcp-server-desig
 
 import datetime
 import io
+import json
+import os
 import sys
 import threading
 from collections.abc import Callable, Iterator
@@ -39,6 +41,7 @@ from .ask import forget_models
 from .disclosures import (
     anchor_disclosure,
     claim_disclosures,
+    coverage_audited,
     coverage_headline,
     ids_span,
     judgement_disclosures,
@@ -76,12 +79,6 @@ Relaying results:
 - Verdicts are a model's drafts for a person's judgement; the evidence images show the
   passage each rests on. Scout hits are candidates, not accusations.
 """
-
-# The CLI's sentence, verbatim: the scout's candidates are search results.
-SCOUT_CAVEAT = (
-    "search-based — absence from these lists proves nothing; presence is a candidate "
-    "for your judgement, not an accusation."
-)
 
 # read tools change nothing and consult nothing outside the case folder
 _READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
@@ -169,6 +166,7 @@ class ClaimList(TypedDict):
     verdict_filter: str | None
     claims_total: int
     claims: list[ClaimRow]
+    run_disclosures: list[DisclosureOut]
     limited: str | None
 
 
@@ -209,6 +207,7 @@ class ClaimDetail(TypedDict):
     unjudged_refs: list[str]
     withheld_refs: list[str]
     disclosures: list[DisclosureOut]
+    run_disclosures: list[DisclosureOut]
 
 
 class SupplementOut(TypedDict):
@@ -329,13 +328,13 @@ class AuditStatus(TypedDict):
     only with the disclosures that qualify them, in audit_summary."""
 
     case: str
-    state: Literal["running", "finished", "failed", "not_started"]
+    state: Literal["running", "finished", "failed", "interrupted", "not_started"]
     manuscript: str | None
     started: str | None
     ended: str | None
     error: str
-    log: list[str]
-    log_lines_total: int
+    log: list[str] | None
+    log_lines_total: int | None
     next: str
 
 
@@ -503,7 +502,15 @@ def _crop_paths(case: Path, claim: ClaimResult, rels: list[str]) -> list[Path]:
     return paths
 
 
-def _caption(claim: ClaimResult, target, shown: list[Path], missing: list[str]) -> str:
+def _caption(
+    claim: ClaimResult, target, shown: list[Path], missing: list[str], manifest, run_fired
+) -> str:
+    """What the crop is, and every caveat on the verdict it is shown under.
+
+    The caveats travel with the picture because the picture is shown with its
+    verdict: a crop from a source whose label may name another paper, captioned
+    without saying so, would present the wrong paper as evidence.
+    """
     qualifier = claim.headline_qualifier()
     lines = [f"claim {claim.id} — {claim.label}" + (f" ({qualifier})" if qualifier else "")]
     if claim.quote:
@@ -523,16 +530,16 @@ def _caption(claim: ClaimResult, target, shown: list[Path], missing: list[str]) 
         )
     if missing:
         lines.append(f"not in the case folder, so not shown: {', '.join(missing)}")
+    if caveats := [d.short for d in claim_disclosures(claim, manifest)]:
+        lines += ["caveats on this claim:", *(f"- {c}" for c in caveats)]
+    if run_fired:
+        lines += ["caveats on the whole audit:", *(f"- {d.short}" for d in run_fired)]
     return "\n".join(lines)
 
 
-def _coverage_audited(coverage: dict) -> bool:
-    """Did the coverage audit run? The rule `run_disclosures` applies."""
-    return bool(coverage.get("labels_in_text") or (coverage.get("occurrences") or {}).get("total"))
-
-
 def _scout_caveat(scout: ScoutResults) -> str:
-    """The scout's own caveat, led by the identity warning the CLI prints."""
+    """The scout's own caveat, led by what the report formats print beside it:
+    the identity warning, and the scan's own error when it did not complete."""
     identity = scout.paper_identity
     if not scout.paper_title or identity == "confirmed":
         lead = ""
@@ -542,7 +549,11 @@ def _scout_caveat(scout: ScoutResults) -> str:
         lead = "The paper's identity in Europe PMC is unverified — check the record is this paper. "
     else:
         lead = "The paper's identity was not recorded — check the record is this paper. "
-    return lead + SCOUT_CAVEAT[0].upper() + SCOUT_CAVEAT[1:]
+    if scout.error:
+        # the reports print it beside the caveat: an incomplete scan's empty
+        # register is absence of data, not a clean search
+        lead += f"The scan is incomplete: {scout.error}. "
+    return lead + cli.SCOUT_CAVEAT[0].upper() + cli.SCOUT_CAVEAT[1:]
 
 
 # --------------------------------------------------------------------------
@@ -620,6 +631,16 @@ def _last_said(lines: list[str], n: int = 4) -> str:
     return " ".join(line.strip() for line in [x for x in lines if x.strip()][-n:])
 
 
+# What a later server knows about the last audit an MCP server started in a case
+# folder. The job writes it "running" before the pipeline touches anything and
+# rewrites it when the job ends, so a server stopped mid-audit leaves "running"
+# behind — the one thing on disk that says the files beside it are incomplete.
+# Its shape is `schemas/mcp_audit.schema.json`.
+RECORD = "mcp_audit.json"
+RECORD_SCHEMA = "mcp_audit/1"
+_RECORD_STATES = ("running", "finished", "failed")
+
+
 @dataclass
 class _Job:
     """One audit this server process started."""
@@ -627,11 +648,46 @@ class _Job:
     case: Path
     manuscript: Path
     started: str
+    scout: bool = True  # False leaves an earlier run's scout.json in the folder
     state: str = "running"  # running | finished | failed
     ended: str | None = None
     error: str = ""
     log: list[str] = field(default_factory=list)
     done: threading.Event = field(default_factory=threading.Event)
+
+
+def _write_record(job: _Job) -> None:
+    payload = {
+        "schema": RECORD_SCHEMA,
+        "state": job.state,
+        "manuscript": job.manuscript.name,  # a name, as refs_manifest.json keeps it
+        "started": job.started,
+        "ended": job.ended,
+        "error": job.error,
+        "scout": job.scout,
+    }
+    (job.case / RECORD).write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _read_record(case: Path) -> dict | None:
+    """The last MCP audit's record, or None when no MCP server audited here — and
+    a refusal, never a guess, when there is one and it cannot be read."""
+    path = case / RECORD
+    if not path.is_file():
+        return None
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict) or record.get("state") not in _RECORD_STATES:
+            raise ValueError("no state this server knows")
+    except (OSError, ValueError) as e:
+        raise ToolError(
+            f"{path} is unreadable ({type(e).__name__}: {str(e)[:200]}), so whether the last "
+            "audit here finished cannot be told and nothing is read as its result — run "
+            "start_audit again"
+        ) from None
+    return record
 
 
 class _Jobs:
@@ -650,17 +706,49 @@ class _Jobs:
     def last(self, case: Path) -> _Job | None:
         return self._by_case.get(case)
 
-    def refuse_running(self, case: Path) -> None:
-        """A case whose audit is running has nothing on disk that belongs to it."""
-        job = self._running
-        if job is not None and job.case == case:
+    def refuse_unfinished(self, case: Path) -> None:
+        """Nothing on disk is read as a result unless the last audit here ended.
+
+        This server's own job decides it when there is one; otherwise the record
+        an earlier server left. No record means no MCP server audited here, and
+        the case is read as the CLI's reports would read it.
+        """
+        if (job := self._by_case.get(case)) is not None:
+            state, started, error = job.state, job.started, job.error
+        elif (record := _read_record(case)) is not None:
+            state = "interrupted" if record["state"] == "running" else record["state"]
+            started, error = record.get("started"), record.get("error") or ""
+        else:
+            return
+        if state == "running":
             raise ToolError(
-                f"an audit of {case} is running now (started {job.started}) — what is on "
-                "disk belongs to an earlier run or is half-written, so nothing is read from "
-                "it until the audit ends. Call audit_status."
+                f"an audit of {case} is running now (started {started}) — what is on disk "
+                "belongs to an earlier run or is half-written, so nothing is read from it "
+                "until the audit ends. Call audit_status."
+            )
+        if state == "interrupted":
+            raise ToolError(
+                f"an audit of {case} started {started} did not finish: the server running it "
+                "stopped mid-run, so what is on disk may be half-written or mix two runs, and "
+                "none of it is read as a result. Run start_audit again — or, if the case has "
+                f"been completed since by other means, remove {case / RECORD} first."
+            )
+        if state == "failed":
+            raise ToolError(
+                f"the last audit of {case} (started {started}) failed: {error}. What is on "
+                "disk may mix that run with an earlier one, so none of it is read as a "
+                "result — fix the cause and run start_audit again."
             )
 
-    def start(self, prepare: Callable[[], tuple[Path, Path, dict]]) -> _Job:
+    def scanned(self, case: Path) -> bool | None:
+        """Did the latest MCP audit here scan the literature? None: no MCP audit here,
+        or one whose record does not say."""
+        if (job := self._by_case.get(case)) is not None:
+            return job.scout
+        record = _read_record(case)
+        return None if record is None else record.get("scout")
+
+    def start(self, prepare: Callable[[], tuple[Path, Path, dict, list[str]]]) -> _Job:
         """Run `prepare` — every check that can refuse before anything is spent —
         then the pipeline on its own thread, and return without waiting for it."""
         with self._lock:
@@ -670,11 +758,15 @@ class _Jobs:
                     f"{running.started}). One audit runs at a time — follow it with "
                     "audit_status, and start this one when it has ended."
                 )
-            case, manuscript, kwargs = prepare()
-            job = _Job(case=case, manuscript=manuscript, started=_now())
+            case, manuscript, kwargs, said = prepare()
+            job = _Job(case=case, manuscript=manuscript, started=_now(),
+                       scout=kwargs["with_scout"], log=list(said))
             self._running = self._by_case[case] = job
-            # daemon: when the host stops the server, the audit stops with it
-            # rather than spending on for a client that has gone
+            # daemon: when the host stops the server, no further stage and no
+            # further model call starts. A `claude -p` call already in flight
+            # runs to its own end — `ask.py`'s timeout bounds it — and the record
+            # left saying "running" is what tells a later server the case is
+            # incomplete.
             threading.Thread(
                 target=self._run, args=(job, kwargs), name="papertrace-audit", daemon=True
             ).start()
@@ -684,6 +776,10 @@ class _Jobs:
         state, error = "failed", ""
         try:
             with _console_into(job.log), _nobody_to_ask():
+                # the folder and its .gitignore first, so the record never lands
+                # in a folder that is briefly untracked
+                cli._open_case(job.case)
+                _write_record(job)
                 # the process outlives one audit: a model an earlier audit
                 # recorded must not be reported as this one's judge
                 forget_models()
@@ -704,6 +800,13 @@ class _Jobs:
             if state == "failed" and not error:
                 error = "the audit was interrupted before it could finish"
             job.state, job.error, job.ended = state, error, _now()
+            try:
+                _write_record(job)
+            except OSError as e:
+                # this server still knows the outcome; a later one reads the
+                # "running" left behind as an interrupted audit, which refuses —
+                # the safe side
+                job.log.append(f"the audit record could not be updated: {e}")
             with self._lock:
                 if self._running is job:
                     self._running = None
@@ -715,16 +818,32 @@ _NEXT = {
     "finished": "call audit_summary for the result — its counts travel with the caveats that "
                 "qualify them",
     "failed": "read `error` and the log, fix what they name, and call start_audit again",
-    "not_started": "no audit of this case was started by this server process — audit_summary "
-                   "reads whatever an earlier run left on disk",
+    "interrupted": "the server running this audit stopped before it ended — call start_audit "
+                   "to run it again",
+    "not_started": "no audit of this case was started by an MCP server — audit_summary reads "
+                   "whatever a CLI run left on disk",
 }
 
 
-def _status(case: Path, job: _Job | None, log_lines: int) -> AuditStatus:
+def _status(case: Path, job: _Job | None, log_lines: int, record: dict | None = None) -> AuditStatus:
+    """The job's state — this server's own, else the record an earlier one left.
+
+    `log` and `log_lines_total` are null, not empty, when no log exists here: an
+    empty log reads as an audit that printed nothing.
+    """
+    if job is None and record is not None:
+        state = "interrupted" if record["state"] == "running" else record["state"]
+        return {
+            "case": str(case), "state": state, "manuscript": record.get("manuscript"),
+            "started": record.get("started"), "ended": record.get("ended"),
+            "error": record.get("error") or "", "log": None, "log_lines_total": None,
+            "next": f"{_NEXT[state]} — recorded by an earlier server process, whose log "
+                    "was not kept",
+        }
     if job is None:
         return {
             "case": str(case), "state": "not_started", "manuscript": None, "started": None,
-            "ended": None, "error": "", "log": [], "log_lines_total": 0,
+            "ended": None, "error": "", "log": None, "log_lines_total": None,
             "next": _NEXT["not_started"],
         }
     log = list(job.log)
@@ -752,9 +871,9 @@ def build_server() -> MCPServer:
     jobs = _Jobs()
 
     def _open(case: str) -> Path:
-        """A case folder to read — unless this server is writing it right now."""
+        """A case folder to read — unless the last audit here has not ended well."""
         root = _case_dir(case)
-        jobs.refuse_running(root)
+        jobs.refuse_unfinished(root)
         return root
 
     @server.tool(title="Audit summary", annotations=_READ, structured_output=True)
@@ -798,12 +917,16 @@ def build_server() -> MCPServer:
         results = _results(root)
         manifest = _manifest(root, required=False)
         rows = [_claim_row(c, manifest) for c in results.claims if verdict in (None, c.verdict)]
+        fired = run_disclosures(results, manifest)
         return {
             "case": str(root),
             "verdict_filter": verdict,
             "claims_total": len(results.claims),
             "claims": rows,
-            "limited": _limited(run_disclosures(results, manifest)),
+            # a host can list claims without ever reading the summary, so the
+            # caveats the reports print above every verdict come here too
+            "run_disclosures": _disclosures(fired),
+            "limited": _limited(fired),
         }
 
     @server.tool(title="Claim detail", annotations=_READ, structured_output=True)
@@ -837,6 +960,9 @@ def build_server() -> MCPServer:
             "unjudged_refs": list(c.unjudged_refs),
             "withheld_refs": list(c.withheld_refs),
             "disclosures": _disclosures(claim_disclosures(c, manifest)),
+            # the caveats the reports print above every verdict: an unconfirmed
+            # source identity, a source read flat or cut short
+            "run_disclosures": _disclosures(run_disclosures(results, manifest)),
         }
 
     @server.tool(title="Evidence crops", annotations=_READ, structured_output=False)
@@ -853,7 +979,9 @@ def build_server() -> MCPServer:
         The boxes were drawn by code finding the model's anchor phrases in the PDF, not
         placed by the model; the caption says whether the phrase was found."""
         root = _open(case)
-        claim = _find_claim(_results(root), claim_id)
+        results = _results(root)
+        manifest = _manifest(root, required=False)
+        claim = _find_claim(results, claim_id)
         target = _evidence_target(claim, source)
         rels = _images_of(target)
         if not rels:
@@ -869,7 +997,8 @@ def build_server() -> MCPServer:
                 f"results.json but not in {out} — re-run `papertrace highlight -c <case>`"
             )
         return [
-            TextContent(type="text", text=_caption(claim, target, shown, missing)),
+            TextContent(type="text", text=_caption(
+                claim, target, shown, missing, manifest, run_disclosures(results, manifest))),
             *(Image(path=p) for p in shown),
         ]
 
@@ -946,7 +1075,7 @@ def build_server() -> MCPServer:
         results = _results(root)
         manifest = _manifest(root, required=False)
         coverage = results.coverage or {}
-        audited = _coverage_audited(coverage)
+        audited = coverage_audited(coverage)
         occurrences = coverage.get("occurrences")
         fired = run_disclosures(results, manifest)
         return {
@@ -987,6 +1116,12 @@ def build_server() -> MCPServer:
             raise ToolError(
                 f"no literature scan at {path} — the audit ran without the scout, or the "
                 "scout stage has not run (`papertrace scout -c <case>`)"
+            )
+        if jobs.scanned(root) is False:
+            raise ToolError(
+                f"the latest audit of {root} ran without the scout, so {path} belongs to an "
+                "earlier run — its registers may be anchored to another DOI or another "
+                "version of this paper, and are not served as this audit's"
             )
         scout = _read(path, ScoutResults.from_json, "scout")
         return {"case": str(root), **scout.to_dict(), "caveat": _scout_caveat(scout)}
@@ -1049,7 +1184,7 @@ def build_server() -> MCPServer:
         if pdfs is not None and not pdfs.is_dir():
             raise ToolError(f"`provided` must be a folder of PDFs, and {pdfs} is not one")
 
-        def prepare() -> tuple[Path, Path, dict]:
+        def prepare() -> tuple[Path, Path, dict, list[str]]:
             # everything that can refuse, refused before a model or a network is touched
             from .check import claude_available
 
@@ -1059,6 +1194,14 @@ def build_server() -> MCPServer:
                     "judged with `claude -p` — install Claude Code and log in. If it is "
                     "installed, the host started this server with a PATH that does not "
                     "reach it: set PATH in the server's configuration."
+                )
+            if case is None and not os.access(pdf.parent, os.W_OK):
+                # `papertrace run` falls back to its working directory, one the
+                # person chose by standing in it; this server's was chosen by the
+                # host, so the audit would land wherever that happens to be
+                raise ToolError(
+                    f"the paper's folder {pdf.parent} is not writable, so the audit cannot sit "
+                    "beside it — pass `case`, the folder to keep it in"
                 )
             said: list[str] = []
             try:
@@ -1075,7 +1218,7 @@ def build_server() -> MCPServer:
                 "model": model, "png": False, "backend": backend, "with_scout": scout,
                 "doi": doi, "formats": list(formats or []), "supplement": own,
                 "llm_refs": llm_refs, "max_claims": max_claims, "max_sources": max_sources,
-            }
+            }, said  # what the checks printed opens the job's log
 
         job = jobs.start(prepare)
         return _status(job.case, job, log_lines=40)
@@ -1097,7 +1240,7 @@ def build_server() -> MCPServer:
         job = jobs.last(root)
         if job is not None and wait_seconds:
             job.done.wait(wait_seconds)
-        return _status(root, job, log_lines)
+        return _status(root, job, log_lines, None if job is not None else _read_record(root))
 
     return server
 

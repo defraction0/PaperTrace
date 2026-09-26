@@ -11,7 +11,9 @@ must carry, the MCP output must carry too.
 """
 
 import json
+import os
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -19,8 +21,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 # `[dev]` installs the SDK, so CI runs this module rather than skipping it;
-# `tests/test_packaging.py` asserts that it stays there
+# `tests/test_packaging.py` asserts that it stays there. A 1.x SDK — other tools
+# install one — is skipped with the same reason rather than failing collection.
 pytest.importorskip("mcp", reason="pip install -e '.[dev]' supplies the MCP SDK")
+
+from importlib.metadata import version as _installed  # noqa: E402
+
+if int(_installed("mcp").split(".")[0]) < 2:
+    pytest.skip("the server is written against the MCP SDK 2.x — pip install -e '.[dev]'",
+                allow_module_level=True)
 
 import anyio  # noqa: E402
 import typer  # noqa: E402
@@ -52,6 +61,13 @@ READ_TOOLS = {
     "audit_summary", "list_claims", "get_claim", "get_evidence",
     "list_references", "list_gaps", "get_scout",
 }
+# one call to each read tool, with whatever arguments it needs beyond `case`
+READ_CALLS = (
+    ("audit_summary", {}), ("list_claims", {}), ("get_claim", {"claim_id": 1}),
+    ("get_evidence", {"claim_id": 1}), ("list_references", {}), ("list_gaps", {}),
+    ("get_scout", {}),
+)
+ROOT = Path(__file__).resolve().parent.parent
 
 
 # --------------------------------------------------------------------------
@@ -957,9 +973,7 @@ def test_read_tools_refuse_the_case_whose_audit_is_running(ready, monkeypatch, t
     started = _start(server, manuscript=_paper(tmp_path), case=case)
 
     try:
-        for tool, args in (("audit_summary", {}), ("list_claims", {}), ("get_claim", {"claim_id": 1}),
-                           ("get_evidence", {"claim_id": 1}), ("list_references", {}),
-                           ("list_gaps", {}), ("get_scout", {})):
+        for tool, args in READ_CALLS:
             result = _call(tool, {"case": started["case"], **args}, server)
             assert result.is_error, tool
             assert "running" in _text(result), tool
@@ -1006,7 +1020,7 @@ def test_the_status_of_a_case_this_server_never_ran_says_so(tmp_path):
     status = _json(_call("audit_status", {"case": str(case)}))
 
     assert status["state"] == "not_started"
-    assert "this server" in status["next"]
+    assert "MCP server" in status["next"]
 
 
 # --------------------------------------------------------------------------
@@ -1071,3 +1085,202 @@ def test_without_the_sdk_papertrace_mcp_says_how_to_install_it(monkeypatch, caps
     assert stop.value.exit_code == 2
     assert out == ""
     assert "pip install 'papertrace[mcp]'" in err
+
+
+# --------------------------------------------------------------------------
+# review findings — each a way the server could present a case as a result
+# it is not, or a verdict without what qualifies it
+# --------------------------------------------------------------------------
+
+
+def _record(case: Path) -> dict:
+    return json.loads((case / "mcp_audit.json").read_text())
+
+
+def test_after_a_failed_audit_nothing_on_disk_is_served_as_its_result(
+    ready, monkeypatch, tmp_path
+):
+    """A rerun can rewrite the manifest and die before `check`, leaving one
+    run's references beside another run's verdicts. The case is refused with
+    the failure, never served as a result."""
+    def body(kw):
+        RefManifest(manuscript="paper.pdf").to_json(Path(kw["case"]) / "refs_manifest.json")
+        raise RuntimeError("claude -p failed: not logged in")
+
+    case = _case(tmp_path)  # an earlier, complete audit
+    RefManifest(manuscript="paper.pdf").to_json(case / "refs_manifest.json")
+    _fake_pipeline(monkeypatch, body)
+    server = mcp_server.build_server()
+    started = _start(server, manuscript=_paper(tmp_path), case=case)
+    assert _await(server, started["case"])["state"] == "failed"
+
+    for tool, args in READ_CALLS:
+        result = _call(tool, {"case": started["case"], **args}, server)
+        assert result.is_error, tool
+        assert "failed" in _text(result) and "not logged in" in _text(result), tool
+
+
+def test_an_audit_its_server_never_finished_is_refused_and_reported_interrupted(tmp_path):
+    """A host that stops the server stops the audit mid-run. Whatever it wrote
+    is on disk, and the only thing that says it is incomplete is the record the
+    job wrote when it started — read here by a server that never ran it."""
+    case = _case(tmp_path)
+    (case / "mcp_audit.json").write_text(json.dumps({
+        "schema": "mcp_audit/1", "state": "running", "manuscript": "paper.pdf",
+        "started": "2026-09-26T10:00:00+00:00", "ended": None, "error": "", "scout": True,
+    }))
+    server = mcp_server.build_server()
+
+    status = _json(_call("audit_status", {"case": str(case)}, server))
+    summary = _call("audit_summary", {"case": str(case)}, server)
+
+    assert status["state"] == "interrupted"
+    assert status["started"] == "2026-09-26T10:00:00+00:00"
+    assert summary.is_error and "did not finish" in _text(summary)
+
+
+def test_the_record_outlives_the_server_that_wrote_it(ready, monkeypatch, tmp_path):
+    jsonschema = pytest.importorskip("jsonschema")
+    _fake_pipeline(monkeypatch)
+    first = mcp_server.build_server()
+    case = _await(first, _start(first, manuscript=_paper(tmp_path), scout=False)["case"])["case"]
+
+    status = _json(_call("audit_status", {"case": case}, mcp_server.build_server()))
+
+    assert status["state"] == "finished"
+    assert "not kept" in status["next"], "a log that did not survive must say so"
+    record = _record(Path(case))
+    assert record["state"] == "finished" and record["scout"] is False
+    jsonschema.validate(record, json.loads((ROOT / "schemas" / "mcp_audit.schema.json").read_text()))
+
+
+def test_a_claim_read_on_its_own_still_carries_the_runs_caveats(tmp_path):
+    """A host can call get_claim without ever calling audit_summary. The source
+    behind claim 1's headline is one whose identity nobody confirmed — the
+    reports say so above every verdict, so a verdict read alone says it too."""
+    results = _results(scope=LIMITED_SCOPE)
+    case = _case(tmp_path, results=results)
+
+    for tool, args in (("get_claim", {"claim_id": 1}), ("list_claims", {})):
+        body = _text(_call(tool, {"case": str(case), **args}))
+        for d in run_disclosures(results, _manifest()):
+            assert d.token in body, (tool, d.key)
+
+
+def test_the_evidence_caption_carries_every_caveat_on_its_verdict(tmp_path):
+    """The crop is shown under its verdict, so the verdict's caveats come with
+    it — here [6] sits past where the numbering stopped being confirmed, and a
+    crop captioned without that would show the wrong paper as evidence."""
+    claim = _paraphrase_claim(True)
+    claim.refs = ["6"]
+    results = _results(claims=[claim])
+    case = _case(tmp_path, results=results)
+
+    caption = _text(_call("get_evidence", {"case": str(case), "claim_id": 4}))
+
+    fired = claim_disclosures(claim, _manifest()) + run_disclosures(results, _manifest())
+    assert "claim_numbering" in {d.key for d in fired}
+    for d in fired:
+        assert d.token in caption, d.key
+
+
+def test_start_audit_will_not_put_an_audit_wherever_the_host_started_it(
+    ready, monkeypatch, tmp_path
+):
+    """`papertrace run` keeps the audit in the working directory when the
+    paper's folder is read-only — a directory the person chose by standing in
+    it. A host chose this server's, so start_audit asks for a case instead."""
+    calls = _fake_pipeline(monkeypatch)
+    pdf = _paper(tmp_path)
+    access = os.access
+    monkeypatch.setattr(os, "access", lambda p, mode: Path(p) != pdf.parent and access(p, mode))
+
+    result = _call("start_audit", {"manuscript": str(pdf)})
+
+    assert result.is_error
+    assert str(pdf.parent) in _text(result) and "`case`" in _text(result)
+    assert calls == []
+
+
+def test_what_the_checks_said_before_the_audit_is_kept_in_its_log(ready, monkeypatch, tmp_path):
+    """A legacy case folder is accepted with a warning that its identity was
+    compared by name only. That warning is printed before the job starts, and
+    it belongs in the job's log, not a buffer nobody reads."""
+    _fake_pipeline(monkeypatch)
+    case = tmp_path / "case"
+    case.mkdir()
+    RefManifest(manuscript="paper.pdf").to_json(case / "refs_manifest.json")
+    server = mcp_server.build_server()
+
+    status = _await(server, _start(server, manuscript=_paper(tmp_path), case=case)["case"])
+
+    assert any("predates content hashing" in line for line in status["log"])
+
+
+def test_an_incomplete_scan_says_so_in_its_caveat(tmp_path):
+    scout = ScoutResults(paper_title="A paper", paper_identity="confirmed",
+                         error="Europe PMC timed out")
+    case = _case(tmp_path, scout=scout)
+
+    assert "Europe PMC timed out" in _json(_call("get_scout", {"case": str(case)}))["caveat"]
+
+
+def test_a_scan_the_latest_audit_did_not_run_is_not_served_as_its_own(
+    ready, monkeypatch, tmp_path
+):
+    """An audit run without the scout leaves an earlier run's scout.json on
+    disk, anchored to whatever paper and DOI that run used."""
+    case = _case(tmp_path, scout=ScoutResults(paper_title="A paper", paper_identity="confirmed"))
+    RefManifest(manuscript="paper.pdf").to_json(case / "refs_manifest.json")
+    _fake_pipeline(monkeypatch)
+    server = mcp_server.build_server()
+    _await(server, _start(server, manuscript=_paper(tmp_path), case=case, scout=False)["case"])
+
+    result = _call("get_scout", {"case": str(case)}, server)
+
+    assert result.is_error
+    assert "without the scout" in _text(result)
+
+
+def test_an_sdk_too_old_for_the_server_gets_the_install_line_too(monkeypatch, capsys):
+    """A 1.x SDK — other tools install one — has no `MCPServer`, and fails with
+    an ImportError that is not a ModuleNotFoundError."""
+    for name in [n for n in sys.modules if n == "mcp" or n.startswith("mcp.")]:
+        monkeypatch.delitem(sys.modules, name)
+    old = types.ModuleType("mcp")
+    old.__path__ = []
+    monkeypatch.setitem(sys.modules, "mcp", old)
+    monkeypatch.setitem(sys.modules, "mcp.server", types.ModuleType("mcp.server"))
+    monkeypatch.delitem(sys.modules, "papertrace.mcp_server", raising=False)
+
+    with pytest.raises(typer.Exit) as stop:
+        cli.mcp_command()
+
+    out, err = capsys.readouterr()
+    assert stop.value.exit_code == 2 and out == ""
+    assert "pip install 'papertrace[mcp]'" in err
+
+
+STRUCTURED = {
+    "audit_summary": "AuditSummary", "list_claims": "ClaimList", "get_claim": "ClaimDetail",
+    "list_references": "ReferenceList", "list_gaps": "Gaps", "get_scout": "ScoutOut",
+    "audit_status": "AuditStatus",
+}
+
+
+def test_every_tool_output_matches_its_schema_in_schemas(tmp_path):
+    """Gate 2: what the server publishes is a contract, and `schemas/` is where
+    this repository's contracts live. Each output validates against it, and
+    each schema names exactly the keys its tool returns — a field added to one
+    and not the other turns this red."""
+    jsonschema = pytest.importorskip("jsonschema")
+    published = json.loads((ROOT / "schemas" / "mcp_tools.schema.json").read_text())
+    case = _case(tmp_path, results=_results(scope=LIMITED_SCOPE),
+                 scout=ScoutResults(paper_title="A paper", paper_identity="unverified"))
+    args = {"get_claim": {"claim_id": 1}}
+
+    for tool, shape in STRUCTURED.items():
+        out = _json(_call(tool, {"case": str(case), **args.get(tool, {})}))
+        jsonschema.validate(out, {**published, "$ref": f"#/$defs/{tool}"})
+        declared = set(published["$defs"][tool]["properties"])
+        assert declared == set(getattr(mcp_server, shape).__annotations__), tool

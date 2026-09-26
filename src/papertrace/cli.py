@@ -457,14 +457,24 @@ def mcp_command() -> None:
     # and a banner or a warning printed before serving begins corrupts it.
     try:
         from .mcp_server import serve
-    except ModuleNotFoundError as e:
-        # only the SDK's absence earns the install line; any other missing
-        # module is a real fault and says so with its own traceback
+    except ImportError as e:
+        # Only the SDK earns the install line — absent (ModuleNotFoundError) or
+        # a 1.x that other tools installed, which has no `MCPServer` and fails
+        # with a plain ImportError. Any other import is a real fault and keeps
+        # its own traceback.
         if (e.name or "").split(".")[0] != "mcp":
             raise
-        # rich eats [mcp] as a style tag; escaping it is what prints the extra
-        Console(stderr=True).print(
-            r"[red]the MCP server needs the MCP SDK[/red] — pip install 'papertrace\[mcp]'"
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            found = f" (found mcp {version('mcp')})"
+        except PackageNotFoundError:
+            found = ""
+        # rich eats [mcp] as a style tag; escaping it is what prints the extra.
+        # soft_wrap: wrapped at the terminal's width, the command split in two
+        Console(stderr=True, soft_wrap=True).print(
+            f"[red]the MCP server needs version 2 of the MCP SDK{found}[/red] — "
+            r"pip install 'papertrace\[mcp]'"
         )
         raise typer.Exit(2) from None
     serve()
@@ -1789,6 +1799,13 @@ def refs(
                     claims=_first_n(max_claims), max_sources=_int(max_sources))
 
 
+# What the scout's candidates are, said once for the console and the MCP server.
+SCOUT_CAVEAT = (
+    "search-based — absence from these lists proves nothing; presence is a candidate "
+    "for your judgement, not an accusation."
+)
+
+
 @app.command(rich_help_panel="Pipeline stages — `run` calls these in order")
 def scout(
     case: Path = typer.Option(
@@ -1848,10 +1865,7 @@ def scout(
             console.print(f"    [cyan]{h.year or '?'}[/cyan] {h.title[:76]}")
         if len(res.same_year) > 5:
             console.print(f"    [dim]… {len(res.same_year) - 5} more in scout.json[/dim]")
-    console.print(
-        "[dim]search-based — absence from these lists proves nothing; presence is a"
-        " candidate for your judgement, not an accusation.[/dim]"
-    )
+    console.print(f"[dim]{SCOUT_CAVEAT}[/dim]")
 
 
 def _check_pipeline(
