@@ -118,6 +118,44 @@ def test_run_hands_report_its_formats_rather_than_an_option_info(monkeypatch, tm
     assert seen["formats"] == ["md"], "run() must pass formats through explicitly"
 
 
+def test_run_pipeline_rejects_a_positional_call():
+    with pytest.raises(TypeError):
+        cli._run_pipeline(Path("whatever.pdf"))
+
+
+def test_run_command_delegates_every_parameter_to_the_pipeline_function(monkeypatch, tmp_path):
+    """`run` gains a second caller — the MCP server's audit job — which is the
+    moment `cli.py`'s own comment names for splitting a stage: a caller that
+    omits an option hands a Typer command an `OptionInfo` for it, and a plain
+    keyword-only function has ordinary defaults instead.
+
+    The signature comparison is what keeps the adapter whole: a parameter added
+    to one and not the other turns this red rather than reaching the pipeline as
+    its default without anyone deciding that."""
+    import inspect
+
+    # read before the patch below replaces it with a `**kw` lambda
+    pipeline_params = set(inspect.signature(cli._run_pipeline).parameters)
+    seen = {}
+    monkeypatch.setattr(cli, "_run_pipeline", lambda **kw: seen.update(kw))
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    own = tmp_path / "p-supplement.pdf"
+
+    cli.run(manuscript=pdf, case=tmp_path, provided=None, email="t@example.org",
+            model="claude-opus-5", png=False, backend="pymupdf", with_scout=False,
+            doi="10.1/x", formats=["viewer"], supplement=[own], llm_refs=False,
+            max_claims=3, max_sources=2)
+
+    assert seen == {
+        "manuscript": pdf, "case": tmp_path, "provided": None, "email": "t@example.org",
+        "model": "claude-opus-5", "png": False, "backend": "pymupdf", "with_scout": False,
+        "doi": "10.1/x", "formats": ["viewer"], "supplement": [own], "llm_refs": False,
+        "max_claims": 3, "max_sources": 2,
+    }
+    assert set(inspect.signature(cli.run).parameters) == pipeline_params
+
+
 def test_check_pipeline_rejects_a_positional_call():
     with pytest.raises(TypeError):
         cli._check_pipeline(Path("some-case"))

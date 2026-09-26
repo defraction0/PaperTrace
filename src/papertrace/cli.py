@@ -2177,62 +2177,29 @@ def report(
     _report_pipeline(case=case, png=png, formats=formats)
 
 
-@app.command(rich_help_panel="Start here")
-def run(
-    manuscript: Path = typer.Argument(..., exists=True),
-    case: Path = typer.Option(
-        None, "--case", "-c",
-        help="Case folder (default: a folder named after the paper, beside the paper)",
-    ),
-    provided: Path = typer.Option(
-        None, "--provided",
-        help="Folder of reference PDFs you already have; files match by name "
-             "<firstauthor>-<year>.pdf (e.g. pyrros-2023.pdf)",
-    ),
-    email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
-    model: str = typer.Option(None, "--model"),
-    png: bool = typer.Option(
-        False, "--png/--no-png",
-        help="Also export PNG images of the report looks (one-time: playwright install chromium)",
-    ),
-    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
-    with_scout: bool = typer.Option(
-        True, "--scout/--no-scout",
-        help="Also scan Europe PMC for newer + uncited literature",
-    ),
-    doi: str = typer.Option(
-        None, "--doi",
-        help="DOI of the paper itself — checks the reference numbering against the "
-             "publisher's deposited list, and pins the scout's literature search",
-    ),
-    formats: list[str] = typer.Option(
-        None, "--format", "-f",
-        help="Extra looks to render beside report.md: editor | terminal | viewer (repeatable)",
-    ),
-    supplement: list[Path] = typer.Option(
-        None, "--supplement", exists=True,
-        help="Supplementary material for THIS paper (repeatable). A cited work's "
-             "supplement needs no flag — drop it in the sources folder named after "
-             "the reference, e.g. pyrros-2023-supplement.pdf",
-    ),
-    llm_refs: bool = typer.Option(
-        True, "--llm-refs/--no-llm-refs",
-        help="Also have a model read the printed reference list as a second opinion "
-             "on the numbering (one extra model call — none under --parse-only, or on a "
-             "pymupdf backend, which leaves no second reading to compare)",
-    ),
-    max_claims: int = typer.Option(
-        None, "--max-claims", min=1,
-        help="Check only the first N extracted claims, in reading order; only the "
-             "references they cite are retrieved, and every report says so",
-    ),
-    max_sources: int = typer.Option(
-        None, "--max-sources", min=1,
-        help="Obtain and judge against at most N cited sources (PDFs), in bibliography "
-             "order; the rest are skipped, and every report says so",
-    ),
+def _run_pipeline(
+    *,
+    manuscript: Path,
+    case: Path | None = None,
+    provided: Path | None = None,
+    email: str | None = None,
+    model: str | None = None,
+    png: bool = False,
+    backend: str = "auto",
+    with_scout: bool = True,
+    doi: str | None = None,
+    formats: list[str] | None = None,
+    supplement: list[Path] | None = None,
+    llm_refs: bool = True,
+    max_claims: int | None = None,
+    max_sources: int | None = None,
 ) -> None:
-    """Full pipeline: ingest → extract → refs → scout → check → highlight → report."""
+    """`run`'s work: ingest → extract → refs → scout → check → highlight → report.
+
+    Keyword-only with plain defaults, for the reason every stage function is:
+    `run` has a second caller — the MCP server's audit job — and a caller that
+    omitted an option from the Typer command would hand it an `OptionInfo`.
+    """
     console.print(BANNER)
     email = _email(email)  # fail fast — before the ingest models load, not after
     # the limits as the stages take them: an array of claim ids and a count.
@@ -2303,6 +2270,68 @@ def run(
         " · the gap register is part of the result."
         + limited
     )
+
+
+@app.command(rich_help_panel="Start here")
+def run(
+    manuscript: Path = typer.Argument(..., exists=True),
+    case: Path = typer.Option(
+        None, "--case", "-c",
+        help="Case folder (default: a folder named after the paper, beside the paper)",
+    ),
+    provided: Path = typer.Option(
+        None, "--provided",
+        help="Folder of reference PDFs you already have; files match by name "
+             "<firstauthor>-<year>.pdf (e.g. pyrros-2023.pdf)",
+    ),
+    email: str = typer.Option(None, "--email", envvar=["PAPERTRACE_EMAIL", "MANUSCRIPTAGENT_EMAIL"]),
+    model: str = typer.Option(None, "--model"),
+    png: bool = typer.Option(
+        False, "--png/--no-png",
+        help="Also export PNG images of the report looks (one-time: playwright install chromium)",
+    ),
+    backend: str = typer.Option("auto", "--backend", help="auto | docling | pymupdf"),
+    with_scout: bool = typer.Option(
+        True, "--scout/--no-scout",
+        help="Also scan Europe PMC for newer + uncited literature",
+    ),
+    doi: str = typer.Option(
+        None, "--doi",
+        help="DOI of the paper itself — checks the reference numbering against the "
+             "publisher's deposited list, and pins the scout's literature search",
+    ),
+    formats: list[str] = typer.Option(
+        None, "--format", "-f",
+        help="Extra looks to render beside report.md: editor | terminal | viewer (repeatable)",
+    ),
+    supplement: list[Path] = typer.Option(
+        None, "--supplement", exists=True,
+        help="Supplementary material for THIS paper (repeatable). A cited work's "
+             "supplement needs no flag — drop it in the sources folder named after "
+             "the reference, e.g. pyrros-2023-supplement.pdf",
+    ),
+    llm_refs: bool = typer.Option(
+        True, "--llm-refs/--no-llm-refs",
+        help="Also have a model read the printed reference list as a second opinion "
+             "on the numbering (one extra model call — none under --parse-only, or on a "
+             "pymupdf backend, which leaves no second reading to compare)",
+    ),
+    max_claims: int = typer.Option(
+        None, "--max-claims", min=1,
+        help="Check only the first N extracted claims, in reading order; only the "
+             "references they cite are retrieved, and every report says so",
+    ),
+    max_sources: int = typer.Option(
+        None, "--max-sources", min=1,
+        help="Obtain and judge against at most N cited sources (PDFs), in bibliography "
+             "order; the rest are skipped, and every report says so",
+    ),
+) -> None:
+    """Full pipeline: ingest → extract → refs → scout → check → highlight → report."""
+    _run_pipeline(manuscript=manuscript, case=case, provided=provided, email=email,
+                  model=model, png=png, backend=backend, with_scout=with_scout, doi=doi,
+                  formats=formats, supplement=supplement, llm_refs=llm_refs,
+                  max_claims=max_claims, max_sources=max_sources)
 
 
 def main() -> None:
