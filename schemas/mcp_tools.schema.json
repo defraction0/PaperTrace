@@ -466,13 +466,14 @@
             "not_started"
           ],
           "type": "string",
-          "description": "running, finished, failed: this server's own job. interrupted: the record an earlier server left says running, so that audit never ended. not_started: no MCP server has audited this case."
+          "description": "The last audit an MCP server started in this case. running, finished, failed: this server's own job, with its log — or another server process's record of one, with log null. A record says running only while it is being refreshed (every 15 s); one not refreshed for 60 s is interrupted: the server writing it stopped mid-run. not_started: no MCP server has audited this case."
         },
         "manuscript": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "The audited PDF's absolute path; null when not_started."
         },
         "started": {
           "type": [
@@ -497,14 +498,14 @@
             "array",
             "null"
           ],
-          "description": "The job's latest console lines; null when no log exists in this process — a recorded or never-started audit — because an empty log would read as an audit that printed nothing."
+          "description": "This server's job's latest console lines; null when the audit is another server process's or was never started — an empty log would read as an audit that printed nothing."
         },
         "log_lines_total": {
           "type": [
             "integer",
             "null"
           ],
-          "description": "How many console lines the job printed; null when no log exists in this process."
+          "description": "How many console lines this server's job printed; null when there is no log here."
         },
         "next": {
           "type": "string"

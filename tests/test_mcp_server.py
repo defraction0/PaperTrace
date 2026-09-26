@@ -39,6 +39,8 @@ from papertrace import ask as ask_mod  # noqa: E402
 from papertrace import check as check_mod  # noqa: E402
 from papertrace import cli, mcp_server  # noqa: E402
 from papertrace.disclosures import (  # noqa: E402
+    ANCHOR_LOCATED_TOKEN,
+    ANCHOR_NOT_LOCATED_TOKEN,
     SCOPE_TOKEN,
     claim_disclosures,
     judgement_disclosures,
@@ -1077,6 +1079,7 @@ def test_without_the_sdk_papertrace_mcp_says_how_to_install_it(monkeypatch, caps
     for name in [n for n in sys.modules if n == "mcp" or n.startswith("mcp.")]:
         monkeypatch.setitem(sys.modules, name, None)
     monkeypatch.delitem(sys.modules, "papertrace.mcp_server", raising=False)
+    monkeypatch.setattr("importlib.metadata.version", _no_distribution)
 
     with pytest.raises(typer.Exit) as stop:
         cli.mcp_command()
@@ -1087,6 +1090,12 @@ def test_without_the_sdk_papertrace_mcp_says_how_to_install_it(monkeypatch, caps
     assert "pip install 'papertrace[mcp]'" in err
 
 
+def _no_distribution(name):
+    from importlib.metadata import PackageNotFoundError
+
+    raise PackageNotFoundError(name)
+
+
 # --------------------------------------------------------------------------
 # review findings — each a way the server could present a case as a result
 # it is not, or a verdict without what qualifies it
@@ -1095,6 +1104,29 @@ def test_without_the_sdk_papertrace_mcp_says_how_to_install_it(monkeypatch, caps
 
 def _record(case: Path) -> dict:
     return json.loads((case / "mcp_audit.json").read_text())
+
+
+def _left_record(case: Path, state: str, *, age: float = 0, **fields) -> Path:
+    """A record as another server process left it, last refreshed `age` s ago."""
+    import time
+
+    path = case / "mcp_audit.json"
+    path.write_text(json.dumps({
+        "schema": "mcp_audit/1", "state": state, "manuscript": "/papers/paper.pdf",
+        "started": "2026-09-26T10:00:00+00:00", "ended": None, "error": "", "scout": True,
+        **fields,
+    }))
+    then = time.time() - age
+    os.utime(path, (then, then))
+    return path
+
+
+def _age_file(path: Path, seconds: float) -> None:
+    """Move a file's mtime by `seconds` — positive is later, negative earlier."""
+    import time
+
+    t = time.time() + seconds
+    os.utime(path, (t, t))
 
 
 def test_after_a_failed_audit_nothing_on_disk_is_served_as_its_result(
@@ -1125,10 +1157,7 @@ def test_an_audit_its_server_never_finished_is_refused_and_reported_interrupted(
     is on disk, and the only thing that says it is incomplete is the record the
     job wrote when it started — read here by a server that never ran it."""
     case = _case(tmp_path)
-    (case / "mcp_audit.json").write_text(json.dumps({
-        "schema": "mcp_audit/1", "state": "running", "manuscript": "paper.pdf",
-        "started": "2026-09-26T10:00:00+00:00", "ended": None, "error": "", "scout": True,
-    }))
+    _left_record(case, "running", age=120)
     server = mcp_server.build_server()
 
     status = _json(_call("audit_status", {"case": str(case)}, server))
@@ -1252,6 +1281,7 @@ def test_an_sdk_too_old_for_the_server_gets_the_install_line_too(monkeypatch, ca
     monkeypatch.setitem(sys.modules, "mcp", old)
     monkeypatch.setitem(sys.modules, "mcp.server", types.ModuleType("mcp.server"))
     monkeypatch.delitem(sys.modules, "papertrace.mcp_server", raising=False)
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "1.28.1")
 
     with pytest.raises(typer.Exit) as stop:
         cli.mcp_command()
@@ -1284,3 +1314,222 @@ def test_every_tool_output_matches_its_schema_in_schemas(tmp_path):
         jsonschema.validate(out, {**published, "$ref": f"#/$defs/{tool}"})
         declared = set(published["$defs"][tool]["properties"])
         assert declared == set(getattr(mcp_server, shape).__annotations__), tool
+
+
+# --------------------------------------------------------------------------
+# second review pass — the record says only what it measured
+# --------------------------------------------------------------------------
+
+
+def test_a_named_sources_crop_carries_only_its_own_anchor_state(tmp_path):
+    """Claim 1's headline source (beta-2021) was not boxed; alpha-2020 was.
+    alpha's crop captioned with beta's anchor state would put two
+    contradictory statements under one picture."""
+    case = _case(tmp_path)
+
+    caption = _text(_call("get_evidence", {"case": str(case), "claim_id": 1,
+                                            "source": "alpha-2020"}))
+
+    assert ANCHOR_LOCATED_TOKEN in caption
+    assert ANCHOR_NOT_LOCATED_TOKEN not in caption
+
+
+def test_an_audit_another_server_is_running_is_neither_read_nor_restarted(
+    ready, monkeypatch, tmp_path
+):
+    """Two hosts can each launch their own server. A record refreshed moments
+    ago is a live audit in another process — not an interrupted one — and a
+    second pipeline in the same folder would be the mixing `_guard_case`
+    exists to prevent."""
+    case = _case(tmp_path)
+    RefManifest(manuscript="paper.pdf").to_json(case / "refs_manifest.json")
+    _left_record(case, "running", age=1)
+    calls = _fake_pipeline(monkeypatch)
+    server = mcp_server.build_server()
+
+    status = _json(_call("audit_status", {"case": str(case)}, server))
+    summary = _call("audit_summary", {"case": str(case)}, server)
+    start = _call("start_audit", {"manuscript": str(_paper(tmp_path)), "case": str(case)}, server)
+
+    assert status["state"] == "running" and status["log"] is None
+    assert summary.is_error and "another server process" in _text(summary)
+    assert start.is_error and "another server process" in _text(start)
+    assert calls == []
+
+
+def test_an_interrupted_audit_can_be_started_again(ready, monkeypatch, tmp_path):
+    case = _case(tmp_path)
+    RefManifest(manuscript="paper.pdf").to_json(case / "refs_manifest.json")
+    _left_record(case, "running", age=600)
+    _fake_pipeline(monkeypatch)
+    server = mcp_server.build_server()
+
+    status = _await(server, _start(server, manuscript=_paper(tmp_path), case=case)["case"])
+
+    assert status["state"] == "finished"
+    assert _record(case)["state"] == "finished"
+
+
+def test_the_job_keeps_its_record_fresh_while_it_runs(ready, monkeypatch, tmp_path):
+    """Freshness is the measurement that tells a live audit from an abandoned
+    one, so the job refreshes its record for as long as it runs."""
+    import time
+
+    monkeypatch.setattr(mcp_server, "HEARTBEAT_SECONDS", 0.05)
+    seen = {}
+
+    def body(kw):
+        record = Path(kw["case"]) / "mcp_audit.json"
+        _age_file(record, -600)
+        time.sleep(0.5)
+        seen["age"] = time.time() - record.stat().st_mtime
+
+    _fake_pipeline(monkeypatch, body)
+    server = mcp_server.build_server()
+
+    _await(server, _start(server, manuscript=_paper(tmp_path))["case"])
+
+    assert seen["age"] < 5, seen
+
+
+def test_a_label_audit_that_never_ran_is_null_even_when_occurrences_were_counted(tmp_path):
+    """Without clean.md the label-level lists are empty because nothing read
+    them, while the occurrence audit ran from the source map. `[]` would say
+    every cited label was reached."""
+    occurrences_only = {
+        "labels_in_text": [], "covered": [], "missing": [],
+        "occurrences": {**OCCURRENCE_COVERAGE["occurrences"]},
+    }
+    case = _case(tmp_path, results=_results(coverage=occurrences_only))
+
+    gaps = _json(_call("list_gaps", {"case": str(case)}))
+
+    assert gaps["unreached_labels"] is None
+    assert [o["label"] for o in gaps["unreached_citations"]] == ["8", "4"]
+
+
+def test_the_status_names_the_manuscript_the_same_way_before_and_after_a_restart(
+    ready, monkeypatch, tmp_path
+):
+    """A published field has one meaning: the audited PDF's absolute path."""
+    _fake_pipeline(monkeypatch)
+    pdf = _paper(tmp_path)
+    server = mcp_server.build_server()
+    running = _start(server, manuscript=pdf)
+    finished = _await(server, running["case"])
+
+    later = _json(_call("audit_status", {"case": running["case"]}, mcp_server.build_server()))
+
+    assert running["manuscript"] == finished["manuscript"] == later["manuscript"]
+    assert later["manuscript"] == str(pdf.resolve())
+
+
+def test_a_later_run_that_finished_the_judging_supersedes_a_failed_audit(
+    ready, monkeypatch, tmp_path
+):
+    """The failure was the last thing an MCP server saw — not the last thing
+    that happened. A results.json written after it is a later run's judging
+    of the manifest now on disk, so the case reads again, in this server too."""
+    def body(kw):
+        raise RuntimeError("claude -p failed: not logged in")
+
+    case = _case(tmp_path)
+    RefManifest(manuscript="paper.pdf").to_json(case / "refs_manifest.json")
+    _fake_pipeline(monkeypatch, body)
+    server = mcp_server.build_server()
+    _await(server, _start(server, manuscript=_paper(tmp_path), case=case)["case"])
+    assert _call("audit_summary", {"case": str(case)}, server).is_error
+
+    _results().to_json(case / "out" / "results.json")  # e.g. `papertrace check`, later
+    _age_file(case / "out" / "results.json", +5)
+
+    assert not _call("audit_summary", {"case": str(case)}, server).is_error
+
+
+def test_a_scan_written_after_an_audit_without_the_scout_is_served(tmp_path):
+    case = _case(tmp_path, scout=ScoutResults(paper_title="A paper", paper_identity="confirmed"))
+    _left_record(case, "finished", age=60, ended="2026-09-26T10:05:00+00:00", scout=False)
+    _age_file(case / "out" / "scout.json", 0)  # `papertrace scout`, after that audit
+
+    result = _call("get_scout", {"case": str(case)})
+
+    assert not result.is_error, _text(result)
+
+
+def test_a_broken_import_inside_a_current_sdk_keeps_its_traceback(monkeypatch):
+    """With a 2.x SDK installed, an import that still fails is a real fault. The
+    install line would contradict itself ("needs version 2 — found 2.x") and
+    hide the one thing that says what broke."""
+    for name in [n for n in sys.modules if n == "mcp" or n.startswith("mcp.")]:
+        monkeypatch.delitem(sys.modules, name)
+    broken = types.ModuleType("mcp")
+    broken.__path__ = []
+    monkeypatch.setitem(sys.modules, "mcp", broken)
+    monkeypatch.setitem(sys.modules, "mcp.server", types.ModuleType("mcp.server"))
+    monkeypatch.delitem(sys.modules, "papertrace.mcp_server", raising=False)
+    monkeypatch.setattr("importlib.metadata.version", lambda name: "2.3.0")
+
+    with pytest.raises(ImportError, match="MCPServer"):
+        cli.mcp_command()
+
+
+def test_a_recorded_failure_does_not_send_the_host_to_a_log_that_was_not_kept(tmp_path):
+    case = _case(tmp_path)
+    _left_record(case, "failed", age=60, ended="2026-09-26T10:05:00+00:00",
+                 error="claude -p failed: not logged in")
+
+    status = _json(_call("audit_status", {"case": str(case)}))
+
+    assert status["state"] == "failed" and status["log"] is None
+    assert "the log" not in status["next"]
+    assert "not kept" in status["next"]
+
+
+@pytest.mark.parametrize("field", [{"scout": "false"}, {"schema": "mcp_audit/2"}],
+                         ids=["scout-not-a-bool", "a-later-schema"])
+def test_a_record_this_server_cannot_vouch_for_is_refused(tmp_path, field):
+    """A record read under the wrong rules is a guess. "false" is not False,
+    and a v2 record may mean something v1 does not."""
+    case = _case(tmp_path)
+    _left_record(case, "finished", age=60, ended="2026-09-26T10:05:00+00:00", **field)
+
+    result = _call("audit_summary", {"case": str(case)})
+
+    assert result.is_error and "unreadable" in _text(result)
+
+
+def test_every_status_a_record_can_produce_matches_the_schema(tmp_path):
+    """The status schema describes what the server returns from its own job AND
+    from a record another server left — not only the shape one test happened
+    to build."""
+    jsonschema = pytest.importorskip("jsonschema")
+    published = json.loads((ROOT / "schemas" / "mcp_tools.schema.json").read_text())
+    cases = {
+        "not_started": {},
+        "running": {"state": "running", "age": 1},
+        "interrupted": {"state": "running", "age": 600},
+        "finished": {"state": "finished", "age": 60, "ended": "2026-09-26T10:05:00+00:00"},
+        "failed": {"state": "failed", "age": 60, "ended": "2026-09-26T10:05:00+00:00",
+                   "error": "RuntimeError: boom"},
+    }
+
+    for expected, record in cases.items():
+        case = _case(tmp_path / expected)
+        if record:
+            _left_record(case, record.pop("state"), **record)
+        status = _json(_call("audit_status", {"case": str(case)}))
+        assert status["state"] == expected
+        jsonschema.validate(status, {**published, "$ref": "#/$defs/audit_status"})
+
+
+def test_the_published_timings_are_the_ones_the_server_uses():
+    """The schemas state the refresh and staleness windows in prose, because a
+    reader of a record has to know them — so a changed constant must not leave
+    the contract quoting the old one."""
+    record = json.loads((ROOT / "schemas" / "mcp_audit.schema.json").read_text())
+    tools = json.loads((ROOT / "schemas" / "mcp_tools.schema.json").read_text())
+    state = tools["$defs"]["audit_status"]["properties"]["state"]["description"]
+
+    for prose in (record["description"], state):
+        assert f"every {mcp_server.HEARTBEAT_SECONDS:g} s" in prose
+        assert f"{mcp_server.STALE_AFTER_SECONDS:g} s" in prose

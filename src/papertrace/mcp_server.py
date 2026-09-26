@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -530,7 +531,9 @@ def _caption(
         )
     if missing:
         lines.append(f"not in the case folder, so not shown: {', '.join(missing)}")
-    if caveats := [d.short for d in claim_disclosures(claim, manifest)]:
+    # every claim caveat but the claim-level anchor: that is the headline's, and
+    # the anchor line above already says the shown source's own
+    if caveats := [d.short for d in claim_disclosures(claim, manifest) if d.key != "anchor"]:
         lines += ["caveats on this claim:", *(f"- {c}" for c in caveats)]
     if run_fired:
         lines += ["caveats on the whole audit:", *(f"- {d.short}" for d in run_fired)]
@@ -631,14 +634,19 @@ def _last_said(lines: list[str], n: int = 4) -> str:
     return " ".join(line.strip() for line in [x for x in lines if x.strip()][-n:])
 
 
-# What a later server knows about the last audit an MCP server started in a case
-# folder. The job writes it "running" before the pipeline touches anything and
-# rewrites it when the job ends, so a server stopped mid-audit leaves "running"
-# behind — the one thing on disk that says the files beside it are incomplete.
-# Its shape is `schemas/mcp_audit.schema.json`.
+# What any server knows about the last audit an MCP server started in a case
+# folder. The job writes it "running" before the pipeline touches anything,
+# refreshes it every HEARTBEAT_SECONDS while it runs, and rewrites it with the
+# outcome when it ends. So a "running" record is measured, not assumed: fresh,
+# and an audit is live in some server process; stale, and the server writing it
+# stopped mid-run. Its shape is `schemas/mcp_audit.schema.json`.
 RECORD = "mcp_audit.json"
 RECORD_SCHEMA = "mcp_audit/1"
 _RECORD_STATES = ("running", "finished", "failed")
+HEARTBEAT_SECONDS = 15.0
+# four missed refreshes: a laptop that slept longer reads its own audit as
+# stopped, which refuses to read the case — the safe side
+STALE_AFTER_SECONDS = 60.0
 
 
 @dataclass
@@ -660,7 +668,7 @@ def _write_record(job: _Job) -> None:
     payload = {
         "schema": RECORD_SCHEMA,
         "state": job.state,
-        "manuscript": job.manuscript.name,  # a name, as refs_manifest.json keeps it
+        "manuscript": str(job.manuscript),  # the same absolute path audit_status gives
         "started": job.started,
         "ended": job.ended,
         "error": job.error,
@@ -673,14 +681,22 @@ def _write_record(job: _Job) -> None:
 
 def _read_record(case: Path) -> dict | None:
     """The last MCP audit's record, or None when no MCP server audited here — and
-    a refusal, never a guess, when there is one and it cannot be read."""
+    a refusal, never a guess, when there is one this server cannot vouch for."""
     path = case / RECORD
     if not path.is_file():
         return None
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(record, dict) or record.get("state") not in _RECORD_STATES:
-            raise ValueError("no state this server knows")
+        # every field a decision rests on, checked: "false" is not False, and a
+        # later schema's record may mean something this one does not
+        if not (
+            isinstance(record, dict)
+            and record.get("schema") == RECORD_SCHEMA
+            and record.get("state") in _RECORD_STATES
+            and isinstance(record.get("scout"), bool)
+            and isinstance(record.get("started"), str)
+        ):
+            raise ValueError(f"not a {RECORD_SCHEMA} record this server can read")
     except (OSError, ValueError) as e:
         raise ToolError(
             f"{path} is unreadable ({type(e).__name__}: {str(e)[:200]}), so whether the last "
@@ -690,12 +706,34 @@ def _read_record(case: Path) -> dict | None:
     return record
 
 
+def _record_age(case: Path) -> float:
+    """Seconds since the record was last written or refreshed."""
+    return max(0.0, time.time() - (case / RECORD).stat().st_mtime)
+
+
+def _written_after_record(case: Path, path: Path) -> bool:
+    """Was `path` written after the record's last update — by a later run?"""
+    return path.is_file() and path.stat().st_mtime > (case / RECORD).stat().st_mtime
+
+
+def _heartbeat(job: _Job) -> None:
+    """Refresh the record while the job runs: freshness is what tells another
+    server this audit is alive rather than abandoned."""
+    path = job.case / RECORD
+    while not job.done.wait(HEARTBEAT_SECONDS):
+        try:
+            os.utime(path)
+        except OSError:
+            return  # the final write reports what the job could not keep up
+
+
 class _Jobs:
     """The audits this server process started — at most one running at a time.
 
     One, because what a run touches is process-global: `cli.console`, `ask`'s
     per-site model record and `sys.stdin`. Two audits sharing them would
-    interleave their logs and name each other's models.
+    interleave their logs and name each other's models. Across processes the
+    record is the guard: a fresh "running" one is someone else's live audit.
     """
 
     def __init__(self):
@@ -706,47 +744,56 @@ class _Jobs:
     def last(self, case: Path) -> _Job | None:
         return self._by_case.get(case)
 
-    def refuse_unfinished(self, case: Path) -> None:
-        """Nothing on disk is read as a result unless the last audit here ended.
+    def refuse_live_elsewhere(self, case: Path) -> None:
+        """A second pipeline in a folder another process is writing is the
+        mixing `_guard_case` exists to prevent."""
+        record = _read_record(case)
+        if record is not None and record["state"] == "running":
+            # both callers have ruled out this server's own job for this case,
+            # so a fresh record is another process's
+            age = _record_age(case)
+            if age < STALE_AFTER_SECONDS:
+                raise ToolError(
+                    f"another server process is auditing {case} now (started "
+                    f"{record['started']}; its record was refreshed {age:.0f} s ago). Follow "
+                    "it from the host that started it, and start this one when it has ended."
+                )
 
-        This server's own job decides it when there is one; otherwise the record
-        an earlier server left. No record means no MCP server audited here, and
-        the case is read as the CLI's reports would read it.
+    def refuse_unfinished(self, case: Path) -> None:
+        """Nothing on disk is read as a result unless the last audit here ended well.
+
+        The record on disk decides, not this server's memory of its own jobs:
+        a case completed since by other means must read again, here too.
         """
-        if (job := self._by_case.get(case)) is not None:
-            state, started, error = job.state, job.started, job.error
-        elif (record := _read_record(case)) is not None:
-            state = "interrupted" if record["state"] == "running" else record["state"]
-            started, error = record.get("started"), record.get("error") or ""
-        else:
-            return
-        if state == "running":
+        running = self._running
+        if running is not None and running.case == case:
             raise ToolError(
-                f"an audit of {case} is running now (started {started}) — what is on disk "
-                "belongs to an earlier run or is half-written, so nothing is read from it "
+                f"an audit of {case} is running now (started {running.started}) — what is on "
+                "disk belongs to an earlier run or is half-written, so nothing is read from it "
                 "until the audit ends. Call audit_status."
             )
-        if state == "interrupted":
-            raise ToolError(
-                f"an audit of {case} started {started} did not finish: the server running it "
-                "stopped mid-run, so what is on disk may be half-written or mix two runs, and "
-                "none of it is read as a result. Run start_audit again — or, if the case has "
-                f"been completed since by other means, remove {case / RECORD} first."
-            )
-        if state == "failed":
-            raise ToolError(
-                f"the last audit of {case} (started {started}) failed: {error}. What is on "
-                "disk may mix that run with an earlier one, so none of it is read as a "
-                "result — fix the cause and run start_audit again."
-            )
-
-    def scanned(self, case: Path) -> bool | None:
-        """Did the latest MCP audit here scan the literature? None: no MCP audit here,
-        or one whose record does not say."""
-        if (job := self._by_case.get(case)) is not None:
-            return job.scout
         record = _read_record(case)
-        return None if record is None else record.get("scout")
+        if record is None:
+            return  # no MCP server audited here: read as the reports would
+        path = case / RECORD
+        if record["state"] == "running":
+            self.refuse_live_elsewhere(case)
+            raise ToolError(
+                f"an audit of {case} started {record['started']} did not finish: its record "
+                f"was last refreshed {_record_age(case):.0f} s ago, so the server running it "
+                "stopped mid-run. What is on disk may be half-written or mix two runs, and "
+                "none of it is read as a result. Run start_audit again — or, if the case has "
+                f"been completed since by other means, remove {path} first."
+            )
+        if record["state"] == "failed" and not _written_after_record(
+            case, case / "out" / "results.json"
+        ):
+            raise ToolError(
+                f"the last audit of {case} (started {record['started']}) failed: "
+                f"{record.get('error') or 'no reason was recorded'}. What is on disk may mix "
+                "that run with an earlier one, so none of it is read as a result — fix the "
+                "cause and run start_audit again."
+            )
 
     def start(self, prepare: Callable[[], tuple[Path, Path, dict, list[str]]]) -> _Job:
         """Run `prepare` — every check that can refuse before anything is spent —
@@ -765,7 +812,7 @@ class _Jobs:
             # daemon: when the host stops the server, no further stage and no
             # further model call starts. A `claude -p` call already in flight
             # runs to its own end — `ask.py`'s timeout bounds it — and the record
-            # left saying "running" is what tells a later server the case is
+            # it stops refreshing is what tells a later server the case is
             # incomplete.
             threading.Thread(
                 target=self._run, args=(job, kwargs), name="papertrace-audit", daemon=True
@@ -780,6 +827,8 @@ class _Jobs:
                 # in a folder that is briefly untracked
                 cli._open_case(job.case)
                 _write_record(job)
+                threading.Thread(target=_heartbeat, args=(job,), name="papertrace-heartbeat",
+                                 daemon=True).start()
                 # the process outlives one audit: a model an earlier audit
                 # recorded must not be reported as this one's judge
                 forget_models()
@@ -804,8 +853,8 @@ class _Jobs:
                 _write_record(job)
             except OSError as e:
                 # this server still knows the outcome; a later one reads the
-                # "running" left behind as an interrupted audit, which refuses —
-                # the safe side
+                # "running" left behind, unrefreshed, as a stopped audit — which
+                # refuses, the safe side
                 job.log.append(f"the audit record could not be updated: {e}")
             with self._lock:
                 if self._running is job:
@@ -818,27 +867,43 @@ _NEXT = {
     "finished": "call audit_summary for the result — its counts travel with the caveats that "
                 "qualify them",
     "failed": "read `error` and the log, fix what they name, and call start_audit again",
-    "interrupted": "the server running this audit stopped before it ended — call start_audit "
-                   "to run it again",
-    "not_started": "no audit of this case was started by an MCP server — audit_summary reads "
-                   "whatever a CLI run left on disk",
+    "not_started": "no MCP server has audited this case — audit_summary reads whatever a CLI "
+                   "run left on disk",
+}
+# the same states read from a record another server process left — whose log
+# is not here, so nothing may send the host to read one
+_NEXT_RECORDED = {
+    "running": "another server process is running this audit — its log is there, not here; "
+               "call audit_status again, with wait_seconds up to 50, until it has ended",
+    "finished": "call audit_summary for the result — the audit was recorded by another server "
+                "process, whose log was not kept",
+    "failed": "read `error`, fix what it names, and call start_audit again — the audit was "
+              "recorded by another server process, whose log was not kept",
+    "interrupted": "the server running this audit stopped before it ended, and its log was not "
+                   "kept — call start_audit to run it again",
 }
 
 
+def _recorded_state(case: Path, record: dict) -> str:
+    """A record's state as measured: `running` only while it is being refreshed."""
+    if record["state"] != "running":
+        return record["state"]
+    return "running" if _record_age(case) < STALE_AFTER_SECONDS else "interrupted"
+
+
 def _status(case: Path, job: _Job | None, log_lines: int, record: dict | None = None) -> AuditStatus:
-    """The job's state — this server's own, else the record an earlier one left.
+    """The job's state — this server's own, else the record another one left.
 
     `log` and `log_lines_total` are null, not empty, when no log exists here: an
     empty log reads as an audit that printed nothing.
     """
     if job is None and record is not None:
-        state = "interrupted" if record["state"] == "running" else record["state"]
+        state = _recorded_state(case, record)
         return {
             "case": str(case), "state": state, "manuscript": record.get("manuscript"),
             "started": record.get("started"), "ended": record.get("ended"),
             "error": record.get("error") or "", "log": None, "log_lines_total": None,
-            "next": f"{_NEXT[state]} — recorded by an earlier server process, whose log "
-                    "was not kept",
+            "next": _NEXT_RECORDED[state],
         }
     if job is None:
         return {
@@ -1085,7 +1150,11 @@ def build_server() -> MCPServer:
                 for u in results.uncited
             ],
             "coverage": coverage_headline(coverage) or None,
-            "unreached_labels": list(coverage.get("missing") or []) if audited else None,
+            # the label lists come from clean.md: without it they are empty
+            # because nothing read them, while the occurrences may still count
+            "unreached_labels": (
+                list(coverage.get("missing") or []) if coverage.get("labels_in_text") else None
+            ),
             "unreached_citations": (
                 [
                     {"label": o["label"], "status": o["status"],
@@ -1117,7 +1186,11 @@ def build_server() -> MCPServer:
                 f"no literature scan at {path} — the audit ran without the scout, or the "
                 "scout stage has not run (`papertrace scout -c <case>`)"
             )
-        if jobs.scanned(root) is False:
+        record = _read_record(root)
+        if (
+            record is not None and record["state"] == "finished" and record["scout"] is False
+            and not _written_after_record(root, path)
+        ):
             raise ToolError(
                 f"the latest audit of {root} ran without the scout, so {path} belongs to an "
                 "earlier run — its registers may be anchored to another DOI or another "
@@ -1207,6 +1280,7 @@ def build_server() -> MCPServer:
             try:
                 with _console_into(said):
                     root = (_case_dir(case) if case else cli.default_case(pdf)).resolve()
+                    jobs.refuse_live_elsewhere(root)
                     address = cli._email(email)
                     cli._guard_case(root, pdf)  # one case folder per paper
             except typer.Exit:
@@ -1238,9 +1312,20 @@ def build_server() -> MCPServer:
         audit_summary; this never repeats its counts without their caveats."""
         root = _case_dir(case)
         job = jobs.last(root)
-        if job is not None and wait_seconds:
-            job.done.wait(wait_seconds)
-        return _status(root, job, log_lines, None if job is not None else _read_record(root))
+        if job is not None:
+            if wait_seconds:
+                job.done.wait(wait_seconds)
+            return _status(root, job, log_lines)
+        # another process's audit: no event to wait on, so watch its record
+        deadline = time.monotonic() + wait_seconds
+        record = _read_record(root)
+        while (
+            record is not None and _recorded_state(root, record) == "running"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+            record = _read_record(root)
+        return _status(root, None, log_lines, record)
 
     return server
 

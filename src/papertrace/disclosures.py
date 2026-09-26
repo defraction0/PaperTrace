@@ -311,9 +311,11 @@ def coverage_audited(coverage: dict) -> bool:
     """Did the coverage audit run at all? One rule, because two readers need it.
 
     The reports decide on it whether to print a ratio or `coverage not audited`,
-    and the MCP server whether a gap list is a measurement or `null`. Were the
-    two copies to disagree, one reader would call "never measured" what the
-    other calls "measured, nothing missing".
+    and the MCP server whether its occurrence-level gap list is a measurement or
+    `null`. Were two copies to disagree, one reader would call "never measured"
+    what the other calls "measured, nothing missing". It answers for the audit
+    as a whole, not for each list: the label-level lists come from `clean.md`
+    and can be empty because nothing read them while the occurrences counted.
 
     Occurrences without labels means `clean.md` was missing while the source
     map was not: the audit ran, so it must not read as "not audited".

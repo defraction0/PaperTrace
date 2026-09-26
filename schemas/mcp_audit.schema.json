@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "mcp_audit",
-  "description": "<case>/mcp_audit.json — what an MCP server (`papertrace mcp`) knows about the last audit it started in this case folder. The audit job writes it with state `running` before the pipeline touches anything, and rewrites it when the job ends. A server stopped mid-audit therefore leaves `running` behind, and a later server reads that as an audit that never finished: it refuses to serve the folder as a result rather than present half-written files as one. Absent means no MCP server has audited this case; the CLI never writes it.",
+  "description": "<case>/mcp_audit.json — what an MCP server (`papertrace mcp`) records about the last audit it started in this case folder, for itself and any other server process. The audit job writes it with state `running` before the pipeline touches anything, refreshes its modification time every 15 s while it runs, and rewrites it with the outcome when it ends. A `running` record is therefore measured: refreshed within 60 s, an audit is live in some server process, and no second one is started in the folder; staler, the server writing it stopped mid-run, and the folder is not read as a result. A `failed` record keeps the folder from being read until a results.json written after it shows a later run completed the judging. Absent means no MCP server has audited this case; the CLI never writes it.",
   "type": "object",
   "required": [
     "schema",
@@ -26,11 +26,11 @@
         "finished",
         "failed"
       ],
-      "description": "`running` while the job runs — and forever, when the server stopped before the job ended, which a later server reports as `interrupted`. `failed`: the pipeline stopped, and what is on disk may mix that run with an earlier one."
+      "description": "`running` while the job runs — and after, when the server stopped first, which the record's unrefreshed modification time shows. `failed`: the pipeline stopped, and what is on disk may mix that run with an earlier one."
     },
     "manuscript": {
       "type": "string",
-      "description": "The audited PDF's file name, as refs_manifest.json keeps it."
+      "description": "The audited PDF's absolute path — the same value audit_status gives."
     },
     "started": {
       "type": "string",

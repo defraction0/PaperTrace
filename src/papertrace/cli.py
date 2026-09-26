@@ -467,9 +467,15 @@ def mcp_command() -> None:
         from importlib.metadata import PackageNotFoundError, version
 
         try:
-            found = f" (found mcp {version('mcp')})"
+            installed = version("mcp")
         except PackageNotFoundError:
-            found = ""
+            installed = None
+        # a 2.x SDK that still fails to import is a real fault: the install line
+        # would contradict itself and hide the traceback that names what broke
+        if installed is not None and installed.split(".")[0].isdigit() \
+                and int(installed.split(".")[0]) >= 2:
+            raise
+        found = f" (found mcp {installed})" if installed else ""
         # rich eats [mcp] as a style tag; escaping it is what prints the extra.
         # soft_wrap: wrapped at the terminal's width, the command split in two
         Console(stderr=True, soft_wrap=True).print(
