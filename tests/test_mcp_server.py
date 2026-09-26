@@ -777,6 +777,34 @@ def test_the_job_hands_the_pipeline_every_parameter(ready, monkeypatch, tmp_path
     assert set(calls[0]) == params, "a pipeline parameter the job never decides on"
 
 
+def test_the_job_runs_the_real_pipeline_body_and_keeps_what_it_prints(
+    ready, monkeypatch, tmp_path, capfd
+):
+    """The other job tests replace `_run_pipeline` whole. Here only its seven
+    stages are stubbed, so the real body runs inside the job — email, case,
+    guard, the case folder's own .gitignore, the banner, the stage order and
+    the closing line — and anything it printed around `cli.console` would
+    reach the process's real stdout, which this test reads."""
+    order = []
+    for name in ("_ingest_pipeline", "_extract_pipeline", "_refs_pipeline", "scout",
+                 "_check_pipeline", "highlight", "_report_pipeline"):
+        monkeypatch.setattr(cli, name, lambda _n=name, **kw: order.append(_n))
+    monkeypatch.setattr(cli, "_detected_doi", lambda m: None)
+    server = mcp_server.build_server()
+    case = tmp_path / "case"
+
+    status = _await(server, _start(server, manuscript=_paper(tmp_path), case=case,
+                                   formats=["viewer"])["case"])
+
+    assert status["state"] == "finished", status
+    assert order == ["_ingest_pipeline", "_extract_pipeline", "_refs_pipeline", "scout",
+                     "_check_pipeline", "highlight", "_report_pipeline"]
+    assert (case / ".gitignore").read_text() == "*\n"
+    assert any("PaperTrace" in line for line in status["log"]), "the banner is in the log"
+    assert any("report_viewer.html" in line for line in status["log"])
+    out, _ = capfd.readouterr()
+    assert out == "", "the real pipeline printed around the captured console"
+
 def test_start_audit_defaults_are_papertrace_runs(ready, monkeypatch, tmp_path):
     """No case named: beside the paper, named after it, as `papertrace run`
     does. Every other default is the CLI's own."""
