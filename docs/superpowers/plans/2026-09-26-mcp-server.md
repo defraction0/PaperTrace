@@ -133,3 +133,25 @@ pymupdf. Each test calls through `Client(build_server())`.
 - [ ] CHANGELOG: an Unreleased entry.
 - [ ] CLAUDE.md: the architecture bullet for `mcp_server.py`, and the
       long-lived-process rule (`forget_models`, one job at a time).
+
+## Task 7 — the review round
+
+A code review of the branch (the `code-review` skill, high effort) returned ten
+findings; nine held up against the code, each fixed test-first. The tenth —
+that `_run_pipeline`'s OptionInfo guards are dead — did not: tests call
+`cli.run()` directly and omit options, which hands the adapter's sentinels
+straight through.
+
+- [x] A failed or interrupted audit's mixed case is refused, via the
+      `mcp_audit.json` record; `audit_status` reads an earlier server's record.
+- [x] Run-level disclosures in `get_claim`, `list_claims` and the evidence
+      caption, beside the claim's own.
+- [x] No fallback to the server's working directory for an unwritable paper
+      folder; the preflight's lines open the job's log.
+- [x] A `scout.json` the latest audit did not write is refused; the caveat
+      carries the scan's error.
+- [x] A 1.x SDK gets the install line; the command is never wrapped in two.
+- [x] `schemas/mcp_tools.schema.json` and `schemas/mcp_audit.schema.json`,
+      with validation tests.
+- [x] `disclosures.coverage_audited` and `cli.SCOUT_CAVEAT`: one rule and one
+      sentence each, not two copies.

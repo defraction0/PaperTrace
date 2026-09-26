@@ -343,8 +343,10 @@ the server's `PATH` — if the host's is too minimal, add its directory in
 `PAPERTRACE_EMAIL`, or from the address `papertrace` saved. A missing
 manuscript, a `claude` the server cannot find, no email, or a case folder
 holding another paper is refused before anything is spent. One audit runs at a
-time per server, and a case folder the server is writing is not read until the
-audit ends. Nobody is at an MCP call to answer a question, so a reference label
+time per server. A case folder is not read while its audit runs, nor after one
+that failed or never finished — its files may mix two runs — which the server
+knows from the `mcp_audit.json` each audit leaves in the folder. Nobody is at an
+MCP call to answer a question, so a reference label
 whose readings disagree is withheld, never settled — that takes you, at a
 terminal. Nothing but the protocol reaches stdout; what the pipeline prints
 comes back in `audit_status`'s log.

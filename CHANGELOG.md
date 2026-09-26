@@ -23,7 +23,12 @@ viewer's way, with a parity test extending the four-format contract to this
 fifth reader — and a limited audit says so first and last. A missing or
 unreadable `results.json` is refused with its reason, never answered with
 empty counts; `null` in the manifest's three-state fields stays `null`; no
-local PDF path is served, and no evidence image from outside `<case>/out/`.
+local PDF path is served, and no evidence image from outside `<case>/out/`. A
+verdict read on its own — `get_claim`, the evidence caption — carries the
+run-level caveats too. Each audit leaves `<case>/mcp_audit.json`: a case whose
+last MCP audit failed or never finished is refused rather than read, because
+its files may mix two runs. The tools' outputs and that record are published in
+`schemas/mcp_tools.schema.json` and `schemas/mcp_audit.schema.json`.
 
 An audit takes minutes and a host built on the TypeScript SDK gives a request
 60 s, so `start_audit` returns at once and `audit_status` long-polls for at

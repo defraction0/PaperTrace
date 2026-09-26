@@ -50,7 +50,9 @@ the thread has nobody to ask.**
   evidence crops as images.
 - A disputed label cannot be settled from an MCP host. That is deliberate;
   `papertrace refs` in a terminal settles it.
-- A running audit cannot be cancelled from the host; stopping the server stops
-  it, and the case folder is re-runnable.
+- A running audit cannot be cancelled from the host. Stopping the server starts
+  no further stage or model call — a `claude -p` call already in flight runs to
+  its end — and the `mcp_audit.json` it leaves saying `running` keeps the half-
+  written case from being read as a result until an audit there finishes.
 - Any future process-global state in the pipeline must be reset per audit, or
   it will leak from one audit into the next. `CLAUDE.md` says so.

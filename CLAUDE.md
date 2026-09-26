@@ -352,9 +352,15 @@ ingest → extract → refs → scout → check → highlight → report
   with `chosen_by: "default"` and the person-gated escalation is unreachable —
   do not offer MCP elicitation in its place: a host may be a model), and
   `ask.forget_models()` runs first. Those three are process-global, hence
-  **one audit at a time**, and read tools refuse a case whose audit is still
-  running. **Any new process-global state in the pipeline must be reset per
-  audit here.** In SDK v2 only a `ToolError`'s message reaches the model — any
+  **one audit at a time**. The job writes `<case>/mcp_audit.json` (`running`,
+  then the outcome), and read tools refuse a case whose last MCP audit is
+  running, failed, or never finished (a `running` record no live job owns is
+  `interrupted`): a failed rerun leaves one run's manifest beside another's
+  verdicts. A verdict read alone — `get_claim`, the evidence caption — carries
+  the run-level disclosures as well as its own. Outputs are published in
+  `schemas/mcp_tools.schema.json`, each definition's keys held equal to its
+  `TypedDict`'s by a test. **Any new process-global state in the pipeline
+  must be reset per audit here.** In SDK v2 only a `ToolError`'s message reaches the model — any
   other exception is a bare "Error executing tool" — so every refusal is one.
   Return types are `typing_extensions.TypedDict` with `structured_output=True`:
   `typing.TypedDict` silently cost every tool its output schema below 3.12.

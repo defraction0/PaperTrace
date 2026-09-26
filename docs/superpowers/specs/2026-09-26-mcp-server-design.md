@@ -50,7 +50,9 @@ pipeline wrote. `start_audit` is the only tool that spends — model calls throu
    call `run_disclosures`, `claim_disclosures` and `judgement_disclosures` — the
    same producers the four report formats use — and serialise them with the
    viewer's own `report._disclosure_dict`. The MCP output is a fifth reader, and
-   the parity test is extended to it: every token reaches it.
+   the parity test is extended to it: every token reaches it. A host can read
+   one claim without ever reading the summary, so `get_claim`, `list_claims`
+   and the evidence caption carry the run-level disclosures too.
 3. **A limited run never reads as a smaller paper.** The scope disclosure is
    first among the disclosures, as in every report, and every result that states
    counts or lists claims ends with a `limited` field carrying the same sentence
@@ -89,6 +91,15 @@ pipeline wrote. `start_audit` is the only tool that spends — model calls throu
     without `pdf_path`, as in the viewer. An evidence image is read only when it
     resolves inside `<case>/out/` and is a `.png` — a `results.json` edited to
     point at `../../somewhere` is refused, not followed.
+11. **A case is not a result until its audit has ended.** A rerun can rewrite
+    the manifest and die before `check`, leaving one run's references beside
+    another's verdicts. The job writes `<case>/mcp_audit.json` — `running`
+    before the pipeline starts, the outcome when it ends — and read tools
+    refuse a case whose last MCP audit failed or never finished. A server
+    stopped mid-audit leaves `running` behind, which a later server reports as
+    `interrupted`. An optional stage's file the latest audit did not write — a
+    `scout.json` from before a run without the scout — is refused as an
+    earlier run's.
 
 ## Long runs: a job, not a blocking call
 
@@ -109,9 +120,10 @@ per-site model record and `sys.stdin` are process-global; two audits sharing
 them would interleave logs and misattribute models. A second `start_audit` is
 refused, naming the audit in progress.
 
-**Read tools refuse a case whose audit is running.** The `results.json` on disk
-then belongs to the previous run, or is half-written, and presenting it as this
-run's would be the silent failure this codebase exists to refuse.
+**Read tools refuse a case whose audit is running, failed or never finished.**
+The files on disk then belong to an earlier run, are half-written, or mix the
+two, and presenting them as a result would be the silent failure this codebase
+exists to refuse.
 
 `audit_status` never returns counts. A count without its disclosures is exactly
 what rule 2 forbids, so a finished job points at `audit_summary`.
@@ -139,10 +151,12 @@ what rule 2 forbids, so a finished job points at `audit_summary`.
   revision (SEP-2577). The job log is returned by `audit_status` instead.
 - **Streamable HTTP.** A case folder stays on the machine that made it, by
   design. stdio only.
-- **A hand-written schema in `schemas/`.** The output schema is generated from
-  the tools' `TypedDict` return types and published by `tools/list`; a copy
-  would be a second contract to drift. No case-folder file gains a field, so
-  gate 2 is untouched.
+- **An output schema only in `tools/list`.** The SDK publishes one generated
+  from each tool's `TypedDict`, but `schemas/` is where this repository keeps
+  its contracts (gate 2), so `schemas/mcp_tools.schema.json` holds them too —
+  every tool output is validated against it, and each definition's keys are
+  held equal to its `TypedDict`'s, so the two cannot drift apart silently.
+  `schemas/mcp_audit.schema.json` covers the one file the server writes.
 
 ## Deliberate omissions
 
@@ -150,11 +164,15 @@ what rule 2 forbids, so a finished job points at `audit_summary`.
   server serves are the evidence crops, which need neither.
 - A running audit cannot be cancelled. A thread cannot be stopped safely
   mid-write; the CLI's Ctrl-C carries the same exposure. If the host stops the
-  server, the job's daemon thread stops with it and the case folder is
-  re-runnable.
-- Job state is not persisted across server restarts. `audit_status` says so
-  ("no audit of this case was started by this server process") rather than
-  guessing from the files on disk.
+  server, no further stage and no further model call starts — but a `claude -p`
+  call already in flight runs to its end, bounded by `ask.py`'s timeout — and
+  the record left saying `running` marks the case incomplete.
+- A job's log is not persisted; its outcome is, in `mcp_audit.json`, and an
+  earlier server's audit reports `log: null` rather than an empty log.
+- Two server processes auditing one case at once are not detected: one audit
+  at a time is a per-process rule, and the CLI has no such guard either.
+- A CLI run that fails midway writes no record, so the server reads that case
+  as the reports would.
 
 ## Testing
 
