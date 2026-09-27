@@ -71,6 +71,17 @@ def model_for(site: str) -> str | None:
     return _MODELS.get(site)
 
 
+def forget_models() -> None:
+    """Start a run with no model recorded at any site.
+
+    The CLI never needed this: one process ran one command, so the record began
+    empty. The MCP server runs audit after audit in one process, and a second
+    audit whose judging made no calls would otherwise report the first audit's
+    judge as its own — the misattribution the per-site record exists to end.
+    """
+    _MODELS.clear()
+
+
 def claude_available() -> bool:
     return shutil.which("claude") is not None
 
@@ -159,5 +170,6 @@ __all__ = [
     "SITE_REFS",
     "claude_available",
     "for_site",
+    "forget_models",
     "model_for",
 ]

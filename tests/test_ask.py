@@ -140,6 +140,23 @@ def test_a_reply_that_names_no_model_does_not_erase_the_one_recorded(monkeypatch
     assert ask_mod.model_for(ask_mod.SITE_CHECK) == "claude-opus-5"
 
 
+def test_forget_models_starts_a_run_with_no_recorded_model(monkeypatch):
+    """One process ran one command, so the record never needed clearing. The
+    MCP server runs audit after audit in one process: without this, a second
+    audit whose judging made no calls — every cited source unretrieved — would
+    print the first audit's judge as its `Checker:`, the misattribution the
+    per-site record exists to prevent."""
+    monkeypatch.setattr(
+        ask_mod, "_MODELS",
+        {ask_mod.SITE_CHECK: "claude-opus-5", ask_mod.SITE_REFS: "claude-haiku-4-5"},
+    )
+
+    ask_mod.forget_models()
+
+    assert ask_mod.model_for(ask_mod.SITE_CHECK) is None
+    assert ask_mod.model_for(ask_mod.SITE_REFS) is None
+
+
 def test_for_site_restores_the_previous_site_on_the_way_out(monkeypatch):
     """Nesting must not leak. A leaked site is a misattributed model."""
     monkeypatch.setattr(ask_mod, "_SITE", "outer")

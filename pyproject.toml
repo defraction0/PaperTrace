@@ -39,14 +39,19 @@ dependencies = [
 
 [project.optional-dependencies]
 png = ["playwright>=1.45"]
+# `papertrace mcp`, for MCP hosts. The server is written against the SDK's 2.x
+# API, and the SDK holds breaking changes for a major, hence the bound
+mcp = ["mcp>=2.2,<3"]
 # kept as a no-op alias so `pip install papertrace[docling]` and the `[full]`
 # extra named all over the 0.4.x docs keep resolving instead of erroring
 docling = []
-full = ["playwright>=1.45"]
+full = ["playwright>=1.45", "mcp>=2.2,<3"]
 dev = ["pytest>=8.0", "ruff>=0.5", "jsonschema>=4.0",
        # 3.10 has no tomllib, and without a parser the whole packaging
        # suite skipped on the oldest version requires-python allows
-       'tomli>=2.0; python_version < "3.11"']
+       'tomli>=2.0; python_version < "3.11"',
+       # so CI runs tests/test_mcp_server.py instead of skipping it
+       "mcp>=2.2,<3"]
 
 [project.scripts]
 papertrace = "papertrace.cli:main"

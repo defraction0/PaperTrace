@@ -313,11 +313,30 @@ def test_docling_is_a_base_dependency():
     assert "docling" in names, "docling must be a base dependency, not an extra"
 
 
+def test_the_mcp_extra_exists_and_ci_installs_it():
+    """`papertrace mcp` needs the MCP SDK, so the SDK is an extra, not a base
+    dependency. `[dev]` — exactly what CI installs — carries the same
+    requirement: `tests/test_mcp_server.py` skips without the SDK, and a module
+    that skips in CI is a module nobody runs. This file's own history is the
+    3.10 cell that silently skipped all 26 of its tests while CI was green.
+
+    `<3` because the server is written against the SDK's 2.x API (`MCPServer`,
+    `Client(server)`), and the SDK's versioning policy holds breaking changes
+    for a major. `[full]` is the everything-install the quick start uses."""
+    extras = PYPROJECT["project"]["optional-dependencies"]
+    sdk = [r for r in extras.get("mcp", []) if re.split(r"[<>=!~;\[ ]", r)[0] == "mcp"]
+    assert sdk, "no `mcp` extra carrying the MCP SDK"
+    assert "<3" in sdk[0], f"{sdk[0]!r} admits a new major of the SDK"
+    for name in ("dev", "full"):
+        assert sdk[0] in extras[name], f"[{name}] must carry {sdk[0]!r} as the [mcp] extra does"
+
+
 def test_the_docling_and_full_extras_still_resolve():
     """`pip install 'papertrace[docling]'` and `[full]` appear throughout the
     0.4.x docs and in other people's notes. Deleting the extras would turn
     those into an install error, so they stay as aliases — `[docling]` empty
-    because it is now redundant, `[full]` keeping only playwright."""
+    because it is now redundant, `[full]` keeping playwright (and, since the MCP
+    server, the SDK — asserted above)."""
     extras = PYPROJECT["project"]["optional-dependencies"]
     assert "docling" in extras and extras["docling"] == []
     full = [d.split(">")[0].strip() for d in extras["full"]]
